@@ -87,8 +87,8 @@ def test_graph_tools_and_errors(api):
 
 def test_index_serves_the_web_ui(api):
     c, _ = api
-    r = c.get("/")
-    assert r.status_code == 200 and "/web/app.js" in r.text
+    r = c.get("/?offline=1")  # redirects to /web/ (query kept), which serves index.html
+    assert r.status_code == 200 and str(r.url).endswith("/web/?offline=1") and 'src="app.js"' in r.text
     assert c.get("/web/app.js").status_code == 200
 
 

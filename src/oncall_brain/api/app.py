@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -38,7 +38,9 @@ Tenant = Annotated[str, Path(pattern=r"^[a-z0-9_]{1,40}$")]
 
 app = FastAPI(title="On-call Brain", description="Incident agents over a FalkorDB knowledge graph.")
 # check_dir=False: the web/ folder may appear after the server starts.
-app.mount("/web", StaticFiles(directory=WEB_DIR, check_dir=False), name="web")
+# html=True serves web/index.html at /web/. Asset paths in the page are relative, so the same files also work as a
+# static site (e.g. GitHub Pages with ?offline=1).
+app.mount("/web", StaticFiles(directory=WEB_DIR, html=True, check_dir=False), name="web")
 
 
 # Built on first use, not at import, so the app imports (and /api/health answers) with FalkorDB down.
@@ -120,11 +122,10 @@ Repo = Annotated[GraphRepository, Depends(tenant_repo)]
 
 
 @app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    page = WEB_DIR / "index.html"
-    if not page.is_file():
-        raise HTTPException(404, f"no UI at {page}")
-    return FileResponse(page)
+def index(request: Request) -> RedirectResponse:
+    if not (WEB_DIR / "index.html").is_file():
+        raise HTTPException(404, f"no UI at {WEB_DIR / 'index.html'}")
+    return RedirectResponse(f"/web/{'?' + request.url.query if request.url.query else ''}")
 
 
 @app.get("/api/health")

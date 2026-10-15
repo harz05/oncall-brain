@@ -1,0 +1,25 @@
+# Lint, seed, run the three-act demo (it exits non-zero if any claim breaks) and the full test suite against the
+# same FalkorDB version local dev pins.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      falkordb:
+        image: falkordb/falkordb:v4.22.0
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src scripts tests
+      - run: python -m scripts.gen_queries_doc --check
+      - run: python -m scripts.seed --tenant acme
+      - run: python -m scripts.demo
+      - run: pytest -q

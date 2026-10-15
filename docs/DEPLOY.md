@@ -30,6 +30,10 @@ docker compose --profile mcp up --build -d   # plus the MCP server on 127.0.0.1:
 ```
 Ports are published on 127.0.0.1 only. Put a reverse proxy (Caddy, nginx) with TLS in front of port 8000, pass the `Host` header through, and add the public name to `ALLOWED_HOSTS`. Do not publish 6379: FalkorDB in the compose file has no password.
 
+## Option C: a static replay on GitHub Pages (no backend)
+
+`.github/workflows/pages.yml` publishes `web/` on every push to main (enable once: Settings -> Pages -> Source: GitHub Actions). With no API behind it, the UI notices and replays the recorded runs in `web/fixtures/` (regenerate them with `python -m scripts.gen_fixtures` after changing the agents). Everything except the Ask tab and live resets works. `.github/workflows/ci.yml` runs lint, the query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on every push.
+
 ## Settings that matter in public
 
 | Setting | Why |

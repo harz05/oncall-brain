@@ -68,7 +68,7 @@ async function fixture(path) {
   const hit = routes.find(([re]) => re.test(p));
   if (!hit) throw new Error(`no offline fixture for ${p}`);
   await sleep(300);
-  return (await fetch(`/web/fixtures/${hit[1]}.json`)).json();
+  return (await fetch(new URL(`fixtures/${hit[1]}.json`, import.meta.url))).json();  // works on any static host
 }
 const T = () => `/api/tenants/${encodeURIComponent(state.tenant)}`;
 
@@ -669,7 +669,12 @@ async function init() {
     $('planner').textContent = /deterministic|mock/i.test(hl.planner)
       ? 'deterministic planner: the graph picks every branch' : `LLM planner: ${hl.planner}`;
   } catch (e) {
-    status(`API unreachable (${e.message}). Add ?offline=1 to replay recorded fixtures.`, true);
+    if (!OFFLINE) {  // no backend (e.g. a static host): replay the recorded fixtures instead
+      params.set('offline', '1');
+      location.search = params.toString();
+      return;
+    }
+    status(`Could not load the recorded fixtures (${e.message}).`, true);
     return;
   }
   await busy(async () => {

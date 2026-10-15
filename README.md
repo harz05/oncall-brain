@@ -8,6 +8,9 @@ When an alert fires, three agents (triage, investigator, comms) work one inciden
 Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthetic (seeded generator, fake names).
 
 <!-- DEMO VIDEO LINK: add after recording -->
+<!-- LIVE REPLAY: https://<user>.github.io/<repo>/ once GitHub Pages is enabled (Settings -> Pages -> GitHub Actions) -->
+
+**Try it without installing anything:** the web UI replays all three acts from recorded runs when no backend is reachable, so the GitHub Pages build of `web/` (`.github/workflows/pages.yml`) is a zero-setup look at the product. The recordings come from the real code (`scripts/gen_fixtures.py`); for live runs use the quick start below.
 
 ![Act 2: the refunds incident solved from act 1's memory, 8 -> 3 investigator calls](docs/img/act2.png)
 
