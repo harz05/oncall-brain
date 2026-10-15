@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "oncall-brain": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp",
-      "args": [],
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp"],
       "env": {}
     }
   }

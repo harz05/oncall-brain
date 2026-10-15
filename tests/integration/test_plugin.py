@@ -33,8 +33,9 @@ def test_plugin_manifests_and_skills_are_well_formed():
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
     assert manifest["name"] == "oncall-brain" and manifest["mcpServers"] == "./.mcp.json"
     server = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["oncall-brain"]
-    assert server["command"] == "${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp"
-    assert os.access(PLUGIN / "bin" / "oncall-brain-mcp", os.X_OK)
+    # Run through bash so a checkout on a filesystem that drops the executable bit (NTFS, some zips) still works.
+    assert server["command"] == "bash" and server["args"] == ["${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp"]
+    assert (PLUGIN / "bin" / "oncall-brain-mcp").read_text().startswith("#!/usr/bin/env bash")
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     assert [p["source"] for p in market["plugins"] if p["name"] == "oncall-brain"] == ["./plugin"]
     skills = sorted(p.parent.name for p in PLUGIN.glob("skills/*/SKILL.md"))
