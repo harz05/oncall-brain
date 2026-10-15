@@ -167,9 +167,23 @@ No LLM key is needed: by default one deterministic planner plays all three roles
 ## Use it from Claude Code in one minute
 
 ```bash
-make db && make seed                                   # FalkorDB with the demo company
-claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server
+make setup && make db && make seed                     # the venv, FalkorDB and the demo company
+claude --plugin-dir ./plugin                           # Claude Code with the oncall-brain plugin, from this checkout
 ```
+
+Or install it from the marketplace this repo carries (Claude Code 2.1.275 or later), then start `claude` anywhere:
+
+```
+/plugin install oncall-brain --marketplace <owner>/<repo>
+```
+
+The plugin (`plugin/`) ships the MCP server (launched over stdio by `plugin/bin/oncall-brain-mcp`; set
+`ONCALL_BRAIN_HOME` to the checkout when the plugin lives elsewhere) and three skills:
+`/oncall-brain:incident alert:checkout-latency`, `/oncall-brain:who-owns kafka`,
+`/oncall-brain:ask why was legacy-billing retired from the checkout path`. Without the plugin, the server alone:
+`claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`.
+`tests/integration/test_plugin.py` validates the manifests (with `claude plugin validate --strict` when the CLI is
+installed) and drives the server through the plugin's launcher with an MCP client, following the who-owns skill.
 
 Then, in Claude Code: *"checkout is slow and alert:checkout-latency just fired on tenant acme. Find out why."* Claude
 calls `respond_to_alert`, reads the outcome (likely cause with a confidence label, who was paged, what was ruled out

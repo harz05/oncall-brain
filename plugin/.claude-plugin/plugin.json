@@ -1,0 +1,9 @@
+{
+  "name": "oncall-brain",
+  "version": "0.1.0",
+  "description": "Incident agents and a company brain over a FalkorDB graph: work an alert (/oncall-brain:incident), find who owns or knows a service (/oncall-brain:who-owns), ask the company (/oncall-brain:ask). Ships the On-call Brain MCP server.",
+  "author": { "name": "On-call Brain" },
+  "keywords": ["incident", "on-call", "falkordb", "graph", "mcp", "sre"],
+  "license": "MIT",
+  "mcpServers": "./.mcp.json"
+}

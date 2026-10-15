@@ -87,9 +87,27 @@ claude mcp add --transport http oncall-brain http://127.0.0.1:8001/mcp
 
 Then, in Claude Code, ask e.g. *"Using oncall-brain on tenant demo: reset it, then respond to
 alert:checkout-latency and tell me the root cause and which suspects were ruled out."*, or use the server's prompts
-(`/mcp` lists them as `/oncall-brain:work_alert` and `/oncall-brain:company_question`). A Claude Code plugin
-(`plugin/`: `plugin.json`, `.mcp.json`, skills, `marketplace.json`) packages the same server for a one-minute
-install; see the README once it lands.
+(`/mcp` lists them as `/oncall-brain:work_alert` and `/oncall-brain:company_question`).
+
+### The Claude Code plugin
+
+`plugin/` packages the same server for a one-minute install:
+
+| File | What it is |
+|---|---|
+| `plugin/.claude-plugin/plugin.json` | The manifest: name `oncall-brain`, points at `.mcp.json`. |
+| `plugin/.mcp.json` | The MCP server entry: `${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp` over stdio. |
+| `plugin/bin/oncall-brain-mcp` | Launcher: runs `<checkout>/.venv/bin/python -m oncall_brain.mcp_server` from the checkout (the plugin's parent directory, or `$ONCALL_BRAIN_HOME`), so `.env` is found. Arguments pass through (`--http --port 8001`). |
+| `plugin/skills/incident/SKILL.md` | `/oncall-brain:incident <alert_id> [tenant]`: the `work_alert` flow, with the heads-up and the confirm step. |
+| `plugin/skills/who-owns/SKILL.md` | `/oncall-brain:who-owns <service> [tenant]`: `who_knows`, then `ask`, then the rotation. |
+| `plugin/skills/ask/SKILL.md` | `/oncall-brain:ask <question> [--tenant t]`: the `company_question` flow, plus `change_story` / `dependency_path` when they add something. |
+| `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace, so `/plugin install oncall-brain --marketplace <owner>/<repo>` works once the repo is on GitHub. |
+
+From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
+(Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
+`... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
+the server through the launcher with an MCP client: 25 tools, 2 prompts, and the who-owns skill's three calls on a
+freshly reset tenant, every answer carrying its Cypher.
 
 ## Claude Desktop
 

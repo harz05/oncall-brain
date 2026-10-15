@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Start the On-call Brain MCP server over stdio (what Claude Code launches for the oncall-brain plugin).
+# Needs the checkout set up (`make setup`) and FalkorDB running (`make db`). The checkout is the plugin's parent
+# directory, or $ONCALL_BRAIN_HOME when the plugin was installed somewhere else. Any arguments are passed through
+# (for example `--http --port 8001` to serve Streamable HTTP instead of stdio).
+set -euo pipefail
+HOME_DIR="${ONCALL_BRAIN_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PY="$HOME_DIR/.venv/bin/python"
+if [[ ! -x "$PY" ]]; then
+  echo "oncall-brain: no interpreter at $PY. Run 'make setup' in the On-call Brain checkout, or point ONCALL_BRAIN_HOME at it." >&2
+  exit 1
+fi
+cd "$HOME_DIR"  # settings come from .env in the checkout
+exec "$PY" -m oncall_brain.mcp_server "$@"

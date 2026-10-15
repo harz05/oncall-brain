@@ -1,0 +1,18 @@
+{
+  "name": "oncall-brain",
+  "owner": { "name": "On-call Brain" },
+  "metadata": {
+    "description": "On-call Brain: incident agents and a company brain over a FalkorDB graph, as a Claude Code plugin with an MCP server and skills.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "oncall-brain",
+      "source": "./plugin",
+      "description": "Work alerts, find owners and ask the company brain from Claude Code. Needs the checkout set up (make setup, make db, make seed).",
+      "version": "0.1.0",
+      "category": "productivity",
+      "keywords": ["incident", "on-call", "falkordb", "graph", "mcp"]
+    }
+  ]
+}
