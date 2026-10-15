@@ -662,8 +662,8 @@ function finalPaint(run) {
   if (memo) run.touched = run.touched.union(memo);
   const learned = run.resolved && G.elementsFor(run.resolved.highlight, run);
   if (learned) run.touched = run.touched.union(learned);
-  G.scopeTo(run.touched);
   const storm = o.storm ? G.select('.storm, .shared') : null;
+  G.scopeTo(run.touched, storm ? run.cause.union(storm) : run.cause); // one hop around the cause path (and the storm)
   const focus = storm ? run.cause.union(storm) : run.cause.nonempty() ? run.cause.union(memo || G.empty()) : null;
   G.paint(run, learned || memo, focus);
   renderGraphTools();

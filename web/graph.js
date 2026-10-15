@@ -195,13 +195,15 @@ export function near(eles) {
   return Math.min((cy.width() - 80) / bb.w, (cy.height() - 80) / bb.h) >= 0.8 ? wide : eles;
 }
 
-// Show only the incident: everything the run touched, plus one dependency hop around its services, laid out
-// again so the subgraph is compact and readable. Whole-graph positions are kept for scopeAll().
-export function scopeTo(eles) {
+// Show only the incident: everything the run touched, plus one dependency hop around `around` (the cause path by
+// default; every touched service when none is given), laid out again so the subgraph is compact and readable.
+// Whole-graph positions are kept for scopeAll().
+export function scopeTo(eles, around) {
   if (!cy || !eles?.nonempty()) return;
-  const svc = eles.nodes('.svc');
+  const svc = (around?.nonempty() ? around : eles).nodes('.svc');
   const hop = svc.connectedEdges('.dep').connectedNodes('.svc');
-  const keep = eles.union(svc.connectedEdges('.dep')).union(hop);
+  const keep = eles.union(eles.nodes('.svc').connectedEdges('.dep').filter((e) => eles.contains(e.source()) && eles.contains(e.target())))
+    .union(svc.connectedEdges('.dep')).union(hop);
   cy.batch(() => {
     cy.elements().addClass('off');
     keep.union(keep.connectedEdges().filter((e) => keep.contains(e.source()) && keep.contains(e.target()))).removeClass('off');
