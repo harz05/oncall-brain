@@ -35,7 +35,7 @@
        "alert": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 1.76,
+     "ms": 1.9,
      "readonly": false
     }
    ],
@@ -103,7 +103,7 @@
        ]
       }
      ],
-     "ms": 1.98,
+     "ms": 3.74,
      "readonly": true
     },
     {
@@ -123,7 +123,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.82,
+     "ms": 1.3,
      "readonly": true
     },
     {
@@ -167,7 +167,7 @@
        ]
       }
      ],
-     "ms": 1.1,
+     "ms": 1.76,
      "readonly": true
     },
     {
@@ -192,7 +192,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.61,
+     "ms": 0.95,
      "readonly": false
     }
    ],
@@ -320,7 +320,7 @@
        ]
       }
      ],
-     "ms": 0.78,
+     "ms": 0.98,
      "readonly": true
     },
     {
@@ -340,7 +340,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.42,
+     "ms": 0.78,
      "readonly": true
     },
     {
@@ -359,20 +359,24 @@
        "team_name": "Checkout"
       }
      ],
-     "ms": 0.63,
+     "ms": 0.95,
      "readonly": true
     },
     {
      "name": "record_page",
-     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service\nRETURN pg.for_service AS first_for",
      "params": {
       "incident_id": "inc:checkout-latency",
       "person": "person:ravi-moreau",
       "at": 1792036800,
       "service": "svc:checkout"
      },
-     "rows": [],
-     "ms": 0.49,
+     "rows": [
+      {
+       "first_for": "svc:checkout"
+      }
+     ],
+     "ms": 0.59,
      "readonly": false
     }
    ],
@@ -462,7 +466,7 @@
        ]
       }
      ],
-     "ms": 0.6,
+     "ms": 0.81,
      "readonly": true
     }
    ],
@@ -536,7 +540,7 @@
        ]
       }
      ],
-     "ms": 1.14,
+     "ms": 0.86,
      "readonly": true
     },
     {
@@ -607,7 +611,7 @@
        "score": 2
       }
      ],
-     "ms": 2.11,
+     "ms": 2.39,
      "readonly": true
     },
     {
@@ -679,47 +683,19 @@
       ]
      },
      "rows": [],
-     "ms": 0.72,
+     "ms": 0.74,
      "readonly": false
     }
    ],
    "highlight": {
     "nodes": [
      "inc:0911",
-     "inc:1001",
-     "inc:1003",
-     "inc:0877",
-     "inc:1002",
-     "svc:inventory",
-     "svc:promotions",
-     "svc:redis-cache",
-     "svc:postgres-orders",
-     "svc:checkout"
+     "svc:inventory"
     ],
     "edges": [
      [
       "inc:checkout-latency",
       "inc:0911",
-      "RECALLS"
-     ],
-     [
-      "inc:checkout-latency",
-      "inc:1001",
-      "RECALLS"
-     ],
-     [
-      "inc:checkout-latency",
-      "inc:1003",
-      "RECALLS"
-     ],
-     [
-      "inc:checkout-latency",
-      "inc:0877",
-      "RECALLS"
-     ],
-     [
-      "inc:checkout-latency",
-      "inc:1002",
       "RECALLS"
      ]
     ]
@@ -876,7 +852,7 @@
        ]
       }
      ],
-     "ms": 1.02,
+     "ms": 1.25,
      "readonly": true
     },
     {
@@ -896,7 +872,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.34,
+     "ms": 0.55,
      "readonly": true
     },
     {
@@ -908,7 +884,7 @@
       "min_score": 3
      },
      "rows": [],
-     "ms": 1.27,
+     "ms": 1.1,
      "readonly": true
     }
    ],
@@ -1012,7 +988,7 @@
        ]
       }
      ],
-     "ms": 1.24,
+     "ms": 0.86,
      "readonly": true
     },
     {
@@ -1032,7 +1008,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.42,
+     "ms": 0.27,
      "readonly": true
     },
     {
@@ -1101,7 +1077,7 @@
        "summary": "Deploy cart v3.1.0 (UI copy changes)"
       }
      ],
-     "ms": 4.84,
+     "ms": 3.11,
      "readonly": true
     },
     {
@@ -1142,7 +1118,7 @@
        "id": "hyp:checkout-latency:pgw-pool-1"
       }
      ],
-     "ms": 1.06,
+     "ms": 0.7,
      "readonly": false
     },
     {
@@ -1174,7 +1150,7 @@
        "id": "hyp:checkout-latency:legacy-193"
       }
      ],
-     "ms": 0.64,
+     "ms": 0.51,
      "readonly": false
     }
    ],
@@ -1411,7 +1387,7 @@
        ]
       }
      ],
-     "ms": 1.48,
+     "ms": 0.9,
      "readonly": true
     },
     {
@@ -1433,12 +1409,12 @@
        "at": 1792036800
       }
      ],
-     "ms": 1.26,
+     "ms": 0.66,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:checkout",
       "target": "svc:cart",
@@ -1452,7 +1428,7 @@
        ]
       }
      ],
-     "ms": 0.78,
+     "ms": 0.81,
      "readonly": true
     },
     {
@@ -1460,14 +1436,14 @@
      "cypher": "// purpose: Which of the given services showed an anomaly between the change and the alert.\nUNWIND $services AS sid\nMATCH (x:Anomaly)-[:ON]->(s:Service {id: sid})\nWHERE x.at >= $since AND x.at <= $until\nRETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary",
      "params": {
       "services": [
-       "svc:checkout",
-       "svc:cart"
+       "svc:cart",
+       "svc:checkout"
       ],
       "since": 1792035300,
       "until": 1792036800
      },
      "rows": [],
-     "ms": 0.75,
+     "ms": 0.54,
      "readonly": true
     },
     {
@@ -1490,7 +1466,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 1.03,
+     "ms": 0.71,
      "readonly": false
     }
    ],
@@ -1666,7 +1642,7 @@
        ]
       }
      ],
-     "ms": 1.1,
+     "ms": 1.54,
      "readonly": true
     },
     {
@@ -1688,12 +1664,12 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.82,
+     "ms": 0.53,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:checkout",
       "target": "svc:pricing",
@@ -1705,9 +1681,16 @@
         "svc:checkout",
         "svc:pricing"
        ]
+      },
+      {
+       "path": [
+        "svc:checkout",
+        "svc:cart",
+        "svc:pricing"
+       ]
       }
      ],
-     "ms": 0.46,
+     "ms": 0.59,
      "readonly": true
     },
     {
@@ -1715,6 +1698,7 @@
      "cypher": "// purpose: Which of the given services showed an anomaly between the change and the alert.\nUNWIND $services AS sid\nMATCH (x:Anomaly)-[:ON]->(s:Service {id: sid})\nWHERE x.at >= $since AND x.at <= $until\nRETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary",
      "params": {
       "services": [
+       "svc:cart",
        "svc:checkout",
        "svc:pricing"
       ],
@@ -1728,7 +1712,7 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.46,
+     "ms": 0.39,
      "readonly": true
     },
     {
@@ -1751,7 +1735,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.45,
+     "ms": 0.38,
      "readonly": false
     }
    ],
@@ -1932,7 +1916,7 @@
        ]
       }
      ],
-     "ms": 1.23,
+     "ms": 0.94,
      "readonly": true
     },
     {
@@ -1954,12 +1938,12 @@
        "at": 1792036800
       }
      ],
-     "ms": 1.0,
+     "ms": 0.56,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:checkout",
       "target": "svc:payments-gw",
@@ -1974,7 +1958,7 @@
        ]
       }
      ],
-     "ms": 0.47,
+     "ms": 0.31,
      "readonly": true
     },
     {
@@ -2006,7 +1990,7 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.3,
+     "ms": 0.29,
      "readonly": true
     },
     {
@@ -2030,7 +2014,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.54,
+     "ms": 0.37,
      "readonly": false
     }
    ],
@@ -2223,7 +2207,7 @@
        ]
       }
      ],
-     "ms": 1.15,
+     "ms": 1.71,
      "readonly": true
     },
     {
@@ -2245,19 +2229,19 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.79,
+     "ms": 0.65,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:checkout",
       "target": "svc:search",
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.34,
+     "ms": 0.28,
      "readonly": true
     },
     {
@@ -2268,7 +2252,7 @@
       "target": "svc:search"
      },
      "rows": [],
-     "ms": 0.54,
+     "ms": 0.89,
      "readonly": true
     },
     {
@@ -2288,7 +2272,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.37,
+     "ms": 0.74,
      "readonly": false
     }
    ],
@@ -2469,7 +2453,7 @@
        ]
       }
      ],
-     "ms": 1.0,
+     "ms": 1.78,
      "readonly": true
     },
     {
@@ -2491,19 +2475,19 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.5,
+     "ms": 0.62,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:checkout",
       "target": "svc:legacy-billing",
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.21,
+     "ms": 0.3,
      "readonly": true
     },
     {
@@ -2524,7 +2508,7 @@
        ]
       }
      ],
-     "ms": 0.24,
+     "ms": 0.25,
      "readonly": true
     },
     {
@@ -2567,7 +2551,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.52,
+     "ms": 0.63,
      "readonly": false
     }
    ],
@@ -2763,7 +2747,7 @@
        ]
       }
      ],
-     "ms": 0.87,
+     "ms": 1.11,
      "readonly": true
     }
    ],
@@ -2938,7 +2922,7 @@
        ]
       }
      ],
-     "ms": 1.16,
+     "ms": 1.69,
      "readonly": true
     },
     {
@@ -2958,7 +2942,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.37,
+     "ms": 0.93,
      "readonly": true
     },
     {
@@ -2977,20 +2961,24 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.51,
+     "ms": 0.65,
      "readonly": true
     },
     {
      "name": "record_page",
-     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service\nRETURN pg.for_service AS first_for",
      "params": {
       "incident_id": "inc:checkout-latency",
       "person": "person:bram-nakamura",
       "at": 1792036800,
       "service": "svc:payments-gw"
      },
-     "rows": [],
-     "ms": 0.31,
+     "rows": [
+      {
+       "first_for": "svc:payments-gw"
+      }
+     ],
+     "ms": 0.28,
      "readonly": false
     }
    ],
@@ -3191,7 +3179,7 @@
        ]
       }
      ],
-     "ms": 1.16,
+     "ms": 1.73,
      "readonly": true
     },
     {
@@ -3211,7 +3199,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.44,
+     "ms": 0.99,
      "readonly": true
     },
     {
@@ -3304,7 +3292,7 @@
        ]
       }
      ],
-     "ms": 0.67,
+     "ms": 1.64,
      "readonly": true
     },
     {
@@ -3345,7 +3333,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.4,
+     "ms": 1.02,
      "readonly": false
     }
    ],
@@ -3712,7 +3700,7 @@
        ]
       }
      ],
-     "ms": 1.6,
+     "ms": 2.57,
      "readonly": true
     },
     {
@@ -3732,7 +3720,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.44,
+     "ms": 0.92,
      "readonly": true
     },
     {
@@ -3803,7 +3791,7 @@
        ]
       }
      ],
-     "ms": 2.36,
+     "ms": 3.43,
      "readonly": true
     },
     {
@@ -3842,7 +3830,7 @@
        "source": "recent-anywhere"
       }
      ],
-     "ms": 0.8,
+     "ms": 1.7,
      "readonly": true
     },
     {
@@ -3864,7 +3852,7 @@
        "cited": 3
       }
      ],
-     "ms": 0.71,
+     "ms": 1.68,
      "readonly": false
     }
    ],
@@ -4065,7 +4053,7 @@
        ]
       }
      ],
-     "ms": 1.33,
+     "ms": 2.04,
      "readonly": true
     }
    ],
@@ -4185,7 +4173,6 @@
    "svc:web-frontend"
   ],
   "at_risk": [
-   "svc:checkout",
    "svc:payments",
    "svc:refunds",
    "svc:subscriptions"

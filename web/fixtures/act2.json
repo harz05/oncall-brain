@@ -35,7 +35,7 @@
        "alert": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.63,
+     "ms": 0.71,
      "readonly": false
     }
    ],
@@ -103,7 +103,7 @@
        ]
       }
      ],
-     "ms": 0.73,
+     "ms": 0.94,
      "readonly": true
     },
     {
@@ -123,7 +123,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.28,
+     "ms": 0.36,
      "readonly": true
     },
     {
@@ -167,7 +167,7 @@
        ]
       }
      ],
-     "ms": 0.4,
+     "ms": 0.47,
      "readonly": true
     },
     {
@@ -192,7 +192,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.27,
+     "ms": 0.36,
      "readonly": false
     }
    ],
@@ -320,7 +320,7 @@
        ]
       }
      ],
-     "ms": 0.72,
+     "ms": 0.7,
      "readonly": true
     },
     {
@@ -340,7 +340,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.25,
+     "ms": 0.3,
      "readonly": true
     },
     {
@@ -359,20 +359,24 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.27,
+     "ms": 0.21,
      "readonly": true
     },
     {
      "name": "record_page",
-     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service\nRETURN pg.for_service AS first_for",
      "params": {
       "incident_id": "inc:refunds-latency",
       "person": "person:bram-nakamura",
       "at": 1792296000,
       "service": "svc:refunds"
      },
-     "rows": [],
-     "ms": 0.24,
+     "rows": [
+      {
+       "first_for": "svc:refunds"
+      }
+     ],
+     "ms": 0.15,
      "readonly": false
     }
    ],
@@ -462,7 +466,7 @@
        ]
       }
      ],
-     "ms": 0.59,
+     "ms": 1.04,
      "readonly": true
     }
    ],
@@ -536,7 +540,7 @@
        ]
       }
      ],
-     "ms": 0.72,
+     "ms": 1.16,
      "readonly": true
     },
     {
@@ -595,7 +599,7 @@
        "score": 2
       }
      ],
-     "ms": 0.71,
+     "ms": 0.97,
      "readonly": true
     },
     {
@@ -655,40 +659,19 @@
       ]
      },
      "rows": [],
-     "ms": 0.42,
+     "ms": 0.49,
      "readonly": false
     }
    ],
    "highlight": {
     "nodes": [
      "inc:checkout-latency",
-     "inc:1003",
-     "inc:0877",
-     "inc:1000",
-     "svc:payments-gw",
-     "svc:redis-cache",
-     "svc:postgres-orders",
-     "svc:kafka"
+     "svc:payments-gw"
     ],
     "edges": [
      [
       "inc:refunds-latency",
       "inc:checkout-latency",
-      "RECALLS"
-     ],
-     [
-      "inc:refunds-latency",
-      "inc:1003",
-      "RECALLS"
-     ],
-     [
-      "inc:refunds-latency",
-      "inc:0877",
-      "RECALLS"
-     ],
-     [
-      "inc:refunds-latency",
-      "inc:1000",
       "RECALLS"
      ]
     ]
@@ -828,7 +811,7 @@
        ]
       }
      ],
-     "ms": 0.72,
+     "ms": 0.93,
      "readonly": true
     },
     {
@@ -848,7 +831,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.24,
+     "ms": 0.36,
      "readonly": true
     },
     {
@@ -871,7 +854,7 @@
        ]
       }
      ],
-     "ms": 0.48,
+     "ms": 0.64,
      "readonly": true
     },
     {
@@ -894,7 +877,7 @@
        "id": "hyp:refunds-latency:pgw-pool-2"
       }
      ],
-     "ms": 0.49,
+     "ms": 0.42,
      "readonly": false
     }
    ],
@@ -1013,7 +996,7 @@
        ]
       }
      ],
-     "ms": 0.8,
+     "ms": 0.76,
      "readonly": true
     },
     {
@@ -1035,12 +1018,12 @@
        "at": 1792296000
       }
      ],
-     "ms": 0.43,
+     "ms": 0.45,
      "readonly": true
     },
     {
-     "name": "live_path",
-     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:refunds",
       "target": "svc:payments-gw",
@@ -1055,7 +1038,7 @@
        ]
       }
      ],
-     "ms": 0.39,
+     "ms": 0.27,
      "readonly": true
     },
     {
@@ -1063,9 +1046,9 @@
      "cypher": "// purpose: Which of the given services showed an anomaly between the change and the alert.\nUNWIND $services AS sid\nMATCH (x:Anomaly)-[:ON]->(s:Service {id: sid})\nWHERE x.at >= $since AND x.at <= $until\nRETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary",
      "params": {
       "services": [
-       "svc:refunds",
        "svc:payments",
-       "svc:payments-gw"
+       "svc:payments-gw",
+       "svc:refunds"
       ],
       "since": 1792294200,
       "until": 1792296000
@@ -1087,7 +1070,7 @@
        "summary": "p99 4.4s on POST /refunds"
       }
      ],
-     "ms": 0.41,
+     "ms": 0.29,
      "readonly": true
     },
     {
@@ -1111,7 +1094,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.5,
+     "ms": 0.29,
      "readonly": false
     }
    ],
@@ -1248,7 +1231,7 @@
        ]
       }
      ],
-     "ms": 1.37,
+     "ms": 0.82,
      "readonly": true
     }
    ],
@@ -1263,7 +1246,7 @@
    "role": "comms",
    "tool": "page_on_call",
    "reason": "The culprit lives in svc:payments-gw; page its owning team too.",
-   "summary": "Paged Bram Nakamura (@bram, Payments) for svc:payments-gw",
+   "summary": "Bram Nakamura (@bram, Payments) owns svc:payments-gw too; already engaged",
    "writes": true,
    "queries": [
     {
@@ -1357,7 +1340,7 @@
        ]
       }
      ],
-     "ms": 1.41,
+     "ms": 0.87,
      "readonly": true
     },
     {
@@ -1377,7 +1360,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.52,
+     "ms": 0.47,
      "readonly": true
     },
     {
@@ -1396,20 +1379,24 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.48,
+     "ms": 0.57,
      "readonly": true
     },
     {
      "name": "record_page",
-     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service\nRETURN pg.for_service AS first_for",
      "params": {
       "incident_id": "inc:refunds-latency",
       "person": "person:bram-nakamura",
       "at": 1792296000,
       "service": "svc:payments-gw"
      },
-     "rows": [],
-     "ms": 0.31,
+     "rows": [
+      {
+       "first_for": "svc:refunds"
+      }
+     ],
+     "ms": 0.38,
      "readonly": false
     }
    ],
@@ -1544,7 +1531,7 @@
        ]
       }
      ],
-     "ms": 1.02,
+     "ms": 0.76,
      "readonly": true
     },
     {
@@ -1564,7 +1551,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.52,
+     "ms": 0.25,
      "readonly": true
     },
     {
@@ -1657,7 +1644,7 @@
        ]
       }
      ],
-     "ms": 0.79,
+     "ms": 0.72,
      "readonly": true
     },
     {
@@ -1698,7 +1685,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.46,
+     "ms": 0.5,
      "readonly": false
     }
    ],
@@ -1999,7 +1986,7 @@
        ]
       }
      ],
-     "ms": 0.83,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -2019,7 +2006,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.37,
+     "ms": 0.44,
      "readonly": true
     },
     {
@@ -2084,7 +2071,7 @@
        ]
       }
      ],
-     "ms": 1.55,
+     "ms": 0.83,
      "readonly": true
     },
     {
@@ -2094,7 +2081,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.66,
+     "ms": 0.64,
      "readonly": true
     },
     {
@@ -2116,7 +2103,7 @@
        "cited": 3
       }
      ],
-     "ms": 0.71,
+     "ms": 0.75,
      "readonly": false
     }
    ],
@@ -2251,7 +2238,7 @@
        ]
       }
      ],
-     "ms": 1.41,
+     "ms": 0.91,
      "readonly": true
     }
    ],
@@ -2321,13 +2308,6 @@
     "handle": "@bram",
     "team": "team:payments",
     "team_name": "Payments"
-   },
-   {
-    "person": "person:bram-nakamura",
-    "name": "Bram Nakamura",
-    "handle": "@bram",
-    "team": "team:payments",
-    "team_name": "Payments"
    }
   ],
   "blast_radius": [
@@ -2338,7 +2318,6 @@
   "at_risk": [
    "svc:checkout",
    "svc:payments",
-   "svc:refunds",
    "svc:subscriptions"
   ],
   "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
