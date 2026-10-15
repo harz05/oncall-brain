@@ -14,7 +14,8 @@ setup:
 	$(E) if command -v uv >/dev/null; then uv venv -q --allow-existing --python 3.12 $$VIRTUAL_ENV && uv pip install -q --python $$VIRTUAL_ENV/bin/python -e ".[dev]"; \
 	else python3.12 -m venv $$VIRTUAL_ENV && pip install -q -e ".[dev]"; fi
 	$(E) python -c "import redislite" 2>/dev/null || [ -x "$$FALKORDB_BIN/redis-server" ] || \
-	  (if command -v uv >/dev/null; then uv pip install -q --python $$VIRTUAL_ENV/bin/python falkordblite; else pip install -q falkordblite; fi) 2>/dev/null || \
+	  (if command -v uv >/dev/null; then uv pip install -q --only-binary falkordblite --python $$VIRTUAL_ENV/bin/python falkordblite; \
+	   else pip install -q --only-binary falkordblite falkordblite; fi) 2>/dev/null || \
 	  bash scripts/falkordb_bin.sh
 
 falkordb-bin:
