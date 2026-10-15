@@ -6,18 +6,20 @@ WITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS step
 OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WITH i, a, o, steps,
      collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,
-              at: c.at, coverage: h.coverage}) AS hypotheses
+              at: c.at, explained: h.explained, onset: h.onset}) AS hypotheses
 OPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)
 WITH i, a, o, steps, hypotheses,
      collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls
 OPTIONAL MATCH (other:Alert)
 WHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at
 WITH i, a, o, steps, hypotheses, recalls, count(other) AS storm
+OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)
+WITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated
 OPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)
-WITH i, a, o, steps, hypotheses, recalls, storm, u, su
+WITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su
 ORDER BY su.rank
 RETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,
-       steps, hypotheses, recalls, storm, collect(u.id) AS shared_upstream
+       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream
 
 // name: log_step
 // purpose: Persist each agent step on the incident (queryable agent history; handoffs between roles are steps too).

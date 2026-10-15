@@ -60,6 +60,8 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
 
 def _call(ctx: ToolContext, d: Decision, incident_id: str):
     tool = registry.REGISTRY[d.tool]
+    if not tool.agent:  # confirming fixes and recording facts belong to humans, whatever the planner proposes
+        raise ValueError(f"{d.tool} is not an agent tool")
     args = dict(d.args)
     if "incident_id" in tool.args_model.model_fields:
         args["incident_id"] = incident_id  # agents only ever act on the incident they were given

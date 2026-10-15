@@ -121,10 +121,10 @@ def page_on_call(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
 
 @tool(writes=True)
 def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Alert storm: of the alerts from the last 15 minutes, fold into this incident the ones that share an
+    """Alert storm: of the alerts from the last 15 minutes, fold into this incident the ones that share with it an
     upstream service which went red, find the services all of them depend on (shared upstream) and rank those by
-    convergence (fewest total hops from the alerting services). Suspects there are checked first, and each
-    supported suspect is scored by how many of the correlated alerts it can explain."""
+    convergence (fewest total hops from the alerting services). Suspects there are checked first, and each supported
+    suspect records which alerting services it explains."""
     head, qs = _head(ctx, a.incident_id)
     storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, window=STORM_WINDOW)
     qs.append(storm)
@@ -141,24 +141,26 @@ def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
         cover.setdefault(r["service"], {})[r["alerting"]] = r["hops"]
         if r["red"]:
             red.add(r["service"])
-    # Related = shares with this alert an upstream service that actually went red. Unrelated alerts that merely
-    # share a quiet piece of infrastructure (a cache everyone uses) stay separate incidents.
-    related = {s for u in red if origin in cover[u] for s in cover[u]} - {origin}
+    # Related = shares with this alert an upstream service that actually went red (an alert on this alert's own service
+    # counts, as long as something went red). Alerts that only share a quiet piece of infrastructure (a cache everyone
+    # uses) stay separate incidents. Related alerts need not have one cause: each suspect later records which alerting
+    # services it explains, and conclude keeps co-causes instead of ruling them out.
+    related = {s for u in red if origin in cover[u] for s in cover[u]}
     alerts = [r for r in storm.rows if r["service"] in related]
     if not alerts:
         return ToolOutput(summary=f"{len(storm.rows)} other alert(s) in the window share no upstream service that "
                           "went red; investigating this one on its own", data={"alerts": [], "shared": []}, queries=qs)
-    group = {origin, *related}
+    group = {origin, *(r["service"] for r in alerts)}
     shared = sorted((u for u, c in cover.items() if group <= c.keys()),
                     key=lambda u: (sum(cover[u][s] for s in group), u))
     ranked = [{"service": u, "hops": sum(cover[u][s] for s in group), "rank": i + 1, "red": u in red}
               for i, u in enumerate(shared)]
     qs.append(ctx.repo.write("record_correlation", incident_id=a.incident_id, origin=origin,
                              alerts=[{"alert": r["alert"], "service": r["service"]} for r in alerts], shared=ranked))
-    names = ", ".join(r["service"].removeprefix("svc:") for r in alerts)
-    summary = (f"{len(alerts) + 1} related alerts ({names} too) share {len(ranked)} upstream services; "
-               f"paths converge on {ranked[0]['service'].removeprefix('svc:')}" if ranked
-               else f"{len(alerts) + 1} related alerts share no common upstream service")
+    names = ", ".join(sorted(x.removeprefix("svc:") for x in group))
+    summary = (f"{len(alerts) + 1} related alerts on {len(group)} service{'s' * (len(group) > 1)} ({names})" + (
+        f"; paths converge on {ranked[0]['service'].removeprefix('svc:')}" if ranked and len(group) > 1
+        else "; no single service sits upstream of all of them" if len(group) > 1 else ""))
     hl = Highlight(nodes=sorted(group) + [r["service"] for r in ranked],
                    edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in alerts])
     return ToolOutput(summary=summary, data={"alerts": alerts, "shared": ranked}, queries=qs, highlight=hl)
@@ -257,38 +259,41 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
     # The symptom may have travelled any live path; judge the one it lit up most (shortest on ties).
     live_path = min(paths, key=lambda p: (sum(s not in anomalous for s in p[1:-1]), len(p))) if paths else []
     unexplained: list[str] = []
-    others = [x for x in f["storm_services"] if x != f["origin"]]
-    if paths and others:  # alert storm: one cause has to explain every correlated alert
+    others = [x for x in f["storm_services"] if x != f["origin"]]  # other alerting services folded into this incident
+    if paths and others:  # alert storm: which of the other alerting services can this change reach?
         sq = ctx.repo.read("storm_unexplained", services=others, target=f["service"], at=f["at"])
         qs.append(sq)
         unexplained = [r["service"] for r in sq.rows]
+    explained = sorted({f["origin"], *others} - set(unexplained)) if paths else []
+    onset = next((r["first_at"] for r in an.rows if r["service"] == f["service"]), None) if paths else None
     facts = CheckFacts(
         change_service=f["service"], alert_service=f["origin"],
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],
         live_path=live_path, any_path=any_path, anomalous=anomalous)
     v = judge(facts)
-    explains = 1 + len(others) - len(unexplained)  # of the correlated alerts (just this one outside a storm)
     reason = v.reason
     if v.verdict == "supports" and others:
-        reason += f"; explains {explains} of {len(others) + 1} correlated alerts" + (
+        reason += f"; explains {len(explained)} of {len(others) + 1} alerting services" + (
             f" (not {', '.join(x.removeprefix('svc:') for x in unexplained)})" if unexplained else "")
     v = type(v)(v.verdict, reason)
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,
-                             reason=v.reason, path=live_path or any_path, at=f["at"], explains=explains))
+                             reason=v.reason, path=live_path or any_path, at=f["at"], explained=explained,
+                             onset=onset))
     shown = live_path or any_path
     hl = Highlight(nodes=shown + [f["change"]], edges=_path_edges(shown) + [(f["change"], f["service"], "CHANGED")])
     return ToolOutput(summary=f"{v.verdict.upper()} {f['change']}: {v.reason}",
                       data={"change": f["change"], "service": f["service"], "summary": f["summary"],
                             "verdict": v.verdict, "reason": v.reason, "live_path": live_path,
-                            "retired_path": any_path, "explains": explains},
+                            "retired_path": any_path, "explained": explained},
                       queries=qs, highlight=hl)
 
 
 @tool(writes=True)
 def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Several suspects survived their checks: keep one leading cause (explains the most correlated alerts, then
-    a memory suggestion, then nearest the alert, then newest) and record why each other one lost."""
+    """Several suspects survived their checks: keep one leading cause (explains the most alerting services, then a
+    memory suggestion, then nearest the alert, then first followed by an anomaly, then newest). A suspect the leader
+    covers is outranked (with the reason); one that explains a service the leader cannot is kept as a co-cause."""
     from oncall_brain.services.board import load_board
 
     head, qs = _head(ctx, a.incident_id)
@@ -298,13 +303,21 @@ def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     if len(supported) < 2:
         return ToolOutput(summary="Nothing to rank", data={"leading": supported[0]["change_id"] if supported
                                                             else None, "outranked": []}, queries=qs)
-    lead, lost = leading(supported)
-    qs.append(ctx.repo.write("record_outranked", at=head["at"], rows=[
-        {"id": h["id"], "evidence_id": "ev:" + h["id"].removeprefix("hyp:"), "reason": why} for h, why in lost]))
-    return ToolOutput(summary=f"Leading cause {lead['change_id']}; outranked " +
-                      ", ".join(h["change_id"] for h, _ in lost),
+    lead, lost, co = leading(supported)
+    if lost:
+        qs.append(ctx.repo.write("record_outranked", at=head["at"], rows=[
+            {"id": h["id"], "evidence_id": "ev:" + h["id"].removeprefix("hyp:") + ":outranked", "reason": why}
+            for h, why in lost]))
+    if co:
+        qs.append(ctx.repo.write("record_co_causes", rows=[{"id": h["id"], "note": why} for h, why in co]))
+    parts = [f"Leading cause {lead['change_id']}"] + (
+        ["outranked " + ", ".join(h["change_id"] for h, _ in lost)] if lost else []) + (
+        ["co-cause " + ", ".join(h["change_id"] for h, _ in co)] if co else [])
+    return ToolOutput(summary="; ".join(parts),
                       data={"leading": lead["change_id"],
-                            "outranked": [{"change": h["change_id"], "reason": why} for h, why in lost]},
+                            "outranked": [{"change": h["change_id"], "reason": why} for h, why in lost],
+                            "co_causes": [{"change": h["change_id"], "service": h["service"], "reason": why}
+                                          for h, why in co]},
                       queries=qs, highlight=Highlight(nodes=[lead["change_id"], lead["service"]]))
 
 
@@ -316,8 +329,10 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     facts_q = ctx.repo.read("update_facts", incident_id=a.incident_id)
     ref_q = ctx.repo.read("refuted_hypotheses", incident_id=a.incident_id)
     qs += [facts_q, ref_q]
+    co_q = ctx.repo.read("co_causes", incident_id=a.incident_id)
+    qs.append(co_q)
     facts = facts_q.rows[0]
-    text = update.status_update(facts, ref_q.rows, head["service"])
+    text = update.status_update(facts, ref_q.rows, head["service"], co_q.rows)
     experts = [x for x in facts["experts"] if x.get("id")]
     runbooks = [r for r in facts["runbooks"] if r.get("id")]
     cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in runbooks),
@@ -341,8 +356,10 @@ def resolve_incident(ctx: ToolContext, a: ResolveArgs) -> ToolOutput:
         raise ValueError(f"unknown change {a.change_id!r}")
     c = cq.rows[0]
     rb_id, title, steps = update.learned_runbook(c["service_name"], c["kind"], c["summary"], head["service"])
+    hyp = f"hyp:{a.incident_id.removeprefix('inc:')}:{a.change_id.removeprefix('chg:')}"
     q = ctx.repo.write("resolve_incident", incident_id=a.incident_id, change_id=a.change_id, at=head["at"] + 3600,
-                       runbook_id=rb_id, title=title, steps=steps)
+                       runbook_id=rb_id, title=title, steps=steps, hypothesis_id=hyp,
+                       evidence_id="ev:" + hyp.removeprefix("hyp:") + ":human")
     qs.append(q)
     if not q.rows:
         return ToolOutput(summary=f"{a.incident_id} was already resolved", data=None, queries=qs)

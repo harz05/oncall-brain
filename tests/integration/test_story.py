@@ -219,7 +219,7 @@ def test_act3_alert_storm_is_correlated_and_only_then_solved(store, tenant):
     assert corr["shared"][0]["service"] == "svc:payments"  # convergence: fewest total hops from the alerting services
     o = run["outcome"]
     assert o["root_cause"]["change"] == "chg:pg-conn-3" and o["checks_to_culprit"] == 1
-    assert "explains 3 of the correlated alerts, this change 1" in {
+    assert "explains every alerting service this change does (1) and 2 more" in {
         r["change"]: r["reason"] for r in o["refuted"]}["chg:subs-88"]
     assert not o["anomaly_baseline_correct"]  # the no-graph rule blames subs-88: it went red first
     assert not o["runbook"]  # no runbook led here, so none is suggested
@@ -314,3 +314,28 @@ def test_outranked_evidence_only_refutes(store, tenant):
     rows = repo._graph.ro_query("MATCH (e:Evidence {verdict:'outranked'}) "
                                 "RETURN size([(e)-[:SUPPORTS]->() | 1]), size([(e)-[:REFUTES]->() | 1])").result_set
     assert rows == [[0, 1]]
+    kept = repo._graph.ro_query("MATCH (e:Evidence {verdict:'supports'})-[:SUPPORTS]->"
+                                "(:Hypothesis {status:'outranked'}) RETURN count(e)").result_set[0][0]
+    assert kept == 1  # the check's own supporting evidence is kept for a human to review
+
+
+def test_a_human_override_becomes_the_confirmed_cause_and_the_update_is_reposted(store, tenant):
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[1], MockProvider())
+    resolve(repo, run["incident_id"], "chg:cart-310")  # the human disagrees with the agents
+    o = respond(repo, ACTS[1], MockProvider())["outcome"]
+    assert o["root_cause"]["change"] == "chg:cart-310" and o["root_cause"]["status"] == "confirmed"
+    assert "a human confirmed chg:cart-310" in {r["change"]: r["reason"] for r in o["refuted"]}["chg:pgw-pool-1"]
+    assert o["update_text"].startswith("[checkout p99 latency above 2s] status: resolved, cause confirmed")
+
+
+def test_add_dependency_can_move_a_live_edge_start_earlier(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    call("add_dependency", ctx, {"caller": "svc:search", "callee": "svc:cart", "at": 9000})
+    out = call("add_dependency", ctx, {"caller": "svc:search", "callee": "svc:cart", "at": 8500})
+    assert out.data["valid_from"] == 8500
+    assert call("dependency_path", ctx, {"from_service": "svc:search", "to_service": "svc:cart", "at": 8600}).data

@@ -44,9 +44,13 @@ def run_tool(repo: GraphRepository, name: str, args: dict[str, Any]) -> ToolOutp
 
 
 def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str, Any]:
+    """The human's call: record the confirmed cause and learn the runbook, then re-post the status update so the
+    stored update says resolved and names the confirmed cause."""
     with repo.lock():
         out = registry.call("resolve_incident", ToolContext(repo),
                             {"incident_id": incident_id, "change_id": change_id})
+        if out.data:
+            registry.call("post_update", ToolContext(repo), {"incident_id": incident_id})
     return out.model_dump()
 
 
@@ -72,11 +76,13 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
     investigator = [s for s in trace if s.role == "investigator" and s.tool != "handoff"]
     recalls = (_data(trace, "recall_similar") or [[]])[0]
     memory = _data(trace, "hypothesize_from_memory")
-    blast = (_data(trace, "blast_radius", "triage") or [[]])[0]
-    at_risk_rows = (_data(trace, "blast_radius", "comms") or [[]])[0]
-    storm = next((d for d in _data(trace, "correlate_alerts") if d["alerts"]), None)
-    alerting = {opened["service"], *(x["service"] for x in (storm or {}).get("alerts", []))}
-    direct = {r["service"] for r in blast} | alerting
+    # Impact, pages and the storm come from the graph too (IMPACTS, PAGED, CORRELATED_WITH, SHARED_UPSTREAM).
+    st = repo.read("incident_storm", incident_id=incident_id).rows[0]
+    storm_alerts = [x for x in st["alerts"] if x["alert"]]
+    storm = {"alerts": storm_alerts, "shared": [x for x in st["shared"] if x["service"]]} if storm_alerts else None
+    alerting = {opened["service"], *(x["service"] for x in storm_alerts)}
+    impacts = [x for x in repo.read("update_facts", incident_id=incident_id).rows[0]["impacts"] if x["service"]]
+    direct = {x["service"] for x in impacts if x["via"] in (None, opened["service"])} | alerting
     update = (repo.read("incident_update", incident_id=incident_id).rows or [{"text": None}])[0]["text"]
     posted = _data(trace, "post_update")
     return {
@@ -90,9 +96,10 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
                    "suspects": memory[0] if memory else [],
                    "solved_by_memory": bool(cause and memory and any(
                        m["change"] == cause["change"] for m in memory[0]))},
-        "paged": list({p["person"]: p for p in _data(trace, "page_on_call")}.values()),
+        "paged": repo.read("incident_paged", incident_id=incident_id).rows,
         "blast_radius": sorted(direct),
-        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct),
+        "at_risk": sorted({x["service"] for x in impacts} - direct),
+        "co_causes": repo.read("co_causes", incident_id=incident_id).rows,
         "update_text": update,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),

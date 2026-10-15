@@ -29,7 +29,7 @@
      "alert_name": "checkout p99 latency above 2s"
     }
    ],
-   "ms": 1.39,
+   "ms": 0.61,
    "readonly": true
   },
   {
@@ -47,12 +47,12 @@
      "service_name": "payments-gw"
     }
    ],
-   "ms": 1.48,
+   "ms": 0.47,
    "readonly": true
   },
   {
    "name": "resolve_incident",
-   "cypher": "// purpose: A human-confirmed fix becomes memory: CAUSED_BY (episodic) and a Runbook for (service, change kind) whose success count grows (procedural).\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: $change_id})-[:CHANGED]->(s:Service)\nWHERE i.status <> 'resolved'\nSET i.status = 'resolved', i.resolved_at = $at\nMERGE (i)-[:CAUSED_BY]->(c)\nMERGE (rb:Runbook {id: $runbook_id})\nON CREATE SET rb.title = $title, rb.steps = $steps, rb.kind = c.kind, rb.uses = 0, rb.successes = 0,\n              rb.learned_from = i.id\nSET rb.uses = rb.uses + 1, rb.successes = rb.successes + 1\nMERGE (rb)-[:FOR_SERVICE]->(s)\nMERGE (i)-[:FIXED_WITH]->(rb)\nWITH i, c, rb\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c)\nFOREACH (x IN CASE WHEN h IS NULL THEN [] ELSE [h] END | SET x.status = 'confirmed')\nRETURN i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps, rb.successes AS successes",
+   "cypher": "// purpose: A human-confirmed fix becomes memory: CAUSED_BY (episodic) and a Runbook for (service, change kind) whose success count grows (procedural). The confirmed change becomes the incident's confirmed hypothesis (created if no agent suspected it); any other surviving suspect is outranked by the human's call.\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: $change_id})-[:CHANGED]->(s:Service)\nWHERE i.status <> 'resolved'\nSET i.status = 'resolved', i.resolved_at = $at\nMERGE (i)-[:CAUSED_BY]->(c)\nMERGE (rb:Runbook {id: $runbook_id})\nON CREATE SET rb.title = $title, rb.steps = $steps, rb.kind = c.kind, rb.uses = 0, rb.successes = 0,\n              rb.learned_from = i.id\nSET rb.uses = rb.uses + 1, rb.successes = rb.successes + 1\nMERGE (rb)-[:FOR_SERVICE]->(s)\nMERGE (i)-[:FIXED_WITH]->(rb)\nMERGE (h:Hypothesis {id: $hypothesis_id})\nON CREATE SET h.source = 'human', h.created_at = $at, h.explained = []\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nSET h.status = 'confirmed'\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = 'supports', e.reason = 'confirmed by a human', e.at = $at\nMERGE (e)-[:SUPPORTS]->(h)\nWITH i, rb, h\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(o:Hypothesis)\nWHERE o.id <> h.id AND o.status IN ['supported', 'co-cause']\nFOREACH (x IN CASE WHEN o IS NULL THEN [] ELSE [o] END |\n  SET x.status = 'outranked'\n  MERGE (oe:Evidence {id: x.id + ':human'})\n  SET oe.verdict = 'outranked', oe.reason = 'outranked: a human confirmed ' + $change_id + ' as the cause'\n  MERGE (oe)-[:REFUTES]->(x))\nRETURN DISTINCT i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps,\n       rb.successes AS successes",
    "params": {
     "incident_id": "inc:checkout-latency",
     "change_id": "chg:pgw-pool-1",
@@ -63,7 +63,9 @@
      "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
      "Watch checkout p99 recover within 10 minutes",
      "Add a guard: alert on payments-gw saturation before callers time out"
-    ]
+    ],
+    "hypothesis_id": "hyp:checkout-latency:pgw-pool-1",
+    "evidence_id": "ev:checkout-latency:pgw-pool-1:human"
    },
    "rows": [
     {
@@ -78,7 +80,7 @@
      "successes": 1
     }
    ],
-   "ms": 3.78,
+   "ms": 1.79,
    "readonly": false
   }
  ],

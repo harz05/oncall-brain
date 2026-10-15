@@ -36,9 +36,10 @@ MATCH (a:Service {id: $caller}), (b:Service {id: $callee})
 OPTIONAL MATCH (a)-[live:DEPENDS_ON]->(b)
 WHERE live.valid_to IS NULL
 WITH a, b, collect(live) AS existing
-// Only one live edge per pair: if the dependency already exists, keep it.
+// Only one live edge per pair: if the dependency already exists, keep it (moving its start earlier if $at is).
 FOREACH (_ IN CASE WHEN size(existing) = 0 THEN [1] ELSE [] END |
   CREATE (a)-[:DEPENDS_ON {valid_from: $at}]->(b))
+FOREACH (d IN existing | SET d.valid_from = CASE WHEN $at < d.valid_from THEN $at ELSE d.valid_from END)
 WITH a, b
 MATCH (a)-[d:DEPENDS_ON]->(b)
 WHERE d.valid_to IS NULL

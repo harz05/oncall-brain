@@ -108,12 +108,12 @@ RETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary
 // purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.
 MATCH (h:Hypothesis {id: $hypothesis_id})
 MERGE (e:Evidence {id: $evidence_id})
-SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at, e.explains = $explains
+SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at, e.explained = $explained
 WITH h, e, h.status AS before
 // A human-confirmed cause stays confirmed whatever a later re-check says.
 SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
                     WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,
-    h.coverage = $explains
+    h.explained = $explained, h.onset = $onset
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
 WITH h, before
@@ -124,18 +124,27 @@ FOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'op
 RETURN h.id AS hypothesis, h.status AS status
 
 // name: record_outranked
-// purpose: When several suspects are supported, keep one leading cause and record why each other one lost (it explains fewer of the alerts, or sits further from the alert), as REFUTES evidence.
+// purpose: When several suspects are supported, record why each one the leader covers lost, as a separate REFUTES Evidence node (the check's own SUPPORTS evidence stays, so a human can still confirm it later).
 UNWIND $rows AS r
 MATCH (h:Hypothesis {id: r.id})
 MERGE (e:Evidence {id: r.evidence_id})
 SET e.verdict = 'outranked', e.reason = r.reason, e.at = $at
 MERGE (e)-[:REFUTES]->(h)
 SET h.status = 'outranked'
-WITH e, h
-// The same Evidence node supported this hypothesis a moment ago; it now only refutes it.
-OPTIONAL MATCH (e)-[old:SUPPORTS]->(h)
-DELETE old
-RETURN count(DISTINCT h) AS outranked
+RETURN count(h) AS outranked
+
+// name: record_co_causes
+// purpose: A supported suspect that explains an alerting service the leading cause cannot is kept as a co-cause, not ruled out.
+UNWIND $rows AS r
+MATCH (h:Hypothesis {id: r.id})
+SET h.status = 'co-cause', h.note = r.note
+RETURN count(h) AS co_causes
+
+// name: co_causes
+// purpose: Changes kept as co-causes of an incident (each explains an alerting service the leading cause cannot).
+MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis {status: 'co-cause'})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+RETURN c.id AS change, s.id AS service, c.summary AS summary, h.note AS reason, h.explained AS explained
+ORDER BY change
 
 // name: cause_facts
 // purpose: The incident's leading cause as the graph records it (confirmed, else supported) with its evidence.
@@ -144,7 +153,7 @@ WHERE h.status IN ['confirmed', 'supported']
 OPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)
 RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, e.path AS live_path,
        h.status AS status
-ORDER BY status
+ORDER BY status, size(coalesce(e.path, [])) DESC
 LIMIT 1
 
 // name: anomaly_baseline

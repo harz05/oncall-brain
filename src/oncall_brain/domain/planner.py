@@ -58,6 +58,11 @@ def investigator(board: dict[str, Any]) -> Decision:
         return _call("check_hypothesis", f"Test suspect {h['change_id']} on {h['service']} against the graph.",
                      hypothesis_id=h["id"])
     supported = [h for h in hyps if h["status"] in ("supported", "confirmed")]
+    storm = board.get("correlated") or []
+    if (supported and storm and not _ran(board, "propose_hypotheses")
+            and max(len(h.get("explained") or []) for h in supported) < len(storm)):
+        return _call("propose_hypotheses", "Memory explains only part of the alert storm; list every suspect on the "
+                     "dependency paths too.")
     if len(supported) > 1 and not _ran(board, "conclude"):
         return _call("conclude", f"{len(supported)} suspects are supported; keep the one that explains the most "
                      "and record why the others lost.")
@@ -77,6 +82,9 @@ def comms(board: dict[str, Any]) -> Decision:
     cause = board.get("cause_service")
     if cause and not _ran(board, "page_on_call", cause):
         return _call("page_on_call", f"The culprit lives in {cause}; page its owning team too.", service=cause)
+    for co in board.get("co_cause_services", []):
+        if not _ran(board, "page_on_call", co):
+            return _call("page_on_call", f"{co} is a co-cause; page its owning team as well.", service=co)
     if cause and not _ran(board, "who_knows", cause):
         return _call("who_knows", f"Who knows {cause} best? Name them in the update.", service=cause)
     if cause and not _ran(board, "blast_radius", cause):

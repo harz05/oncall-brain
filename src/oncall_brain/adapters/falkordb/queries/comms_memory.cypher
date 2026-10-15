@@ -60,7 +60,7 @@ MATCH (c:Change {id: $change_id})-[:CHANGED]->(s:Service)
 RETURN c.id AS change, c.kind AS kind, c.summary AS summary, s.id AS service, s.name AS service_name
 
 // name: resolve_incident
-// purpose: A human-confirmed fix becomes memory: CAUSED_BY (episodic) and a Runbook for (service, change kind) whose success count grows (procedural).
+// purpose: A human-confirmed fix becomes memory: CAUSED_BY (episodic) and a Runbook for (service, change kind) whose success count grows (procedural). The confirmed change becomes the incident's confirmed hypothesis (created if no agent suspected it); any other surviving suspect is outranked by the human's call.
 MATCH (i:Incident {id: $incident_id}), (c:Change {id: $change_id})-[:CHANGED]->(s:Service)
 WHERE i.status <> 'resolved'
 SET i.status = 'resolved', i.resolved_at = $at
@@ -71,10 +71,39 @@ ON CREATE SET rb.title = $title, rb.steps = $steps, rb.kind = c.kind, rb.uses = 
 SET rb.uses = rb.uses + 1, rb.successes = rb.successes + 1
 MERGE (rb)-[:FOR_SERVICE]->(s)
 MERGE (i)-[:FIXED_WITH]->(rb)
-WITH i, c, rb
-OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c)
-FOREACH (x IN CASE WHEN h IS NULL THEN [] ELSE [h] END | SET x.status = 'confirmed')
-RETURN i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps, rb.successes AS successes
+MERGE (h:Hypothesis {id: $hypothesis_id})
+ON CREATE SET h.source = 'human', h.created_at = $at, h.explained = []
+MERGE (i)-[:HAS_HYPOTHESIS]->(h)
+MERGE (h)-[:SUSPECTS]->(c)
+SET h.status = 'confirmed'
+MERGE (e:Evidence {id: $evidence_id})
+SET e.verdict = 'supports', e.reason = 'confirmed by a human', e.at = $at
+MERGE (e)-[:SUPPORTS]->(h)
+WITH i, rb, h
+OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(o:Hypothesis)
+WHERE o.id <> h.id AND o.status IN ['supported', 'co-cause']
+FOREACH (x IN CASE WHEN o IS NULL THEN [] ELSE [o] END |
+  SET x.status = 'outranked'
+  MERGE (oe:Evidence {id: x.id + ':human'})
+  SET oe.verdict = 'outranked', oe.reason = 'outranked: a human confirmed ' + $change_id + ' as the cause'
+  MERGE (oe)-[:REFUTES]->(x))
+RETURN DISTINCT i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps,
+       rb.successes AS successes
+
+// name: incident_paged
+// purpose: Everyone paged for the incident, with their team.
+MATCH (:Incident {id: $incident_id})-[pg:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)
+RETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name AS team_name, pg.for_service AS service
+ORDER BY pg.at, name
+
+// name: incident_storm
+// purpose: The alerts folded into the incident and its shared upstream (rank order), as recorded by correlate_alerts.
+MATCH (i:Incident {id: $incident_id})
+OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(a:Alert)-[:FIRED_ON]->(s:Service)
+WITH i, collect(DISTINCT {alert: a.id, name: a.name, service: s.id, at: a.at}) AS alerts
+OPTIONAL MATCH (i)-[x:SHARED_UPSTREAM]->(u:Service)
+WITH alerts, x, u ORDER BY x.rank
+RETURN alerts, collect({service: u.id, hops: x.hops, rank: x.rank}) AS shared
 
 // name: service_map
 // purpose: Services, owners and dependency edges (flagged live or retired at $at) for the UI.

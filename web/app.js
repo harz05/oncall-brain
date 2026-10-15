@@ -402,7 +402,9 @@ function renderOutcome() {
       'Change log + anomalies (no graph) would blame: ', h('b', {}, short(ab.change)), ' ',
       h('span', { class: 'pill' }, o.anomaly_baseline_correct ? 'same answer' : 'wrong'),
       h('span', { class: 'sub' }, ab.summary)) : null,
-    rc ? [h('p', {}, rc.summary), h('p', { class: 'muted' }, rc.reason)] : null);
+    rc ? [h('p', {}, rc.summary), h('p', { class: 'muted' }, rc.reason)] : null,
+    (o.co_causes || []).map((c) => h('p', { class: 'baseline' }, 'Also contributing: ', h('b', {}, short(c.change)),
+      ` on ${short(c.service)}`, h('span', { class: 'sub' }, c.reason))));
 
   const ruled = h('div', { class: 'card ruled' },
     h('h3', {}, `Ruled out (${o.refuted.length})`),

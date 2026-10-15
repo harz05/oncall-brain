@@ -38,9 +38,14 @@ def load(store, tenant: str, data: dict):
     return repo
 
 
-def why_wrong(o: dict, sc: dict, got: str | None) -> str:
+def checks(run: dict) -> list[dict]:
+    return [s.data for s in run["steps"] if s.tool == "check_hypothesis" and s.data]
+
+
+def why_wrong(run: dict, sc: dict, got: str | None) -> str:
     """The agent's own verdict reasons, so a miss explains itself in the report."""
-    truth = next((c for c in o["refuted"] if c["change"] == sc["truth_change"]), None)
+    o = run["outcome"]
+    truth = next((c for c in checks(run) if c["change"] == sc["truth_change"]), None)
     out = [f"truth judged {truth['verdict']}: {truth['reason']}" if truth
            else f"truth never checked ({o['hypotheses_checked']} checks)"]
     if got:
@@ -65,7 +70,7 @@ def run_seed(store, tenant: str, seed: int, tool_ms: dict[str, list[float]]) -> 
              "keyword": (keyword_pick(d["changes"], d["alerts"][0]) or {}).get("id"),
              "flat": (o["baseline_pick"] or {}).get("change")}
     letter = {v: k for k, v in sc["decoys"].items()}
-    refuted = {r["change"] for r in o["refuted"] if r["verdict"] == "refutes"}
+    refuted = {c["change"] for c in checks(run) if c["verdict"] == "refutes"}
     return {"seed": seed, "alert": sc["alert_id"].removeprefix("alert:"), "cause": sc["truth_path"][-1][4:],
             "hops": len(sc["truth_path"]) - 1, "decoys": "".join(sc["decoys"]),
             **{m: p == truth for m, p in picks.items()},
@@ -74,7 +79,7 @@ def run_seed(store, tenant: str, seed: int, tool_ms: dict[str, list[float]]) -> 
             "checks": o["hypotheses_checked"], "ms": ms,
             "refuted": {k for k, v in sc["decoys"].items() if v in refuted},
             "memory_misled": bool(o["memory"]["suspects"]),
-            "why": None if got == truth else why_wrong(o, sc, got)}
+            "why": None if got == truth else why_wrong(run, sc, got)}
 
 
 def pct(xs: list[float], p: float) -> float:
@@ -199,7 +204,7 @@ def report(rows: list[dict], tool_ms: dict[str, list[float]], services: int) -> 
         f"{statistics.mean(r['checks'] for r in rows):.1f} hypotheses checked on average.", "",
         "Decoys on the board and refuted by the graph: "
         + ", ".join(f"{d} {refuted[d]}/{planted[d]}" for d in "abcd")
-        + " (d only reaches the board when it is among the 3 newest changes). "
+        + " (d only reaches the board when it is among the 5 newest changes). "
         f"Misleading memory (e) planted in {e_planted} seeds; memory suggested a suspect in "
         f"{sum(r['memory_misled'] for r in rows)}.", "",
         "## Latency", "",

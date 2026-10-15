@@ -42,25 +42,39 @@ def judge(f: CheckFacts) -> Verdict:
     return Verdict("supports", "anomaly propagates " + " -> ".join(_n(s) for s in reversed(f.live_path)))
 
 
-def leading(supported: list[dict]) -> tuple[dict, list[tuple[dict, str]]]:
-    """Several suspects are supported: keep the one that explains the most correlated alerts, then a memory
-    suggestion, then the one nearest the alert, then the newest. Returns (leader, [(other, why it lost)])."""
-    def key(h: dict) -> tuple:
-        return (-(h.get("coverage") or 1), h["source"] != "memory", h["hops"] if h["hops"] is not None else 99,
-                -h["at"])
+def leading(supported: list[dict]) -> tuple[dict, list[tuple[dict, str]], list[tuple[dict, str]]]:
+    """Several suspects survived their checks. Keep one leading cause: the one that explains the most alerting
+    services, then a memory suggestion, then the one nearest the alert, then the one whose service went red first
+    after it, then the newest, then by id. Another suspect is outranked only if the leader explains every alerting
+    service it explains; if it explains a service the leader cannot, it is a co-cause, not ruled out.
+    Returns (leader, [(outranked, why)], [(co_cause, why)])."""
+    def cov(h: dict) -> set:
+        return set(h.get("explained") or [])
 
-    ranked = sorted(supported, key=key)
-    lead, lc = ranked[0], ranked[0].get("coverage") or 1
-    out = []
-    for h in ranked[1:]:
-        hc = h.get("coverage") or 1
-        if hc < lc:
-            why = f"{lead['change_id']} explains {lc} of the correlated alerts, this change {hc}"
-        elif (h["source"] != "memory") and lead["source"] == "memory":
+    def key(h: dict) -> tuple:
+        return (-len(cov(h)), h["source"] != "memory", h["hops"] if h["hops"] is not None else 99,
+                h.get("onset") or float("inf"), -h["at"], h["change_id"])
+
+    lead, *rest = sorted(supported, key=key)
+    lc = cov(lead)
+    outranked, co = [], []
+    for h in rest:
+        hc = cov(h)
+        if hc - lc:
+            co.append((h, "also needed: it alone explains " + ", ".join(sorted(_n(s) for s in hc - lc))))
+            continue
+        if len(hc) < len(lc):
+            why = (f"{lead['change_id']} explains every alerting service this change does ({len(hc)}) and "
+                   f"{len(lc) - len(hc)} more")
+        elif h["source"] != "memory" and lead["source"] == "memory":
             why = f"memory (a runbook that worked before) points at {lead['change_id']}"
         elif (h["hops"] or 0) > (lead["hops"] or 0):
             why = f"{lead['change_id']} is nearer the alerting service ({lead['hops']} vs {h['hops']} hops)"
-        else:
+        elif (lead.get("onset") or float("inf")) < (h.get("onset") or float("inf")):
+            why = f"an anomaly followed {lead['change_id']} earlier than it followed this change"
+        elif lead["at"] != h["at"]:
             why = f"{lead['change_id']} is the more recent of two equally supported changes"
-        out.append((h, "outranked: " + why))
-    return lead, out
+        else:
+            why = f"tied with {lead['change_id']} on every measure; picked by id"
+        outranked.append((h, "outranked: " + why))
+    return lead, outranked, co
