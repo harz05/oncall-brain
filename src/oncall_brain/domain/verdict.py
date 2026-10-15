@@ -1,6 +1,9 @@
-"""How a hypothesis check turns graph facts into a verdict. Pure, so every rule is unit-tested."""
+"""How a hypothesis check turns graph facts into a verdict, and how several surviving suspects are ranked.
+Pure, so every rule is unit-tested."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+INF = float("inf")
 
 
 @dataclass(frozen=True)
@@ -17,8 +20,10 @@ class CheckFacts:
 
 @dataclass(frozen=True)
 class Verdict:
-    verdict: str  # "supports" | "refutes" | "inconclusive"
-    reason: str
+    verdict: str  # "supports" | "refutes"
+    reason: str  # the full explanation (trace, UI)
+    tag: str  # a few words for status updates
+    gaps: tuple[str, ...] = field(default=())  # path services with no anomaly on record (monitoring gap?)
 
 
 def _n(service_id: str) -> str:
@@ -27,50 +32,78 @@ def _n(service_id: str) -> str:
 
 def judge(f: CheckFacts) -> Verdict:
     if f.rolled_back_before_alert:
-        return Verdict("refutes", "change was rolled back before the alert fired")
+        return Verdict("refutes", "change was rolled back before the alert fired", "rolled back")
     if not f.live_path:
         if f.any_path:
             return Verdict("refutes", f"{_n(f.alert_service)} no longer depends on {_n(f.change_service)} "
-                                      "(dependency retired before the alert)")
-        return Verdict("refutes", f"no dependency path from {_n(f.alert_service)} to {_n(f.change_service)}")
+                                      "(dependency retired before the alert)", "dependency retired")
+        return Verdict("refutes", f"no dependency path from {_n(f.alert_service)} to {_n(f.change_service)}",
+                       "no dependency path")
     if f.change_service not in f.anomalous:
-        return Verdict("refutes", f"{_n(f.change_service)} showed no anomaly after the change")
-    # The symptom must travel the dependency path from the changed service to the alerting service.
-    silent = [s for s in f.live_path[1:-1] if s not in f.anomalous]
+        return Verdict("refutes", f"{_n(f.change_service)} showed no anomaly after the change", "no anomaly after it")
+    chain = " -> ".join(_n(s) for s in reversed(f.live_path))
+    # The symptom should travel the dependency path from the changed service to the alerting service. A silent hop
+    # in between is more often missing telemetry than a different cause, so it weakens the support instead of
+    # discarding the suspect; a suspect with a complete chain still ranks ahead of it.
+    silent = tuple(s for s in f.live_path[1:-1] if s not in f.anomalous)
     if silent:
-        return Verdict("inconclusive", f"anomaly did not propagate through {', '.join(map(_n, silent))}")
-    return Verdict("supports", "anomaly propagates " + " -> ".join(_n(s) for s in reversed(f.live_path)))
+        return Verdict("supports", f"anomaly on {_n(f.change_service)} reached {_n(f.alert_service)} via {chain}, "
+                                   f"but nothing was recorded on {', '.join(map(_n, silent))} (monitoring gap?)",
+                       "supported, with a monitoring gap", silent)
+    return Verdict("supports", "anomaly propagates " + chain, "supported")
 
 
-def leading(supported: list[dict]) -> tuple[dict, list[tuple[dict, str]], list[tuple[dict, str]]]:
-    """Several suspects survived their checks. Keep one leading cause: the one that explains the most alerting
-    services, then a memory suggestion, then the one nearest the alert, then the one whose service went red first
-    after it, then the newest, then by id. Another suspect is outranked only if the leader explains every alerting
-    service it explains; if it explains a service the leader cannot, it is a co-cause, not ruled out.
-    Returns (leader, [(outranked, why)], [(co_cause, why)])."""
+def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset()
+            ) -> tuple[dict, list[tuple[dict, str]], list[tuple[dict, str]]]:
+    """Several suspects survived their checks; keep one leading cause.
+
+    Order: explains the most alerting services, then fewest monitoring gaps, then a memory suggestion, then nearest
+    the alert, then first followed by an anomaly, then newest, then id. One causal rule overrides that order: if a
+    suspect's service is upstream of the leader's (depends_on holds (leader service, its service)) and went red
+    first, the leader's anomaly is most likely propagation, so the upstream suspect leads (a cascade victim that
+    happened to have a deploy is not the cause).
+    Another suspect is outranked only if the leader explains every alerting service it explains; if it explains a
+    service the leader cannot, it is a co-cause, not ruled out. Returns (leader, [(outranked, why)], [(co, why)])."""
+
     def cov(h: dict) -> set:
         return set(h.get("explained") or [])
 
-    def key(h: dict) -> tuple:
-        return (-len(cov(h)), h["source"] != "memory", h["hops"] if h["hops"] is not None else 99,
-                h.get("onset") or float("inf"), -h["at"], h["change_id"])
+    def onset(h: dict) -> float:
+        return h.get("onset") or INF
 
-    lead, *rest = sorted(supported, key=key)
+    def upstream_first(up: dict, down: dict) -> bool:
+        return (down["service"], up["service"]) in depends_on and onset(up) < onset(down) and cov(up) >= cov(down)
+
+    def key(h: dict) -> tuple:
+        return (-len(cov(h)), len(h.get("gaps") or []), h["source"] != "memory",
+                h["hops"] if h["hops"] is not None else 99, onset(h), -h["at"], h["change_id"])
+
+    ranked = sorted(supported, key=key)
+    lead = ranked[0]
+    while (up := next((h for h in ranked if h is not lead and upstream_first(h, lead)), None)) is not None:
+        lead = up
     lc = cov(lead)
     outranked, co = [], []
-    for h in rest:
+    for h in ranked:
+        if h is lead:
+            continue
         hc = cov(h)
         if hc - lc:
             co.append((h, "also needed: it alone explains " + ", ".join(sorted(_n(s) for s in hc - lc))))
             continue
-        if len(hc) < len(lc):
+        if upstream_first(lead, h):
+            why = (f"{_n(h['service'])} depends on {_n(lead['service'])}, which went red first: its anomaly came "
+                   f"from upstream ({lead['change_id']})")
+        elif len(hc) < len(lc):
             why = (f"{lead['change_id']} explains every alerting service this change does ({len(hc)}) and "
                    f"{len(lc) - len(hc)} more")
+        elif len(h.get("gaps") or []) > len(lead.get("gaps") or []):
+            why = f"{lead['change_id']} has a complete anomaly chain; this one has a monitoring gap"
         elif h["source"] != "memory" and lead["source"] == "memory":
             why = f"memory (a runbook that worked before) points at {lead['change_id']}"
         elif (h["hops"] or 0) > (lead["hops"] or 0):
             why = f"{lead['change_id']} is nearer the alerting service ({lead['hops']} vs {h['hops']} hops)"
-        elif (lead.get("onset") or float("inf")) < (h.get("onset") or float("inf")):
+        elif onset(lead) < onset(h):
             why = f"an anomaly followed {lead['change_id']} earlier than it followed this change"
         elif lead["at"] != h["at"]:
             why = f"{lead['change_id']} is the more recent of two equally supported changes"

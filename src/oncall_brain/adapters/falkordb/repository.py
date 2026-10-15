@@ -115,6 +115,14 @@ class FalkorGraphStore:
     def lock(self, tenant: str):
         return self.tenant(tenant).lock()
 
+    def clone_pristine(self, tenant: str, into: str) -> bool:
+        """Copy the tenant's pristine graph into another tenant's slot (for what-if replays). False if none."""
+        if PRISTINE + _check_tenant(tenant) not in self._names():
+            return False
+        self.drop(into)
+        self._copy(PRISTINE + tenant, PREFIX + _check_tenant(into))
+        return True
+
     def drop(self, tenant: str) -> None:
         for name in (PREFIX + _check_tenant(tenant), PRISTINE + tenant):
             if name in self._names():

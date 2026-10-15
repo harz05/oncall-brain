@@ -275,25 +275,26 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
     if v.verdict == "supports" and others:
         reason += f"; explains {len(explained)} of {len(others) + 1} alerting services" + (
             f" (not {', '.join(x.removeprefix('svc:') for x in unexplained)})" if unexplained else "")
-    v = type(v)(v.verdict, reason)
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,
-                             reason=v.reason, path=live_path or any_path, at=f["at"], explained=explained,
-                             onset=onset))
+                             reason=reason, tag=v.tag, path=live_path or any_path, at=f["at"], explained=explained,
+                             onset=onset, gaps=list(v.gaps)))
     shown = live_path or any_path
     hl = Highlight(nodes=shown + [f["change"]], edges=_path_edges(shown) + [(f["change"], f["service"], "CHANGED")])
-    return ToolOutput(summary=f"{v.verdict.upper()} {f['change']}: {v.reason}",
+    return ToolOutput(summary=f"{v.verdict.upper()} {f['change']}: {reason}",
                       data={"change": f["change"], "service": f["service"], "summary": f["summary"],
-                            "verdict": v.verdict, "reason": v.reason, "live_path": live_path,
-                            "retired_path": any_path, "explained": explained},
+                            "verdict": v.verdict, "reason": reason, "tag": v.tag, "live_path": live_path,
+                            "retired_path": any_path, "explained": explained, "gaps": list(v.gaps)},
                       queries=qs, highlight=hl)
 
 
 @tool(writes=True)
 def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Several suspects survived their checks: keep one leading cause (explains the most alerting services, then a
-    memory suggestion, then nearest the alert, then first followed by an anomaly, then newest). A suspect the leader
-    covers is outranked (with the reason); one that explains a service the leader cannot is kept as a co-cause."""
+    """Several suspects survived their checks: keep one leading cause (explains the most alerting services, then
+    fewest monitoring gaps, a memory suggestion, nearest the alert, first followed by an anomaly, newest), except
+    that a suspect upstream of the leader whose service went red first takes over (the leader is a cascade victim).
+    A suspect the leader covers is outranked (with the reason); one that explains a service the leader cannot is
+    kept as a co-cause."""
     from oncall_brain.services.board import load_board
 
     head, qs = _head(ctx, a.incident_id)
@@ -303,7 +304,9 @@ def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     if len(supported) < 2:
         return ToolOutput(summary="Nothing to rank", data={"leading": supported[0]["change_id"] if supported
                                                             else None, "outranked": []}, queries=qs)
-    lead, lost, co = leading(supported)
+    dq = ctx.repo.read("depends_among", services=sorted({h["service"] for h in supported}), at=head["at"])
+    qs.append(dq)
+    lead, lost, co = leading(supported, {(r["service"], r["upstream"]) for r in dq.rows})
     if lost:
         qs.append(ctx.repo.write("record_outranked", at=head["at"], rows=[
             {"id": h["id"], "evidence_id": "ev:" + h["id"].removeprefix("hyp:") + ":outranked", "reason": why}
@@ -330,9 +333,11 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     ref_q = ctx.repo.read("refuted_hypotheses", incident_id=a.incident_id)
     qs += [facts_q, ref_q]
     co_q = ctx.repo.read("co_causes", incident_id=a.incident_id)
-    qs.append(co_q)
+    cause_q = ctx.repo.read("cause_facts", incident_id=a.incident_id)
+    qs += [co_q, cause_q]
     facts = facts_q.rows[0]
-    text = update.status_update(facts, ref_q.rows, head["service"], co_q.rows)
+    path = (cause_q.rows[0]["live_path"] or []) if cause_q.rows else []
+    text = update.status_update(facts, ref_q.rows, head["service"], co_q.rows, path)
     experts = [x for x in facts["experts"] if x.get("id")]
     runbooks = [r for r in facts["runbooks"] if r.get("id")]
     cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in runbooks),

@@ -12,7 +12,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from pathlib import Path as FsPath
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
@@ -160,8 +160,13 @@ def alerts(repo: Repo) -> list[dict[str, Any]]:
 
 
 @app.post("/api/tenants/{tenant}/alerts/{alert_id}/respond")
-def respond(repo: Repo, alert_id: str) -> dict[str, Any]:
-    return respond_svc.respond(repo, alert_id, llm())  # FastAPI serialises the TraceStep models inside
+def respond(repo: Repo, alert_id: str, compare: Literal["memory"] | None = None) -> dict[str, Any]:
+    """?compare=memory also replays the same incident on a copy of the pristine graph (no learned memory) and
+    returns its counters under "ablation" -- the fair before/after for memory."""
+    run = respond_svc.respond(repo, alert_id, llm())  # FastAPI serialises the TraceStep models inside
+    if compare == "memory":
+        run["ablation"] = {"without_memory": respond_svc.without_memory(store(), repo.tenant, alert_id, llm())}
+    return run
 
 
 class ResolveBody(BaseModel):

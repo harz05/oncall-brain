@@ -6,7 +6,7 @@ WITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS step
 OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WITH i, a, o, steps,
      collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,
-              at: c.at, explained: h.explained, onset: h.onset}) AS hypotheses
+              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses
 OPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)
 WITH i, a, o, steps, hypotheses,
      collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls

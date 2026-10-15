@@ -8,7 +8,7 @@ from oncall_brain.agents.loop import record, run_role
 from oncall_brain.agents.registry import ToolContext
 from oncall_brain.domain.models import ToolOutput, TraceStep
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
-from oncall_brain.ports import GraphRepository, LLMProvider
+from oncall_brain.ports import GraphRepository, GraphStore, LLMProvider
 
 # Importing the module registers the tools.
 from oncall_brain.services import tools as _tools  # noqa: F401
@@ -32,6 +32,20 @@ def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str
         role = run_role(role, repo, incident_id, llm, trace)
     return {"incident_id": incident_id, "alert": out.data, "planner": llm.name, "steps": trace,
             "outcome": outcome(repo, incident_id, trace)}
+
+
+def without_memory(store: GraphStore, tenant: str, alert_id: str, llm: LLMProvider) -> dict[str, Any] | None:
+    """The same incident replayed on a copy of the tenant's pristine graph, i.e. without anything the agents learned
+    since seeding: the fair way to show what memory saved (same incident, same planner, memory removed)."""
+    scratch = f"{tenant[:32]}_nomem"
+    if not store.clone_pristine(tenant, scratch):
+        return None
+    try:
+        o = respond(store.tenant(scratch), alert_id, llm)["outcome"]
+    finally:
+        store.drop(scratch)
+    return {"investigator_calls": o["investigator_calls"], "hypotheses_checked": o["hypotheses_checked"],
+            "checks_to_culprit": o["checks_to_culprit"], "root_cause": (o["root_cause"] or {}).get("change")}
 
 
 def run_tool(repo: GraphRepository, name: str, args: dict[str, Any]) -> ToolOutput:

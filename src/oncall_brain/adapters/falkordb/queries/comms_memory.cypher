@@ -20,7 +20,7 @@ OPTIONAL MATCH (rb:Runbook {id: h.runbook})
 OPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)
 WITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb
 RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,
-       s.id AS cause_service, h.status AS cause_status,
+       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,
        author.name AS author, collect(DISTINCT src.id) AS sources,
        collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,
                          uses: rb.uses}) AS runbooks
@@ -30,8 +30,8 @@ RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS ch
 MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WHERE h.status IN ['refuted', 'outranked']
 MATCH (e:Evidence)-[:REFUTES]->(h)
-RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, h.source AS source,
-       h.status AS verdict
+RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason,
+       coalesce(e.tag, 'ruled out') AS tag, h.source AS source, h.status AS verdict
 
 // name: post_update
 // purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.
@@ -85,7 +85,8 @@ WHERE o.id <> h.id AND o.status IN ['supported', 'co-cause']
 FOREACH (x IN CASE WHEN o IS NULL THEN [] ELSE [o] END |
   SET x.status = 'outranked'
   MERGE (oe:Evidence {id: 'ev:' + substring(x.id, 4) + ':human'})
-  SET oe.verdict = 'outranked', oe.reason = 'outranked: a human confirmed ' + $change_id + ' as the cause'
+  SET oe.verdict = 'outranked', oe.reason = 'outranked: a human confirmed ' + $change_id + ' as the cause',
+      oe.tag = 'a human confirmed another cause'
   MERGE (oe)-[:REFUTES]->(x))
 RETURN DISTINCT i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps,
        rb.successes AS successes

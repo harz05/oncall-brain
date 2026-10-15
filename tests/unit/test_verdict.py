@@ -28,10 +28,6 @@ def test_healthy_suspect_is_refuted():
     assert v.verdict == "refutes" and "no anomaly" in v.reason
 
 
-def test_gap_in_propagation_is_inconclusive():
-    assert judge(facts(anomalous={"svc:checkout", "svc:payments-gw"})).verdict == "inconclusive"
-
-
 def test_change_on_the_alerting_service_itself():
     assert judge(facts(change_service="svc:checkout", live_path=["svc:checkout"],
                        anomalous={"svc:checkout"})).verdict == "supports"
@@ -64,3 +60,22 @@ def test_a_suspect_explaining_a_service_the_leader_cannot_is_a_co_cause():
 def test_exact_ties_are_broken_by_id_and_say_so():
     lead, lost, _ = leading([h("b"), h("a")])
     assert lead["change_id"] == "a" and "picked by id" in lost[0][1]
+
+
+def test_a_silent_middle_hop_is_a_weak_support_with_the_gap_named():
+    v = judge(facts(anomalous={"svc:checkout", "svc:payments-gw"}))
+    assert v.verdict == "supports" and v.gaps == ("svc:payments",) and "monitoring gap" in v.reason
+
+
+def test_an_upstream_suspect_that_went_red_first_takes_over_from_a_nearer_one():
+    near = {**h("pay", hops=1, onset=27), "service": "svc:payments"}
+    far = {**h("gw", hops=2, onset=20), "service": "svc:payments-gw"}
+    lead, lost, _ = leading([near, far], {("svc:payments", "svc:payments-gw")})
+    assert lead["change_id"] == "gw" and "went red first" in lost[0][1]
+    lead, _, _ = leading([near, far])  # without the dependency fact, nearest still wins
+    assert lead["change_id"] == "pay"
+
+
+def test_a_complete_chain_beats_one_with_a_gap():
+    lead, lost, _ = leading([{**h("gap", hops=1), "gaps": ["svc:p"]}, h("full", hops=2)])
+    assert lead["change_id"] == "full" and "monitoring gap" in lost[0][1]

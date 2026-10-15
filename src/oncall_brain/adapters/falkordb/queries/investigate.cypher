@@ -108,12 +108,12 @@ RETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary
 // purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.
 MATCH (h:Hypothesis {id: $hypothesis_id})
 MERGE (e:Evidence {id: $evidence_id})
-SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at, e.explained = $explained
+SET e.verdict = $verdict, e.reason = $reason, e.tag = $tag, e.path = $path, e.at = $at, e.explained = $explained
 WITH h, e, h.status AS before
 // A human-confirmed cause stays confirmed whatever a later re-check says.
 SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
                     WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,
-    h.explained = $explained, h.onset = $onset
+    h.explained = $explained, h.onset = $onset, h.gaps = $gaps
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
 WITH h, before
@@ -128,10 +128,18 @@ RETURN h.id AS hypothesis, h.status AS status
 UNWIND $rows AS r
 MATCH (h:Hypothesis {id: r.id})
 MERGE (e:Evidence {id: r.evidence_id})
-SET e.verdict = 'outranked', e.reason = r.reason, e.at = $at
+SET e.verdict = 'outranked', e.reason = r.reason, e.tag = 'outranked', e.at = $at
 MERGE (e)-[:REFUTES]->(h)
 SET h.status = 'outranked'
 RETURN count(h) AS outranked
+
+// name: depends_among
+// purpose: Which of the given services depend (directly or transitively, live at $at) on which others: lets conclude tell a cascade victim from the change upstream that started it.
+MATCH (a:Service), (b:Service)
+WHERE a.id IN $services AND b.id IN $services AND a.id <> b.id
+MATCH p = (a)-[:DEPENDS_ON*1..6]->(b)
+WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
+RETURN DISTINCT a.id AS service, b.id AS upstream
 
 // name: record_co_causes
 // purpose: A supported suspect that explains an alerting service the leading cause cannot is kept as a co-cause, not ruled out.
