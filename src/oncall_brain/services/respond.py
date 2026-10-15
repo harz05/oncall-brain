@@ -41,11 +41,6 @@ def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str
     return out.model_dump()
 
 
-def out_service(trace: list[TraceStep]) -> str | None:
-    """The alerting service (from the open_incident step)."""
-    return next((s.data["service"] for s in trace if s.tool == "open_incident"), None)
-
-
 def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[Any]:
     return [s.data for s in trace if s.tool == tool and (role is None or s.role == role) and s.data]
 
@@ -53,7 +48,8 @@ def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[An
 def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> dict[str, Any]:
     checks = _data(trace, "check_hypothesis")
     supported = [c for c in checks if c["verdict"] == "supports"]
-    at = next(s.data["at"] for s in trace if s.tool == "open_incident")
+    opened = trace[0].data  # respond() always opens the incident first
+    at = opened["at"]
     baseline = repo.read("recent_changes", since=at - WINDOW, until=at).rows
     investigator = [s for s in trace if s.role == "investigator" and s.tool != "handoff"]
     recalls = (_data(trace, "recall_similar") or [[]])[0]
@@ -73,7 +69,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
                        m["change"] == supported[0]["change"] for m in memory[0]))},
         "paged": list({p["person"]: p for p in _data(trace, "page_on_call")}.values()),
         "blast_radius": sorted(direct),
-        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct - {out_service(trace)}),
+        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct - {opened["service"]}),
         "update_text": updates[0]["text"] if updates else None,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),
