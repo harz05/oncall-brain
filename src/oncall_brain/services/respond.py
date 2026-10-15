@@ -80,4 +80,5 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "checks_to_culprit": next((i + 1 for i, c in enumerate(checks) if c["verdict"] == "supports"), None),
         "runbook": updates[0]["runbook"] if updates else None,
         "expert": updates[0]["expert"] if updates else None,
+        "storm": next((d for d in _data(trace, "correlate_alerts") if d["alerts"]), None),
     }
