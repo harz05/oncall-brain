@@ -18,6 +18,7 @@
   --alert: #f87171;
   --accent: #7dd3fc;
   --brain: #2dd4bf;
+  --shared: #e879f9;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: dark;
   scrollbar-color: #2b3954 transparent;
@@ -110,6 +111,9 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .lg { display: inline-block; width: 12px; height: 12px; }
 .lg.svc { width: 18px; height: 10px; border-radius: 3px; background: #162033; border: 1.5px solid #3a4a64; }
 .lg.t1 { width: 18px; height: 10px; border-radius: 3px; background: #162033; border: 2px solid var(--accent); }
+.lg.alerting { width: 18px; height: 10px; border-radius: 3px; background: #162033; border: 2px solid var(--alert);
+  box-shadow: 0 0 0 2px #f8717155; }
+.lg.shared { width: 18px; height: 10px; border-radius: 3px; background: #3f1a47; border: 1.5px solid var(--shared); }
 .lg.chg { background: #f5b041; transform: rotate(45deg) scale(0.8); }
 .lg.person { background: #2dd4bf; border-radius: 50%; }
 .lg.team { background: #60a5fa; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
@@ -129,6 +133,9 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .outcome > .card.intro { flex: 1 1 auto; max-width: 820px; }
 .outcome > .card.counter { flex: 0 0 200px; }
 .outcome > .card.update { flex-basis: 330px; }
+/* Act 3 adds the Storm card: the others give up some width so the row still fits 1920px. */
+.outcome > .card.storm { flex: 0 0 310px; }
+.outcome.has-storm > .card:not(.storm, .counter) { flex-shrink: 1; min-width: 195px; }
 .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
 .intro ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; }
 .nums { display: grid; gap: 8px; }
@@ -168,6 +175,11 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .hop { padding: 1px 7px; border-radius: 5px; background: #3a1f12; border: 1px solid var(--cause); font-family: var(--mono);
   font-size: 12.5px; }
 .arrow { color: var(--muted); }
+.hop.alerting { background: #3b1d1d; border-color: var(--alert); }
+.shared-list { margin: 0; padding-left: 22px; display: grid; gap: 2px; }
+.shared-list li:first-child { color: var(--shared); font-weight: 700; }
+.shared-list .score { float: right; font: 600 12.5px var(--mono); color: var(--shared); }
+.caption { color: var(--muted); font-size: 12.5px; font-style: italic; }
 
 /* ---------- trace ---------- */
 .trace-panel { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: #0d1526; }
@@ -253,6 +265,12 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
   .outcome > .card { padding: 8px 10px; }
   .num .big { font-size: 28px; }
   .nums { grid-template-columns: 1fr 1fr; } /* side by side, so the culprit line and memory pill fit 768px */
+}
+@media (max-width: 1400px) { /* five scenario buttons and a 13-item legend */
+  .controls { gap: 6px; }
+  .step { padding: 7px 10px; gap: 6px; }
+  .legend { gap: 8px; font-size: 11px; }
+  .legend li:first-child { display: none; } /* plain "service" is the default look; first to go when space runs out */
 }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr) 340px; }

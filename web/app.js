@@ -5,11 +5,13 @@
 const params = new URLSearchParams(location.search);
 const OFFLINE = params.has('offline'); // ?offline=1 replays web/fixtures (generated from the real code)
 const STEP_MS = Number(params.get('step_ms')) || 750;
+const ACTS = [1, 2, 3]; // one #btn-actN each; the alerts of an act come from GET /alerts
+const COUNT = ['', 'one', 'two', 'three', 'four', 'five'];
 const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const C = {
   bg: '#0b1020', svc: '#162033', svcBorder: '#3a4a64', lit: '#1d3b61', text: '#dbe4f0', t1: '#7dd3fc',
   edge: '#4b5b75', hot: '#fde047', cause: '#fb7a3c', chg: '#f5b041', person: '#2dd4bf', team: '#60a5fa',
-  inc: '#b48cff', rb: '#34d399', refuted: '#6b7689', alert: '#f87171',
+  inc: '#b48cff', rb: '#34d399', refuted: '#6b7689', alert: '#f87171', shared: '#e879f9', sharedBg: '#3f1a47',
 };
 // Satellite (non-service) node kinds, with the direction (degrees, y down) we prefer to place them from
 // their anchor. Anything else in a highlight (ticket:, msg:, alert:) stays off the graph.
@@ -20,7 +22,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const kindOf = (id) => id.split(':', 1)[0];
 const short = (id) => (id ? id.slice(id.indexOf(':') + 1) : '');
 const names = new Map(); // id -> friendlier graph label learned from step data (people, teams)
-const state = { tenant: '', alerts: {}, cy: null, run: null, best: {}, busy: false, next: 'btn-reset', skip: false };
+const state = { tenant: '', acts: {}, alerts: {}, cy: null, run: null, best: {}, busy: false, next: 'btn-reset', skip: false };
 
 // ---------- DOM: strings become text nodes, so API data is never parsed as HTML ----------
 function h(tag, attrs = {}, ...kids) {
@@ -43,6 +45,7 @@ const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
 function status(text, isError = false) {
   const el = $('status');
   el.textContent = text;
+  el.title = text; // the line is ellipsized on narrow screens
   el.classList.toggle('error', isError);
 }
 
@@ -60,7 +63,8 @@ async function fixture(path) {
   const p = decodeURIComponent(path);
   if (p.endsWith('/reset')) return { tenant: state.tenant, status: 'restored' };
   const routes = [[/\/health$/, 'health'], [/\/alerts$/, 'alerts'], [/\/graph/, 'graph'], [/\/resolve$/, 'resolve'],
-    [/checkout-latency\/respond$/, 'act1'], [/refunds-latency\/respond$/, 'act2']];
+    [/checkout-latency\/respond$/, 'act1'], [/refunds-latency\/respond$/, 'act2'],
+    [/subscriptions-latency\/respond$/, 'act3']];
   const hit = routes.find(([re]) => re.test(p));
   if (!hit) throw new Error(`no offline fixture for ${p}`);
   await sleep(300);
@@ -97,11 +101,21 @@ const STYLE = [
   { selector: '.ctx', style: { opacity: 0.5 } },
   { selector: 'node.svc.touched', style: { 'background-color': C.lit } },
   { selector: 'edge.dep.touched', style: { width: 2.5, 'line-color': '#7b8db0', 'target-arrow-color': '#7b8db0' } },
+  { selector: 'node.svc.shared', style: { 'background-color': C.sharedBg, 'border-color': C.shared, 'border-width': 2 } },
   { selector: 'node.alerting', style: { 'border-color': C.alert, 'border-width': 3 } },
   { selector: 'node.refuted', style: { 'background-color': C.refuted, color: '#8a94a6' } },
   { selector: 'node.hot', style: { 'border-color': C.hot, 'border-width': 3, 'underlay-color': C.hot,
     'underlay-opacity': 0.25, 'underlay-padding': 7 } },
   { selector: 'edge.hot', style: { 'line-color': C.hot, 'target-arrow-color': C.hot, width: 3.5, opacity: 1 } },
+  // Alert storm: the alerting services and the top chokepoint keep their colour even while lit (hot).
+  { selector: 'node.storm', style: { 'border-color': C.alert, 'border-width': 3.5, 'underlay-color': C.alert,
+    'underlay-opacity': 0.3, 'underlay-padding': 7 } },
+  { selector: 'node.choke', style: { 'border-width': 3.5, 'underlay-color': C.shared, 'underlay-opacity': 0.35,
+    'underlay-padding': 8 } },
+  { selector: 'node.note', style: { width: 1, height: 1, 'background-opacity': 0, 'border-width': 0, 'underlay-opacity': 0,
+    color: C.shared, 'font-size': 12.5, 'font-weight': 600, 'text-wrap': 'wrap' } }, // after .hot: only its label shows
+  { selector: 'edge.note-link', style: { width: 1.5, 'line-color': C.shared, 'line-style': 'dotted',
+    'target-arrow-shape': 'none' } },
   { selector: 'edge.recalls.hot', style: { 'line-color': C.inc, 'target-arrow-color': C.inc, 'underlay-color': C.inc,
     'underlay-opacity': 0.3, 'underlay-padding': 5 } },
   { selector: 'node.cause', style: { 'border-color': C.cause, 'border-width': 3.5, 'underlay-color': C.cause,
@@ -141,9 +155,9 @@ function buildGraph(g) {
 
 // Place a satellite next to its anchor, at the first spot (preferred angle first, then fanning out) that does
 // not overlap a node or its label. ponytail: O(nodes) per candidate, fine for the ~60 nodes we ever draw.
-function freeSpot(base, pref) {
+function freeSpot(base, pref, W = 92) {
   const boxes = state.cy.nodes().map((n) => n.boundingBox({ includeLabels: true }));
-  const W = 92, UP = 16, DOWN = 32; // satellite icon plus its label underneath
+  const UP = 16, DOWN = 32; // satellite icon plus its label underneath (W wide)
   for (const r of [60, 95, 130, 170, 220]) {
     for (let k = 0; k < 12; k++) {
       const a = ((pref + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 30) * Math.PI) / 180;
@@ -175,6 +189,7 @@ function elementsFor(hl) {
   const home = (hl.nodes || []).find((id) => kindOf(id) === 'svc' && has(id)) || state.run?.res.alert.service;
   let eles = cy.collection();
   for (const [s, t, rel] of hl.edges || []) {
+    if (![s, t].every((id) => has(id) || kindOf(id) in SAT_ANGLE)) continue; // e.g. CORRELATED_WITH an alert: id
     if (!has(s) && !has(t)) ensureNode(s, home);
     if (!has(s)) ensureNode(s, t);
     if (!has(t)) ensureNode(t, s);
@@ -188,6 +203,23 @@ function elementsFor(hl) {
     eles = eles.union(cy.getElementById(id));
   }
   return eles.union(eles.connectedNodes());
+}
+
+// Alert storm (correlate_alerts): alert ids are not graph nodes, so the alerting services get the alert style,
+// the shared upstream a tint, and the top betweenness chokepoint a note. Returns the note to light with the step.
+function markStorm(d) {
+  const cy = state.cy;
+  cy.getElementById(state.run.res.alert.service).addClass('alerting storm');
+  for (const a of d.alerts) cy.getElementById(a.service).addClass('alerting storm');
+  for (const s of d.shared) cy.getElementById(s.service).addClass('shared');
+  const top = d.shared[0] && cy.getElementById(d.shared[0].service);
+  if (!top?.nonempty()) return cy.collection();
+  top.addClass('choke');
+  const label = `paths converge here\nbetweenness ${+d.shared[0].score.toFixed(1)}`;
+  const note = cy.add({ group: 'nodes', classes: 'sat note', data: { id: 'note:choke', label },
+    position: freeSpot(top.position(), 90, 150) });
+  return note.union(cy.add({ group: 'edges', classes: 'note-link',
+    data: { id: 'note:choke>link', source: note.id(), target: top.id() } }));
 }
 
 // Fade everything except what this run touched (plus one dependency hop of context); brighten `hot`.
@@ -216,7 +248,7 @@ function resetGraphView() {
   const cy = state.cy;
   if (!cy) return;
   cy.remove('.sat');
-  cy.elements().removeClass('dim ctx touched hot cause refuted alerting');
+  cy.elements().removeClass('dim ctx touched hot cause refuted alerting storm shared choke');
   cy.stop(true);
   cy.animate({ fit: { padding: 30 }, duration: 300 });
 }
@@ -292,8 +324,9 @@ function reveal(i) {
   if (step.role === 'investigator' && step.tool !== 'handoff') run.calls++;
   if (step.tool === 'check_hypothesis') run.hyps++;
   renderCounter();
-  const eles = elementsFor(step.highlight); // the server already keeps only strong recalls in the highlight
+  let eles = elementsFor(step.highlight); // the server already keeps only strong recalls in the highlight
   if (!eles) return;
+  if (step.tool === 'correlate_alerts' && step.data?.alerts.length) eles = eles.union(markStorm(step.data));
   step.eles = eles;
   run.touched = run.touched.union(eles);
   if (step.tool === 'check_hypothesis' && step.data) {
@@ -391,7 +424,20 @@ function renderOutcome() {
     h('pre', {}, o.update_text || '(none)'),
     cites.length ? h('p', {}, h('span', { class: 'k' }, 'Sources '), cites.map((c) => h('span', { class: 'src' }, c))) : null);
 
-  $('outcome').replaceChildren(h('div', { id: 'counter' }), cause, ruled, memory, update);
+  const st = o.storm, alerts = st ? [...st.alerts, { ...res.alert, name: res.alert.alert }] : [];
+  const storm = st && h('div', { class: 'card storm' },
+    h('h3', {}, 'Alert storm'),
+    h('p', { class: 'lead' }, h('b', {}, `${alerts.length} alerts`), ' → 1 incident'),
+    h('span', { class: 'path' }, alerts.sort((a, b) => a.at - b.at).map((a) =>
+      h('span', { class: 'hop alerting', title: `${a.name} · ${ist(a.at)}` }, short(a.service)))),
+    h('p', {}, h('span', { class: 'k' }, 'Shared upstream'), h('span', { class: 'muted' }, 'by betweenness')),
+    h('ol', { class: 'shared-list' }, st.shared.slice(0, 3).map((s) => h('li', { value: s.rank },
+      h('span', {}, short(s.service)), h('span', { class: 'score' }, +s.score.toFixed(1))))),
+    state.run.act === 3 ? h('p', { class: 'caption' },
+      'Without correlating the alerts, the same planner blames subs-88 (see make demo).') : null);
+
+  $('outcome').classList.toggle('has-storm', !!st);
+  $('outcome').replaceChildren(...[h('div', { id: 'counter' }), storm, cause, ruled, memory, update].filter(Boolean));
   renderCounter();
 }
 
@@ -467,10 +513,9 @@ async function ask(tool, args, render) {
 function syncButtons() {
   const b = state.busy, run = state.run;
   $('btn-reset').disabled = b;
-  $('btn-act1').disabled = b || !state.alerts[1];
-  $('btn-act2').disabled = b || !state.alerts[2];
+  for (const n of ACTS) $(`btn-act${n}`).disabled = b || !state.alerts[n];
   $('btn-resolve').disabled = b || !(run?.done && run.res.outcome.root_cause && !run.resolved);
-  for (const id of ['btn-reset', 'btn-act1', 'btn-resolve', 'btn-act2']) $(id).classList.toggle('primary', !b && id === state.next);
+  for (const el of document.querySelectorAll('.controls .step')) el.classList.toggle('primary', !b && el.id === state.next);
   if (OFFLINE) return;
   $('ask-who').disabled = b || !$('ask-svc').value;
   $('ask-why').disabled = b || !$('ask-chg').value;
@@ -491,13 +536,17 @@ async function busy(fn) {
 
 async function loadTenant() {
   const alerts = await api('GET', `${T()}/alerts`);
+  state.acts = {};
   state.alerts = {};
-  for (const a of alerts) {
-    state.alerts[a.act] = a;
-    const btn = $(`btn-act${a.act}`);
+  for (const a of [...alerts].sort((x, y) => x.at - y.at)) (state.acts[a.act] ||= []).push(a);
+  for (const [act, group] of Object.entries(state.acts)) {
+    const a = state.alerts[act] = group.at(-1); // the act's last alert to fire is the one the agents respond to
+    const btn = $(`btn-act${act}`);
     if (!btn) continue;
-    btn.replaceChildren(btn.querySelector('b'), ` Act ${a.act}: ${short(a.service)} is ${a.symptom === 'latency' ? 'slow' : a.symptom}`);
-    btn.title = a.name;
+    btn.replaceChildren(btn.querySelector('b'), ` Act ${act}: ${group.length > 1
+      ? `${COUNT[group.length] || group.length} alerts at once`
+      : `${short(a.service)} is ${a.symptom === 'latency' ? 'slow' : a.symptom}`}`);
+    btn.title = group.map((x) => x.name).join('\n');
   }
   const g = await api('GET', `${T()}/graph`);
   buildGraph(g);
@@ -536,8 +585,13 @@ async function doAct(act) {
   state.run = { res, act, calls: 0, hyps: 0, done: false, resolved: false,
     touched: cy ? cy.collection() : null, cause: cy ? cy.collection() : null };
   cy?.getElementById(res.alert.service).addClass('alerting');
-  $('hud').replaceChildren(h('span', { class: 'pill alert' }, 'ALERT'), h('b', {}, res.alert.alert),
-    h('span', { class: 'muted' }, `${short(res.alert.service)} · ${ist(res.alert.at)} · ${res.incident_id}`));
+  const group = state.acts[act] || [];
+  $('hud').replaceChildren(...(group.length > 1
+    ? [h('span', { class: 'pill alert' }, 'ALERTS'), h('b', {}, `${group.length} alerts in `
+      + `${plural(Math.round((group.at(-1).at - group[0].at) / 60), 'minute')}: ${group.map((a) => short(a.service)).join(', ')}`),
+      h('span', { class: 'muted' }, `${ist(res.alert.at)} · ${res.incident_id}`)]
+    : [h('span', { class: 'pill alert' }, 'ALERT'), h('b', {}, res.alert.alert),
+      h('span', { class: 'muted' }, `${short(res.alert.service)} · ${ist(res.alert.at)} · ${res.incident_id}`)]));
   $('outcome').replaceChildren();
   renderCounter();
   status(`Act ${act}: replaying ${res.steps.length} agent steps (planner: ${res.planner}).`);
@@ -557,7 +611,8 @@ async function doAct(act) {
   const memo = o.memory.solved_by_memory ? elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
     [[res.incident_id, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }) : null;
   if (memo) state.run.touched = state.run.touched.union(memo);
-  paint(memo);
+  // Alert storm: the whole run spans most of the graph, so end on the alerting services, shared upstream and cause.
+  paint(memo, o.storm && state.cy ? state.run.cause.union(state.cy.$('.storm, .shared')) : null);
   state.next = o.root_cause ? 'btn-resolve' : 'btn-reset';
   status(o.root_cause ? `Act ${act} done: ${short(o.root_cause.change)} on ${short(o.root_cause.service)} in `
     + `${o.investigator_calls} investigator calls. Confirm it to save the fix to memory.` : `Act ${act} done: no root cause.`);
@@ -574,14 +629,13 @@ async function doResolve() {
     run.touched = run.touched.union(eles);
     paint(eles);
   }
-  state.next = run.act === 1 ? 'btn-act2' : 'btn-reset';
+  state.next = state.alerts[run.act + 1] ? `btn-act${run.act + 1}` : 'btn-reset';
   status(r.summary);
 }
 
 async function init() {
   $('btn-reset').onclick = () => busy(doReset);
-  $('btn-act1').onclick = () => busy(() => doAct(1));
-  $('btn-act2').onclick = () => busy(() => doAct(2));
+  for (const n of ACTS) $(`btn-act${n}`).onclick = () => busy(() => doAct(n));
   $('btn-resolve').onclick = () => busy(doResolve);
   $('btn-skip').onclick = () => { state.skip = true; };
   $('trace').addEventListener('click', onTraceClick);
