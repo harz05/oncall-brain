@@ -1,5 +1,5 @@
-"""Deterministic 'LLM': the rule-based planner. Lets the whole demo, tests and the cloud reviewer run
-without API keys. The graph still decides every branch, because the planner only sees the board."""
+"""Deterministic stand-in for an LLM: the rule-based planner. Lets the whole demo, tests and reviewers run
+without API keys. Fixed rules choose each step; their inputs are only what the graph returns (the board)."""
 
 from typing import Any
 

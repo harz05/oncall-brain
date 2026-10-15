@@ -92,7 +92,7 @@ def comms(board: dict[str, Any]) -> Decision:
                      service=cause)
     if not _ran(board, "post_update"):
         return _call("post_update", "Write the status update with owners, cause and sources.")
-    return Decision(action="done", reason="Update posted; waiting for a human to confirm the fix.")
+    return Decision(action="done", reason="Update written; waiting for a human to confirm the fix.")
 
 
 ROLES = {"triage": triage, "investigator": investigator, "comms": comms}

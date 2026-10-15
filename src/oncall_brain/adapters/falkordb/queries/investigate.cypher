@@ -157,11 +157,18 @@ WHERE NOT sid IN explained
 RETURN sid AS service
 
 // name: any_path
-// purpose: shortestPath ignoring validity, to tell a retired dependency apart from no dependency at all.
+// purpose: shortestPath ignoring validity, to tell a retired (or not yet live) dependency apart from no dependency at all.
 MATCH (o:Service {id: $origin}), (t:Service {id: $target})
 WITH shortestPath((o)-[:DEPENDS_ON*]->(t)) AS p
 WHERE p IS NOT NULL
-RETURN [n IN nodes(p) | n.id] AS path, [r IN relationships(p) | r.valid_to] AS retired_at
+RETURN [n IN nodes(p) | n.id] AS path, [r IN relationships(p) | r.valid_to] AS retired_at,
+       [r IN relationships(p) | r.valid_from] AS live_from
+
+// name: red_before
+// purpose: The latest anomaly on a service between the start of the alert window and a change landing on it: was the service already failing before its own change (a cascade victim)?
+MATCH (x:Anomaly)-[:ON]->(:Service {id: $service})
+WHERE x.at >= $since AND x.at < $until
+RETURN max(x.at) AS at
 
 // name: anomalies_between
 // purpose: Which of the given services showed an anomaly between the change and the alert.
@@ -179,7 +186,7 @@ WITH h, e, h.status AS before
 // A human-confirmed cause stays confirmed whatever a later re-check says.
 SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
                     WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,
-    h.explained = $explained, h.onset = $onset, h.gaps = $gaps
+    h.explained = $explained, h.onset = $onset, h.gaps = $gaps, h.red_before = $red_before
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
 WITH h, before

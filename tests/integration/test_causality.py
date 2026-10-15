@@ -34,3 +34,24 @@ def test_a_monitoring_gap_on_a_middle_hop_still_names_the_cause(s):
     o = respond(repo, st.alert("checkout", 2), MockProvider())["outcome"]
     assert o["root_cause"]["change"] == "chg:gw-x" and "monitoring gap" in o["root_cause"]["reason"]
     assert "check its monitoring" in o["update_text"]
+
+
+def test_a_stale_upstream_blip_is_not_a_cascade(s):
+    """payments-gw had one blip an hour earlier and an unrelated change; the real cause is a fresh payments deploy."""
+    repo, st = s
+    st.change("payments-gw", 100, "gw-old", "config"), st.red("payments-gw", 95, "errors")
+    st.change("payments", 30, "pay-x"), st.red("payments", 28), st.red("checkout", 10)
+    o = respond(repo, st.alert("checkout", 2), MockProvider())["outcome"]
+    assert o["root_cause"]["change"] == "chg:pay-x"
+
+
+def test_a_dependency_that_starts_after_the_alert_is_not_called_retired(s):
+    from oncall_brain.agents.registry import ToolContext, call
+    from tests.integration.test_storms import MIN, T
+
+    repo, st = s
+    st.change("search", 20, "search-x"), st.red("search", 15), st.red("shipping", 10)
+    call("add_dependency", ToolContext(repo), {"caller": "svc:shipping", "callee": "svc:search", "at": T + 10 * MIN})
+    o = respond(repo, st.alert("shipping", 2), MockProvider())["outcome"]
+    reasons = {r["change"]: r["reason"] for r in o["refuted"]}
+    assert "only started depending on search after the alert" in reasons["chg:search-x"]

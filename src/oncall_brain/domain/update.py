@@ -23,12 +23,19 @@ def status_update(facts: dict[str, Any], refuted: list[dict[str, Any]], origin: 
         if facts.get("cause_gaps"):
             lines.append("Note: no anomaly was recorded on " + ", ".join(map(_short, facts["cause_gaps"]))
                          + " although the failure passed through it; check its monitoring")
+    if facts.get("context"):
+        lines.append("Context: " + "; ".join(f"{d['title']} ({d['kind']})" for d in facts["context"]))
     for c in co_causes:
         lines.append(f"Also contributing: {c['change'].removeprefix('chg:')} on {_short(c['service'])} "
                      f"({c['reason'].removeprefix('also needed: ')})")
-    if refuted:
+    ruled = [r for r in refuted if r.get("verdict") != "outranked"]
+    outranked = [r for r in refuted if r.get("verdict") == "outranked"]
+    if ruled:
         lines.append("Ruled out: " + ", ".join(f"{r['change'].removeprefix('chg:')} ({r.get('tag') or 'ruled out'})"
-                                               for r in refuted))
+                                               for r in ruled))
+    if outranked:
+        lines.append("Supported but outranked: " + ", ".join(
+            f"{r['change'].removeprefix('chg:')} ({r['reason'].removeprefix('outranked: ')})" for r in outranked))
     paged = [p for p in facts["paged"] if p.get("handle")]
     if paged:
         lines.append("Paged: " + ", ".join(f"{p['handle']} ({p['team']})" for p in paged))

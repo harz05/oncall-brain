@@ -49,7 +49,8 @@ OPTIONAL MATCH (t:Ticket {id: cid})
 OPTIONAL MATCH (msg:Message {id: cid})
 OPTIONAL MATCH (rb:Runbook {id: cid})
 OPTIONAL MATCH (p:Person {id: cid})
-WITH m, coalesce(c, t, msg, rb, p) AS n
+OPTIONAL MATCH (d:Doc {id: cid})
+WITH m, coalesce(c, t, msg, rb, p, d) AS n
 WHERE n IS NOT NULL
 MERGE (m)-[:CITES]->(n)
 RETURN count(n) AS cited
@@ -117,3 +118,15 @@ RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
 // purpose: The status update the comms agent last posted on the incident.
 MATCH (:Incident {id: $incident_id})-[:HAS_UPDATE]->(m:Message)
 RETURN m.text AS text
+
+// name: cause_context
+// purpose: Company knowledge behind the cause: current docs that mention the culprit change, then decision records and postmortems about its service, written before the incident. The update cites them so the on-call engineer sees the decision history.
+MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+WHERE h.status IN ['confirmed', 'supported']
+MATCH (d:Doc)-[:DECIDES|MENTIONS]->(x)
+WHERE (x = c OR x = s) AND d.at <= $at AND NOT ()-[:SUPERSEDES]->(d)
+WITH DISTINCT d, max(CASE WHEN x = c THEN 1 ELSE 0 END) AS about_change,
+     CASE d.kind WHEN 'decision' THEN 2 WHEN 'postmortem' THEN 1 ELSE 0 END AS weighty
+RETURN d.id AS id, d.title AS title, d.kind AS kind, d.at AS at, about_change, weighty
+ORDER BY about_change DESC, weighty DESC, at DESC
+LIMIT 2

@@ -247,10 +247,12 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
     qs.append(live)
     paths = [r["path"] for r in live.rows]
     any_path: list[str] = []
+    not_yet_live = False
     if not paths:
         anyq = ctx.repo.read("any_path", origin=f["origin"], target=f["service"])
         qs.append(anyq)
         any_path = anyq.rows[0]["path"] if anyq.rows else []
+        not_yet_live = bool(anyq.rows) and any(t > f["at"] for t in anyq.rows[0]["live_from"] if t is not None)
     anomalous: set[str] = set()
     if paths:  # anomalies only matter when a live path exists; otherwise the verdict is already a refutation
         on_paths = sorted({s for p in paths for s in p}) or [f["service"]]
@@ -267,10 +269,15 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         unexplained = [r["service"] for r in sq.rows]
     explained = sorted({f["origin"], *others} - set(unexplained)) if paths else []
     onset = next((r["first_at"] for r in an.rows if r["service"] == f["service"]), None) if paths else None
+    red_before = None
+    if paths:  # was the changed service already failing before this change landed? (a cascade victim)
+        rq = ctx.repo.read("red_before", service=f["service"], since=f["at"] - WINDOW, until=f["change_at"])
+        qs.append(rq)
+        red_before = rq.rows[0]["at"] if rq.rows else None
     facts = CheckFacts(
         change_service=f["service"], alert_service=f["origin"],
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],
-        live_path=live_path, any_path=any_path, anomalous=anomalous)
+        live_path=live_path, any_path=any_path, anomalous=anomalous, not_yet_live=not_yet_live)
     v = judge(facts)
     reason = v.reason
     if v.verdict == "supports" and others:
@@ -279,7 +286,7 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,
                              reason=reason, tag=v.tag, path=live_path or any_path, at=f["at"], explained=explained,
-                             onset=onset, gaps=list(v.gaps)))
+                             onset=onset, gaps=list(v.gaps), red_before=red_before))
     shown = live_path or any_path
     hl = Highlight(nodes=shown + [f["change"]], edges=_path_edges(shown) + [(f["change"], f["service"], "CHANGED")])
     return ToolOutput(summary=f"{v.verdict.upper()} {f['change']}: {reason}",
@@ -335,14 +342,16 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     qs += [facts_q, ref_q]
     co_q = ctx.repo.read("co_causes", incident_id=a.incident_id)
     cause_q = ctx.repo.read("cause_facts", incident_id=a.incident_id)
-    qs += [co_q, cause_q]
-    facts = facts_q.rows[0]
+    ctx_q = ctx.repo.read("cause_context", incident_id=a.incident_id, at=head["at"])
+    qs += [co_q, cause_q, ctx_q]
+    facts = {**facts_q.rows[0], "context": ctx_q.rows}
     path = (cause_q.rows[0]["live_path"] or []) if cause_q.rows else []
     text = update.status_update(facts, ref_q.rows, head["service"], co_q.rows, path)
     experts = [x for x in facts["experts"] if x.get("id")]
     runbooks = [r for r in facts["runbooks"] if r.get("id")]
     cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in runbooks),
-                         *(x["id"] for x in experts)] if c]
+                         *(x["id"] for x in experts), *(d["id"] for d in ctx_q.rows)] if c]
+    cites = list(dict.fromkeys(cites))
     qs.append(ctx.repo.write("post_update", incident_id=a.incident_id, message_id=f"msg:update:{a.incident_id}",
                              text=text, at=head["at"], cites=cites))
     return ToolOutput(summary="Wrote the status update for #incidents (stored on the incident)",

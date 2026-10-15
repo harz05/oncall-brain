@@ -75,10 +75,10 @@ ON CREATE SET pg.at = $at, pg.for_service = $service
 RETURN pg.for_service AS first_for
 
 // name: storm_alerts
-// purpose: Other alerts that fired in the $window seconds before this incident's alert (an alert storm).
+// purpose: Other alerts within $window seconds of this incident's alert, before or after it (an alert storm; whichever alert is answered first folds the others in).
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
 MATCH (other:Alert)-[:FIRED_ON]->(s:Service)
-WHERE other.id <> a.id AND other.at >= a.at - $window AND other.at <= a.at
+WHERE other.id <> a.id AND other.at >= a.at - $window AND other.at <= a.at + $window
 RETURN other.id AS alert, other.name AS name, s.id AS service, other.at AS at
 ORDER BY at
 
@@ -127,3 +127,10 @@ MATCH (svc:Service {id: u.service})
 MERGE (i)-[x:SHARED_UPSTREAM]->(svc)
 SET x.rank = u.rank, x.hops = u.hops
 RETURN count(svc) AS shared
+
+// name: open_incident_for_alert
+// purpose: An open incident this alert was already folded into (CORRELATED_WITH), so a second responder joins it instead of opening a duplicate incident.
+MATCH (i:Incident {status: 'open'})-[:CORRELATED_WITH]->(:Alert {id: $alert_id})
+MATCH (i)-[:TRIGGERED_BY]->(t:Alert)
+RETURN i.id AS incident, t.id AS trigger
+LIMIT 1

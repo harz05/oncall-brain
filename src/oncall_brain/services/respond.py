@@ -21,6 +21,11 @@ def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str,
 
 def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str, Any]:
     trace: list[TraceStep] = []
+    # Another responder may already have folded this alert into its incident (an alert storm): join that incident.
+    joined = (repo.read("open_incident_for_alert", alert_id=alert_id).rows or [None])[0]
+    asked = alert_id
+    if joined:
+        alert_id = joined["trigger"]
     out = registry.call("open_incident", ToolContext(repo), {"alert_id": alert_id})
     incident_id = out.data["incident"]
     record(repo, incident_id, trace,
@@ -31,6 +36,7 @@ def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str
     while role:
         role = run_role(role, repo, incident_id, llm, trace)
     return {"incident_id": incident_id, "alert": out.data, "planner": llm.name, "steps": trace,
+            "joined": {"alert": asked, "incident": incident_id} if joined else None,
             "outcome": outcome(repo, incident_id, trace)}
 
 
@@ -51,7 +57,10 @@ def without_memory(store: GraphStore, tenant: str, alert_id: str, llm: LLMProvid
 def run_tool(repo: GraphRepository, name: str, args: dict[str, Any]) -> ToolOutput:
     """One tool call from outside an agent run (HTTP /tools, MCP). Write tools take the tenant lock so they
     cannot race an agent run; inside respond() the lock is already held, so the loop calls the registry directly."""
-    if name in registry.REGISTRY and registry.REGISTRY[name].writes:
+    tool = registry.REGISTRY.get(name)
+    # Tools that write only when given an incident (blast_radius, page_on_call, who_knows) are plain reads without one.
+    writes = tool and tool.writes and ("incident_id" not in tool.args_model.model_fields or args.get("incident_id"))
+    if writes:
         with repo.lock():
             return registry.call(name, ToolContext(repo), args)
     return registry.call(name, ToolContext(repo), args)

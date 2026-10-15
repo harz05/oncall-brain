@@ -2,7 +2,7 @@
 
 Incident agents that reason over a FalkorDB graph and remember what fixed things.
 
-**In one breath:** an alert fires; three agent roles (triage, investigator, comms) work the incident through one shared FalkorDB graph and find which change broke it, ruling out the decoys a change log would blame; a human confirms the fix, the graph remembers it, and the next similar incident is solved in half the steps.
+**In one breath:** an alert fires; three agent roles (triage, investigator, comms) work the incident through one shared FalkorDB graph and find which change broke it, ruling out the decoys a change log would blame; a human confirms the fix, the graph remembers it, and the same incident replayed with that memory takes half the investigator calls.
 
 - **Problem:** when checkout slows down, the newest deploy is rarely the cause. The cause sits somewhere on the dependency path, and whether a dependency was even live at the time matters.
 - **Result:** in the demo, every change-log method blames the wrong change (one blames a service checkout stopped calling three days ago); the graph agent names the payments-gateway config change two hops upstream, with the path and sources.
@@ -79,7 +79,7 @@ All of this is Cypher traversal: temporal variable-length paths, `shortestPath`,
 
 The full query catalogue is in [docs/QUERIES.md](docs/QUERIES.md); the data model in [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
 
-### Measured, not just claimed
+### Evaluation
 
 On 200 generated incidents (random alert service, random cause 0-3 hops upstream, planted decoys of every kind above, plus noise anomalies in the window, a silent middle hop in some seeds and a cascade victim that deploys after the cause went red in others), from [docs/EVAL.md](docs/EVAL.md):
 

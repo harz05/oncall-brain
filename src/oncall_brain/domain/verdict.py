@@ -4,6 +4,7 @@ Pure, so every rule is unit-tested."""
 from dataclasses import dataclass, field
 
 INF = float("inf")
+CASCADE_WINDOW = 15 * 60  # an upstream failure reaches its callers within minutes; a stale blip is not a cascade
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class CheckFacts:
     live_path: list[str]  # alert service -> ... -> changed service, using DEPENDS_ON edges valid at alert time
     any_path: list[str]  # same, ignoring edge validity (to tell "retired dependency" from "never connected")
     anomalous: set[str]  # services on/near the path with an anomaly between the change and the alert
+    not_yet_live: bool = False  # the any_path dependency only started after the alert (not retired)
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,9 @@ def judge(f: CheckFacts) -> Verdict:
     if f.rolled_back_before_alert:
         return Verdict("refutes", "change was rolled back before the alert fired", "rolled back")
     if not f.live_path:
+        if f.any_path and f.not_yet_live:
+            return Verdict("refutes", f"{_n(f.alert_service)} only started depending on {_n(f.change_service)} "
+                                      "after the alert", "dependency not yet live")
         if f.any_path:
             return Verdict("refutes", f"{_n(f.alert_service)} no longer depends on {_n(f.change_service)} "
                                       "(dependency retired before the alert)", "dependency retired")
@@ -60,8 +65,10 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
     Order: explains the most alerting services, then fewest monitoring gaps, then a memory suggestion, then nearest
     the alert, then first followed by an anomaly, then newest, then id. One causal rule overrides that order: if a
     suspect's service is upstream of the leader's (depends_on holds (leader service, its service)) and was already
-    red when the leader's change landed, the leader's anomaly is most likely propagation, so the upstream suspect
-    leads (a cascade victim that happened to deploy mid-incident is not the cause).
+    red when the leader's change landed, and the leader's service was itself already red before its change (or
+    turned red within CASCADE_WINDOW of the upstream), the leader's anomaly is most likely propagation, so the
+    upstream suspect leads (a cascade victim that happened to deploy mid-incident is not the cause; a stale blip
+    upstream an hour earlier is not a cascade). The upstream needs no more monitoring gaps than the leader.
     Another suspect is outranked only if the leader explains every alerting service it explains; if it explains a
     service the leader cannot, it is a co-cause, not ruled out. Returns (leader, [(outranked, why)], [(co, why)])."""
 
@@ -72,8 +79,16 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
         return h.get("onset") or INF
 
     def upstream_first(up: dict, down: dict) -> bool:
-        # A cascade: down's service depends on up's, and up's service was already red before down's change landed.
-        return (down["service"], up["service"]) in depends_on and onset(up) < down["at"] and cov(up) >= cov(down)
+        # A cascade: down's service depends on up's, and up's service was already red when down's change landed.
+        # Evidence that down's own anomaly is propagation, not its change: down's service was already red before
+        # its change (after up went red), or turned red within CASCADE_WINDOW of up. A single stale blip upstream
+        # an hour earlier is neither. Up's own chain must be no weaker (coverage, monitoring gaps).
+        if (down["service"], up["service"]) not in depends_on or not onset(up) < down["at"]:
+            return False
+        victim = (down.get("red_before") or -INF) >= onset(up)
+        fast = onset(down) - onset(up) <= CASCADE_WINDOW
+        return ((victim or fast) and cov(up) >= cov(down)
+                and len(up.get("gaps") or []) <= len(down.get("gaps") or []))
 
     def key(h: dict) -> tuple:
         return (-len(cov(h)), len(h.get("gaps") or []), h["source"] != "memory",

@@ -350,3 +350,29 @@ def test_resolving_over_any_surface_reposts_the_update(store, tenant):
     run_tool(repo, "resolve_incident", {"incident_id": run["incident_id"], "change_id": "chg:pgw-pool-1"})
     text = repo.read("incident_update", incident_id=run["incident_id"]).rows[0]["text"]
     assert "status: resolved, cause confirmed" in text
+
+
+def test_the_update_cites_the_decision_history_behind_the_cause(store, tenant):
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    o = respond(repo, ACTS[3], MockProvider())["outcome"]
+    assert "ADR-014" in o["update_text"] and "Context:" in o["update_text"]
+    cited = repo._graph.ro_query("MATCH (:Incident {id:'inc:subscriptions-latency'})-[:HAS_UPDATE]->(:Message)"
+                                 "-[:CITES]->(d:Doc) RETURN collect(d.id)").result_set[0][0]
+    assert "doc:adr-014" in cited
+
+
+def test_reads_without_an_incident_do_not_wait_for_the_tenant_lock(store, tenant, monkeypatch):
+    from oncall_brain.services.respond import run_tool
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    taken, real = [], repo.lock
+    monkeypatch.setattr(repo, "lock", lambda: taken.append(1) or real())
+    run_tool(repo, "blast_radius", {"service": "svc:payments-gw"})
+    run_tool(repo, "who_knows", {"service": "svc:payments-gw"})
+    assert taken == []
+    run = respond(repo, ACTS[1], MockProvider())  # an agent run takes the lock itself
+    taken.clear()
+    run_tool(repo, "who_knows", {"service": "svc:payments-gw", "incident_id": run["incident_id"]})
+    assert taken == [1]  # writes CONSULTED on the incident, so it locks

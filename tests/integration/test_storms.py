@@ -95,3 +95,22 @@ def test_of_two_changes_that_explain_everything_the_one_the_service_went_red_aft
     o = respond(repo, s.alert("subscriptions", 2), MockProvider())["outcome"]
     assert o["root_cause"]["change"] == "chg:pg-a"
     assert o["anomaly_baseline_correct"]
+
+
+def test_concurrent_responders_to_one_storm_make_one_incident(store, tenant):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from oncall_brain.datagen import ACTS
+
+    seed(store, tenant)
+    alerts = ["alert:checkout-latency-3", "alert:refunds-latency-3", ACTS[3]]
+    with ThreadPoolExecutor(3) as pool:
+        runs = list(pool.map(lambda a: respond(store.tenant(tenant), a, MockProvider()), alerts))
+    assert len({r["incident_id"] for r in runs}) == 1  # whoever ran first folded the others in; the rest joined
+    assert sum(r["joined"] is not None for r in runs) == 2
+    o = runs[-1]["outcome"]
+    assert o["root_cause"]["change"] == "chg:pg-conn-3"
+    incidents = store.tenant(tenant)._graph.ro_query("MATCH (i:Incident {status:'open'}) RETURN count(i)").result_set
+    assert incidents[0][0] == 1
+    teams = [p["team_name"] for p in o["paged"]]
+    assert len(teams) == len(set(teams))  # one page per team

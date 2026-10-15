@@ -33,9 +33,11 @@ class FalkorRepository:
         self._graph = db.select_graph(PREFIX + tenant)
 
     def lock(self):
-        """One writer per tenant across processes (API, MCP, scripts): a Redis lock next to the graph.
-        FalkorDB commits each write query atomically, but two agents MERGE-ing the same edge at the same
-        moment can both miss it and both create it, so whole agent runs on a tenant are serialised."""
+        """One agent run per tenant at a time, across processes (API, MCP, scripts): a Redis lock next to the graph.
+        Each write query commits atomically, but MERGE is not a uniqueness guarantee under concurrency: in our test
+        (12 clients x 100 concurrent `MERGE (:N {id:7})` on an unconstrained label) FalkorDB created 2 nodes. And two
+        concurrent runs on one incident would redo each other's work. So whole runs on a tenant are serialised;
+        reads (tools called without an incident) stay concurrent, and different tenants run in parallel."""
         # The lease outlives any sane run (an LLM planner can take minutes); a crashed holder frees it after 15 min.
         return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=900, blocking_timeout=120)
 
