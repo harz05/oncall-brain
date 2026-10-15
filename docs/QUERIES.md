@@ -646,7 +646,11 @@ MERGE (e:Evidence {id: r.evidence_id})
 SET e.verdict = 'outranked', e.reason = r.reason, e.at = $at
 MERGE (e)-[:REFUTES]->(h)
 SET h.status = 'outranked'
-RETURN count(h) AS outranked
+WITH e, h
+// The same Evidence node supported this hypothesis a moment ago; it now only refutes it.
+OPTIONAL MATCH (e)-[old:SUPPORTS]->(h)
+DELETE old
+RETURN count(DISTINCT h) AS outranked
 ```
 
 ### cause_facts

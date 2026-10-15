@@ -74,7 +74,7 @@ def test_triage_correlates_an_alert_storm_first():
     assert next_decision("triage", b).tool == "blast_radius"
 
 
-def test_storm_puts_shared_upstream_suspects_first_in_betweenness_order():
+def test_storm_puts_shared_upstream_suspects_first_in_convergence_order():
     hyps = [hyp("near", hops=0, at=90, svc="svc:subs"), hyp("pg", hops=2, at=10, svc="svc:pg"),
             hyp("pay", hops=1, at=5, svc="svc:pay")]
     b = board([("recall_similar", "inc:x"), ("propose_hypotheses", "inc:x")], hyps)

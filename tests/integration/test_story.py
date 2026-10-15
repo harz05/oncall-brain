@@ -305,3 +305,12 @@ def test_event_tools_are_never_offered_to_agents():
     assert not offered & {"record_change", "record_anomaly", "raise_alert", "add_dependency", "retire_dependency",
                           "resolve_incident"}
     assert {"check_hypothesis", "correlate_alerts", "conclude"} <= offered
+
+
+def test_outranked_evidence_only_refutes(store, tenant):
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    respond(repo, ACTS[3], MockProvider())
+    rows = repo._graph.ro_query("MATCH (e:Evidence {verdict:'outranked'}) "
+                                "RETURN size([(e)-[:SUPPORTS]->() | 1]), size([(e)-[:REFUTES]->() | 1])").result_set
+    assert rows == [[0, 1]]
