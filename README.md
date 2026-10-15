@@ -2,7 +2,11 @@
 
 Incident agents that reason over a FalkorDB graph and remember what fixed things.
 
-When an alert fires, three agents (triage, investigator, comms) work one incident together through a shared graph: who is hurt, which change broke it, who to page, what to tell people. When a human confirms the fix, the graph remembers it, and the next similar incident is solved in a fraction of the steps.
+**In one breath:** an alert fires; three agent roles (triage, investigator, comms) work the incident through one shared FalkorDB graph and find which change broke it, ruling out the decoys a change log would blame; a human confirms the fix, the graph remembers it, and the next similar incident is solved in half the steps.
+
+- **Problem:** when checkout slows down, the newest deploy is rarely the cause. The cause sits somewhere on the dependency path, and whether a dependency was even live at the time matters.
+- **Result:** in the demo, every change-log method blames the wrong change (one blames a service checkout stopped calling three days ago); the graph agent names the payments-gateway config change two hops upstream, with the path and sources.
+- **How:** temporal multi-hop Cypher traversals, a hypothesis board the roles hand off through, and episodic + procedural memory, all in one graph per tenant. By default a deterministic planner chooses each step from what the graph returns (no API key needed); an LLM can take its place.
 
 **Tracks entered:** 01 Agents That Act on Connected Data, 02 Agent Memory and Coordination, 03 Company Brain.
 Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthetic (seeded generator, fake names).
@@ -12,7 +16,7 @@ Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthet
 
 **Try it without installing anything:** the web UI replays all three acts from recorded runs when no backend is reachable, so the GitHub Pages build of `web/` (`.github/workflows/pages.yml`) is a zero-setup look at the product. The recordings come from the real code (`scripts/gen_fixtures.py`); for live runs use the quick start below.
 
-![Act 2: the refunds incident solved from act 1's memory, 8 -> 3 investigator calls](docs/img/act2.png)
+![Act 2: the refunds incident solved from act 1's memory. Same incident without that memory: 6 investigator calls, culprit on check 2; with it: 3 calls, check 1](docs/img/act2.png)
 
 ## The story the demo tells
 
@@ -34,7 +38,7 @@ Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthet
 - A human confirms. The incident gets `CAUSED_BY` the change, a `Runbook` is learned for (payments-gw, config), and the update is re-posted as "resolved, cause confirmed". The human's call wins: confirming a different change than the agents picked makes that change the cause and outranks theirs.
 
 **Act 2, three days later: "refunds p99 latency above 2s".**
-Recall finds act 1 by structure, because payments-gw is on refunds' live dependency path and the symptom is the same. Text similarity plays no part. The runbook that fixed act 1 is for config changes on payments-gw, so the investigator suspects the new payments-gw config change first and confirms it in one check: **8 investigator calls on act 1 (culprit on check 3), 3 on act 2 (culprit on check 1).** The update adds "Next action: Revert the config change on payments-gw ... worked 1 of 1 times". Replayed on a graph without act 1's memory, act 2 takes 6 calls and checks 4 hypotheses: nearest-first checking tries a newer, healthy payments deploy (`chg:pay-77`, 1 hop away) before the culprit (check 2). An anomaly-aware change log also gets act 2 right (the payments-gw change is the first to go red), so act 2 shows memory making the investigation shorter, not beating that baseline.
+Recall finds act 1 by structure, because payments-gw is on refunds' live dependency path and the symptom is the same. Text similarity plays no part. The runbook that fixed act 1 is for config changes on payments-gw, so the investigator suspects the new payments-gw config change first and confirms it in one check. **The same incident replayed without act 1's memory takes 6 investigator calls and finds the culprit on check 2; with the memory it takes 3 calls and finds it on check 1** (the UI shows both, via `?compare=memory`). The update adds "Next action: Revert the config change on payments-gw ... worked 1 of 1 times". Without the memory, nearest-first checking tries a newer, healthy payments deploy (`chg:pay-77`, 1 hop away) before the culprit. An anomaly-aware change log also gets act 2 right (the payments-gw change is the first to go red), so act 2 shows memory making the investigation shorter, not beating that baseline.
 
 **Act 3, two days later: three alerts in 4 minutes** (checkout, refunds, subscriptions).
 - Triage sees other recent alerts on the board and calls `correlate_alerts` first. It walks each alerting service's upstream services over edges live at alert time, notes which went red, and folds in the alerts that share a red upstream service with this one (`CORRELATED_WITH`). An alert that only shares a quiet cache stays its own incident.
@@ -65,6 +69,8 @@ The full query catalogue is in [docs/QUERIES.md](docs/QUERIES.md); the data mode
 ### Measured, not just claimed
 
 On 200 generated incidents (random alert service, random cause 0-3 hops upstream, planted decoys of every kind above), from [docs/EVAL.md](docs/EVAL.md):
+
+These scenarios are synthetic and written by the same team as the checks: every planted decoy is one the graph can refute, so read the graph agent's score as "the checks work as designed on this data", and the baselines' scores as what each shortcut gets wrong. [docs/EVAL.md](docs/EVAL.md) lists the perturbations (noise, telemetry gaps, cascade victims), per-perturbation results and every miss.
 
 | method | uses the graph | correct |
 |---|---|---|
@@ -148,7 +154,7 @@ Ports are published on 127.0.0.1 only. The app container seeds the default tenan
 | Track | What to look at |
 |---|---|
 | 01 Agents That Act on Connected Data | multi-hop `DEPENDS_ON*` suspects with temporal edge filters; `shortestPath` refutations; alert-storm correlation: related alerts share a red upstream, the shared upstream is ranked by convergence, and `conclude` keeps the cause that explains the most alerting services plus any co-cause (`test_act3_alert_storm_is_correlated_and_only_then_solved`, `tests/integration/test_storms.py`); the planner branches on what each query returns; actions written back (incident, impacts, pages, hypotheses, evidence, the consulted expert, status update); live events written through tools (`record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`); tools exposed via MCP; every step's Cypher in the trace |
-| 02 Agent Memory and Coordination | three roles hand off through the shared `Incident` board (no in-process state); `AgentStep` history persisted per incident; episodic + semantic + procedural memory, where the runbook decides what memory suspects and loses confidence when refuted; act 2 recalls act 1; one graph per tenant (`test_tenants_are_isolated`); a per-tenant lock so concurrent responders don't duplicate work (`test_concurrent_responders_do_not_duplicate_work_or_edges`) |
+| 02 Agent Memory and Coordination | three roles hand off through the shared `Incident` board (no in-process state); `AgentStep` history persisted per incident; episodic + semantic + procedural memory, where the runbook decides what memory suspects and loses confidence when refuted; act 2 recalls act 1; one graph per tenant (`test_tenants_are_isolated`); concurrent responders on one tenant are serialised by a per-tenant Redis lock, so they never duplicate work or edges (`test_concurrent_responders_do_not_duplicate_work_or_edges`); different tenants run in parallel |
 | 03 Company Brain | changes, tickets, chat, incidents, runbooks and people in one graph; `who_knows` / `change_story` (also in the UI's Ask tab); every status update cites its sources and the person to ask (`CITES` edges); keeping knowledge current: temporal dependencies, plus event tools that record changes, anomalies, alerts and retired dependencies as they happen (`test_live_events_drive_a_new_investigation`) |
 
 ## Repo layout
