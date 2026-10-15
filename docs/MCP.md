@@ -39,7 +39,7 @@ bind address, which blocks DNS rebinding. It has no token and no per-user auth: 
 tenant. Keep it on localhost, or see [DEPLOY.md](DEPLOY.md) before exposing it.
 
 Which Python to use:
-- On Harsh's machine, the venv lives on the external drive: `/media/harsh/MyPassport1/devenv/venv/bin/python`.
+- On Harsh's machine, the venv lives on the external drive: `<venv>/bin/python`.
 - Elsewhere, after `make setup`, it is the project venv: `<repo>/.venv/bin/python`.
 
 The commands below use the first. Swap in the second on another machine.
@@ -48,7 +48,7 @@ The commands below use the first. Swap in the second on another machine.
 
 ```bash
 claude mcp add --transport stdio --env FALKORDB_HOST=localhost --env FALKORDB_PORT=6379 oncall-brain \
-  -- /media/harsh/MyPassport1/devenv/venv/bin/python -m oncall_brain.mcp_server
+  -- <venv>/bin/python -m oncall_brain.mcp_server
 claude mcp list                        # oncall-brain should show as connected
 ```
 
@@ -70,7 +70,7 @@ and restart Claude Desktop. Claude Desktop does not start in the repo, so pass t
 {
   "mcpServers": {
     "oncall-brain": {
-      "command": "/media/harsh/MyPassport1/devenv/venv/bin/python",
+      "command": "<venv>/bin/python",
       "args": ["-m", "oncall_brain.mcp_server"],
       "env": {"FALKORDB_HOST": "localhost", "FALKORDB_PORT": "6379", "LLM_PROVIDER": "mock"}
     }
@@ -83,7 +83,7 @@ and restart Claude Desktop. Claude Desktop does not start in the repo, so pass t
 ```bash
 # On Harsh's machine, source env.sh first so the npm cache stays on the external drive.
 source /media/harsh/MyPassport1/devenv/env.sh
-npx @modelcontextprotocol/inspector /media/harsh/MyPassport1/devenv/venv/bin/python -m oncall_brain.mcp_server
+npx @modelcontextprotocol/inspector <venv>/bin/python -m oncall_brain.mcp_server
 ```
 
 Or start the server with `--http` and point the Inspector at `http://127.0.0.1:8001/mcp` (transport: Streamable

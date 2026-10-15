@@ -247,7 +247,8 @@ WHERE h.status IN ['confirmed', 'supported']
 OPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)
 OPTIONAL MATCH (c)-[:AUTHORED_BY]->(p:Person)
 RETURN c.id AS change, s.id AS service, c.summary AS summary, c.kind AS kind, c.at AS at, p.name AS author,
-       e.reason AS reason, e.path AS live_path, h.status AS status
+       e.reason AS reason, e.path AS live_path, h.status AS status, coalesce(h.explained, []) AS explained,
+       coalesce(h.gaps, []) AS gaps
 ORDER BY status, size(coalesce(e.path, [])) DESC
 LIMIT 1
 

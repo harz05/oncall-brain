@@ -141,13 +141,15 @@ function newRun(alert, alerts, act) {
 
 const outcomeOf = (cur) => cur?.res?.outcome || null;
 
-function statusOf(cur, serverStatus) {
+// cur: a run or stored incident (may be null); row: the inbox row from GET /alerts (status, has_cause, has_update).
+function statusOf(cur, row) {
   if (cur?.error) return ['error', 'Failed'];
   if (cur && !cur.done) return ['working', 'Investigating'];
-  if (cur?.resolved || serverStatus === 'resolved' || cur?.status === 'resolved') return ['confirmed', 'Confirmed'];
+  if (cur?.resolved || row?.status === 'resolved' || cur?.status === 'resolved') return ['confirmed', 'Confirmed'];
   const o = outcomeOf(cur);
   if (o) return o.root_cause ? ['found', 'Cause found'] : ['human', 'Needs a human'];
-  return serverStatus ? ['open', 'Open'] : ['new', 'New'];
+  if (row?.status) return row.has_cause ? ['found', 'Cause found'] : row.has_update ? ['human', 'Needs a human'] : ['working', 'Investigating'];
+  return ['new', 'New'];
 }
 
 function scenarios() { // the demo company's scripted alerts, grouped by act; the act's last alert is the one answered
@@ -167,7 +169,7 @@ function inboxItems() {
   const items = new Map();
   for (const a of state.alerts) {
     if (!a.incident) continue;
-    if (!items.has(a.incident)) items.set(a.incident, { incident: a.incident, status: a.status, alerts: [] });
+    if (!items.has(a.incident)) items.set(a.incident, { incident: a.incident, status: a.status, has_cause: a.has_cause, has_update: a.has_update, alerts: [] });
     items.get(a.incident).alerts.push(a);
   }
   const rows = [...items.values()];
@@ -226,10 +228,10 @@ const modelDecides = () => !/deterministic|mock/i.test(state.health?.planner || 
 // ---------- rendering: inbox and landing ----------
 function renderInbox() {
   const rows = inboxItems();
-  const open = rows.filter((it) => statusOf(it.run, it.status)[0] !== 'confirmed').length;
+  const open = rows.filter((it) => statusOf(it.run, it)[0] !== 'confirmed').length;
   set('inbox-counts', rows.length ? `${open} open · ${rows.length - open} confirmed` : '');
   set('inbox', rows.length ? rows.map((it) => {
-    const [cls, label] = statusOf(it.run, it.status);
+    const [cls, label] = statusOf(it.run, it);
     const trigger = it.run?.alert || it.fresh || it.alerts.find((a) => `inc:${short(a.id)}` === it.incident) || it.alerts.at(-1);
     const many = it.alerts.length > 1;
     const selected = state.current && (state.current === it.run || (it.incident && state.current.incident === it.incident));
@@ -290,7 +292,7 @@ function renderHead(cur) {
   $('inc-status').className = `status-pill ${cls}`;
   $('inc-status').textContent = label;
   $('inc-title').textContent = titleOf(cur);
-  set('inc-sub', `${short(cur.home)} · ${ist(cur.alert.at)}`);
+  set('inc-sub', `${short(cur.home)} · ${ist(cur.alert.at)}`, stormLine(cur));
   $('btn-back').hidden = !mobile();
   document.querySelector('.incidents').classList.toggle('has-current', true);
 }
@@ -376,7 +378,8 @@ function renderAnswer(cur) {
     : null;
   const verdict = h('div', { class: `verdict ${resolved ? 'confirmed' : ''}` },
     h('p', { class: 'k' }, label),
-    rc ? [h('h3', { class: 'cause-line' }, h('span', { class: 'cause-svc' }, short(rc.service)), ' ', rc.summary),
+    rc ? [h('h3', { class: 'cause-line' }, h('span', { class: 'cause-svc' }, short(rc.service)),
+      rc.summary?.toLowerCase().startsWith(short(rc.service).toLowerCase()) ? rc.summary.slice(short(rc.service).length) : ` · ${rc.summary}`),
       h('p', { class: 'byline' }, `${kindOfChange(rc.kind)}${rc.author ? ` by ${rc.author}` : ''}`,
         rc.at ? ` · ${ist(rc.at)} · ${minutesBetween(rc.at, alertAt)} min before the alert` : ''),
       chipText ? h('span', { class: `conf ${resolved ? 'confirmed' : conf?.level || ''}` }, chipText) : null]
@@ -386,7 +389,7 @@ function renderAnswer(cur) {
 
   // Actions.
   const alts = o ? [...o.refuted, ...(o.co_causes || [])].filter((r) => r.change !== rc?.change) : [];
-  const actions = !cur.stored && o && !resolved ? h('div', { class: 'actions' },
+  const actions = o && cur.incident && !resolved ? h('div', { class: 'actions' },
     rc ? h('button', { class: 'confirm', disabled: state.running && !cur.done, onclick: () => resolve(cur, rc.change) }, '✓ Confirm cause') : null,
     alts.length ? h('button', { class: 'ghost tall', onclick: () => { cur.showAlt = !cur.showAlt; renderAnswer(cur); } }, rc ? 'Wrong cause' : 'Pick the cause') : null,
     h('button', { class: 'link-btn', onclick: () => showTab('why') }, 'Show me why →'),

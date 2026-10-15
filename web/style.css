@@ -223,7 +223,9 @@ main > #graph-wrap { display: none; } /* only shown once moved into a slot */
 .bignums .big { font-size: 30px; font-weight: 800; line-height: 1; color: var(--memory); }
 .bignums .lbl { color: var(--muted); font-size: 11.5px; }
 .memory-line { color: var(--muted); font-size: 13px; }
-.storm-line { flex-basis: 100%; color: var(--muted); font-size: 13px; }
+.storm-line { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+#inc-sub { display: contents; }
+#inc-sub .storm-line { flex-basis: 100%; }
 .verdict { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid #7c3a12; border-radius: 12px; background: #1a120e; }
 .verdict.confirmed { border-color: #1f5f3a; background: #0f1f17; }
 .cause-line { font-size: 21px; line-height: 1.3; font-weight: 700; }
@@ -245,8 +247,8 @@ main > #graph-wrap { display: none; } /* only shown once moved into a slot */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-static { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; background: var(--panel-2); }
 .chip-static.alerting { border-color: var(--alert); }
-.chip-static.src { max-width: 100%; }
-.chip-static.src > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-static.src { max-width: 100%; align-items: baseline; padding: 4px 10px; border-radius: 8px; }
+.chip-static.src > .pill { flex: none; }
 .people { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .people li { display: flex; align-items: center; gap: 8px; }
 .avatar { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #12324a; color: var(--accent); font-size: 11px; font-weight: 700; }
@@ -416,8 +418,9 @@ pre.code { margin: 0; padding: 10px 60px 10px 12px; border-radius: 8px; backgrou
   .why-view { grid-template-columns: minmax(0, 1fr) 380px; }
 }
 @media (max-width: 900px) {
-  body { overflow: auto; grid-template-rows: auto auto; }
-  main { min-height: calc(100vh - 100px); }
+  html, body { height: auto; min-height: 100%; }
+  body { display: block; overflow: auto; } /* normal flow: the header takes its natural height, the page scrolls */
+  main { min-height: calc(100vh - 120px); }
   .top { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand actions" "nav nav"; padding: 8px 12px; row-gap: 8px; }
   .brand { grid-area: brand; }
   .views { grid-area: nav; justify-self: stretch; }
@@ -440,7 +443,9 @@ pre.code { margin: 0; padding: 10px 60px 10px 12px; border-radius: 8px; backgrou
   .cta-row { flex-direction: column; align-items: stretch; }
   .how { grid-template-columns: minmax(0, 1fr); }
   .incident { height: auto; }
-  .incident-head { padding: 10px 12px; gap: 8px; }
+  .incident-main, .answer-view, .why-side, .landing { overflow: visible; height: auto; } /* one scroller: the page */
+  .incident-head { padding: 10px 12px; gap: 8px; align-items: flex-start; }
+  .back { order: -1; flex-basis: 100%; width: max-content; }
   .incident-title h2 { font-size: 18px; }
   .seg { margin-left: 0; width: 100%; }
   .seg button { flex: 1; min-height: 40px; }

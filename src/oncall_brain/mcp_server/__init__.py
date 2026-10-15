@@ -1,6 +1,8 @@
-"""MCP surface of the tool registry. Every graph tool in agents.registry is exposed as-is (its docstring and
-pydantic schema, plus a required `tenant`), next to two use cases: respond_to_alert and reset_tenant. Nothing
-is defined twice: add a tool to the registry and it shows up here, in the agent loop and in the HTTP API."""
+"""MCP surface of the tool registry: the primary interface of On-call Brain for outside agents (Claude Code, Claude
+Desktop, any MCP client). Every graph tool in agents.registry is exposed as-is (its docstring and pydantic schema,
+plus a required `tenant`), next to two use cases: respond_to_alert and reset_tenant, and two prompts for the two
+workflows (work an alert, answer a company question). Nothing is defined twice: add a tool to the registry and it
+shows up here, in the agent loop and in the HTTP API."""
 
 from collections.abc import Callable
 from functools import lru_cache
@@ -20,7 +22,22 @@ from oncall_brain.services import respond, seeding
 from oncall_brain.services.tools import AlertArgs
 
 TENANT = {"type": "string", "pattern": "^[a-z0-9_]{1,40}$",
-          "description": "Tenant graph to work in (one isolated FalkorDB graph per tenant), e.g. acme"}
+          "description": "The company to work in: one isolated FalkorDB graph per tenant, e.g. acme (the demo company)"}
+
+INSTRUCTIONS = """On-call Brain: incident agents and a company brain over one FalkorDB graph per company (tenant).
+Three ways to use it:
+1. An alert fired: respond_to_alert(tenant, alert_id) runs triage -> investigator -> comms on the graph and returns
+   the likely cause with a confidence label, who was paged, the suspects ruled out and why, the fix (runbook) and
+   the status update. When a human confirms the cause, call resolve_incident(tenant, incident_id, change_id) so the
+   fix becomes memory for the next incident. raise_alert records a new alert first if it is not in the graph yet.
+2. A question about the company: ask(tenant, question) answers "who owns kafka", "why was legacy-billing retired",
+   "how do I roll back a bad deploy on cart", "what happened to auth" with sources. who_knows ranks the people who
+   know a service; change_story traces a change to its ticket, chat, docs and author; dependency_path, blast_radius
+   and service_map answer structural questions.
+3. Keeping the graph current: record_change (deploys, config changes), record_anomaly, raise_alert, add_dependency
+   and retire_dependency write live facts; the next investigation sees them.
+Ids look like svc:checkout, alert:checkout-latency, inc:checkout-latency, chg:pgw-pool-1, person:sana-brandt. Every
+result includes the Cypher it ran. If a tenant has no graph yet, reset_tenant(tenant) seeds the demo company."""
 
 # A handler gets (store, tenant, args) and returns something JSON-serialisable.
 Handler = Callable[[GraphStore, str, dict[str, Any]], Any]
@@ -48,10 +65,10 @@ def _registry_handler(name: str) -> Handler:
 
 def _respond(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
     run = respond.respond(_repo(store, tenant), AlertArgs.model_validate(args).alert_id, _llm())
-    return {"incident_id": run["incident_id"], "planner": run["planner"],
+    return {"incident_id": run["incident_id"], "planner": run["planner"], "llm_tokens": run.get("llm_tokens", 0),
             "outcome": run["outcome"],
-            "steps": [{"seq": s.seq, "role": s.role, "tool": s.tool, "summary": s.summary, "reason": s.reason}
-                      for s in run["steps"]]}
+            "steps": [{"seq": s.seq, "role": s.role, "tool": s.tool, "by": s.by, "summary": s.summary,
+                       "reason": s.reason} for s in run["steps"]]}
 
 
 def _reset(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -64,12 +81,51 @@ def _llm():
 
 
 USE_CASES: dict[str, tuple[str, type[BaseModel], bool, Handler]] = {
-    "respond_to_alert": ("Run the triage -> investigator -> comms agents on an alert (e.g. alert:checkout-latency). "
-                         "They hand off through the graph; returns the incident id, the outcome (root cause, "
-                         "refuted suspects, who was paged, status update) and every step.", AlertArgs, True, _respond),
-    "reset_tenant": ("Restore the tenant's pristine seeded graph (GRAPH.COPY), seeding it first if it has none. "
-                     "Wipes incidents, memory and runbooks learned since.", _NoArgs, True, _reset),
+    "respond_to_alert": ("Work an alert end to end: run the triage -> investigator -> comms agents on it over the "
+                         "graph. They hand off through the incident node and record every step. Returns the incident "
+                         "id and the outcome: likely cause (change, service, author) with a confidence label, who was "
+                         "paged, impact, the suspects ruled out and why, the fix (runbook) if memory has one, the "
+                         "status update text, and every step with who decided it. Use this for 'X is slow/erroring, "
+                         "find out why' when an alert id exists (raise_alert creates one).", AlertArgs, True, _respond),
+    "reset_tenant": ("Restore the company's pristine seeded graph (GRAPH.COPY), seeding the demo company first if it "
+                     "has none. Wipes incidents, memory and runbooks learned since. Use before a demo, never during "
+                     "a real incident.", _NoArgs, True, _reset),
 }
+
+PROMPTS: dict[str, types.Prompt] = {
+    "work_alert": types.Prompt(
+        name="work_alert",
+        description="Work an alert end to end: run the three agents on it and report what an on-call engineer "
+                    "needs (cause, confidence, who is paged, the fix, what was ruled out), then offer to confirm.",
+        arguments=[types.PromptArgument(name="tenant", description="Company graph, e.g. acme", required=True),
+                   types.PromptArgument(name="alert_id", description="Alert id, e.g. alert:checkout-latency",
+                                        required=True)]),
+    "company_question": types.Prompt(
+        name="company_question",
+        description="Answer a question about the company from its graph (owners, on-call, decisions, past incidents, "
+                    "runbooks), leading with the answer and citing the sources.",
+        arguments=[types.PromptArgument(name="tenant", description="Company graph, e.g. acme", required=True),
+                   types.PromptArgument(name="question", description="The question in plain words", required=True)]),
+}
+
+
+def prompt_text(name: str, args: dict[str, str]) -> str:
+    """The user message a prompt expands to (also what the Claude Code skills send)."""
+    tenant, a = args.get("tenant", "acme"), args
+    if name == "work_alert":
+        return (f"An alert fired on company '{tenant}': {a.get('alert_id', '')}. Call respond_to_alert with that "
+                "tenant and alert_id. Then report, in plain words and in this order: (1) the likely cause: the "
+                "change, the service it touched, who made it, and the confidence label with its reason; (2) who is "
+                "paged; "
+                "(3) the fix (runbook) if there is one; (4) what was ruled out and why, one line each; (5) the status "
+                "update text as written. Use ids exactly as returned. End by asking whether the cause is right; if I "
+                "say yes, call resolve_incident with the incident id and change id so the fix is remembered.")
+    if name == "company_question":
+        return (f"Answer this question about company '{tenant}' from its graph: {a.get('question', '')}. Call ask "
+                "with that tenant and question. Lead with a one- or two-sentence answer, then list the sources it "
+                "returned (kind and title). If the question is about who owns or knows a service, who_knows adds "
+                "the ranking; if it is about why a change was made, change_story adds the ticket, chat and author.")
+    raise ValueError(f"unknown prompt {name!r}")
 
 
 def catalogue() -> dict[str, tuple[types.Tool, Handler]]:
@@ -111,7 +167,15 @@ def build_server(store: GraphStore | None = None) -> Server:
         except Exception as e:  # report to the client as a tool error instead of killing the session
             return _text(f"{type(e).__name__}: {e}", error=True)
 
-    return Server("oncall-brain", version="0.1.0", on_list_tools=list_tools, on_call_tool=call_tool,
-                  instructions="Incident agents over a FalkorDB knowledge graph. Start with reset_tenant, then "
-                               "respond_to_alert (alert:checkout-latency, then alert:refunds-latency), or call the "
-                               "graph tools (blast_radius, dependency_path, service_map, ...) directly.")
+    async def list_prompts(ctx: Any, params: Any) -> types.ListPromptsResult:
+        return types.ListPromptsResult(prompts=list(PROMPTS.values()))
+
+    async def get_prompt(ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
+        if params.name not in PROMPTS:
+            raise ValueError(f"unknown prompt {params.name!r}")
+        text = prompt_text(params.name, {k: str(v) for k, v in (params.arguments or {}).items()})
+        return types.GetPromptResult(description=PROMPTS[params.name].description, messages=[
+            types.PromptMessage(role="user", content=types.TextContent(type="text", text=text))])
+
+    return Server("oncall-brain", version="0.2.0", on_list_tools=list_tools, on_call_tool=call_tool,
+                  on_list_prompts=list_prompts, on_get_prompt=get_prompt, instructions=INSTRUCTIONS)

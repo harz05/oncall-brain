@@ -39,18 +39,19 @@ class ServiceArgs(BaseModel):
 
 
 class HypothesisArgs(BaseModel):
-    hypothesis_id: str
+    hypothesis_id: str = Field(description="An open hypothesis id from the incident board, e.g. "
+                                           "hyp:checkout-latency:pgw-pool-1 (propose_hypotheses lists them)")
 
 
 class PathArgs(BaseModel):
-    from_service: str
-    to_service: str
+    from_service: str = Field(description="The calling service id, e.g. svc:checkout (the path starts here)")
+    to_service: str = Field(description="The service it may depend on, e.g. svc:payments-gw (the path ends here)")
     at: int | None = Field(None, description="Epoch seconds; defaults to now")
 
 
 class ResolveArgs(BaseModel):
-    incident_id: str
-    change_id: str = Field(description="The change a human confirmed as root cause")
+    incident_id: str = Field(description="Incident id, e.g. inc:checkout-latency (respond_to_alert returns it)")
+    change_id: str = Field(description="The change a human confirmed as root cause, e.g. chg:pgw-pool-1")
 
 
 class AtArgs(BaseModel):
@@ -466,33 +467,36 @@ SYMPTOM = Literal["latency", "errors", "saturation"]
 
 
 class ChangeEvent(BaseModel):
-    service: str = Field(pattern=SVC)
-    kind: Literal["deploy", "config"]
-    summary: str = Field(max_length=300)
+    service: str = Field(pattern=SVC, description="Service the change touched, e.g. svc:payments-gw")
+    kind: Literal["deploy", "config"] = Field(description="deploy (a new version) or config (a setting changed)")
+    summary: str = Field(max_length=300, description="One line, as a changelog entry: what changed and why")
     at: int | None = Field(None, description="Epoch seconds; defaults to now")
-    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$")
-    rolled_back_at: int | None = None
-    id: str | None = Field(None, pattern=r"^chg:[\w.-]{1,80}$")
+    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$",
+                               description="Person id of who made it, e.g. person:sana-brandt (optional)")
+    rolled_back_at: int | None = Field(None, description="Epoch seconds the change was rolled back, if it was")
+    id: str | None = Field(None, pattern=r"^chg:[\w.-]{1,80}$",
+                           description="Your own id for the change, e.g. chg:cart-320 (optional; generated if omitted)")
 
 
 class AnomalyEvent(BaseModel):
-    service: str = Field(pattern=SVC)
-    kind: SYMPTOM
-    summary: str = Field(max_length=300)
-    at: int | None = None
+    service: str = Field(pattern=SVC, description="Service the monitoring anomaly was seen on, e.g. svc:payments")
+    kind: SYMPTOM = Field(description="latency, errors or saturation")
+    summary: str = Field(max_length=300, description="One line from monitoring, e.g. 'p99 latency 4.1s (SLO 1s)'")
+    at: int | None = Field(None, description="Epoch seconds the anomaly started; defaults to now")
 
 
 class AlertEvent(BaseModel):
-    service: str = Field(pattern=SVC)
-    symptom: SYMPTOM
-    name: str = Field(max_length=200)
-    at: int | None = None
+    service: str = Field(pattern=SVC, description="Service the alert fired on, e.g. svc:checkout")
+    symptom: SYMPTOM = Field(description="latency, errors or saturation")
+    name: str = Field(max_length=200, description="The alert's name as your alerting tool shows it, e.g. "
+                                                  "'checkout p99 latency above 2s'")
+    at: int | None = Field(None, description="Epoch seconds the alert fired; defaults to now")
 
 
 class DependencyEvent(BaseModel):
-    caller: str = Field(pattern=SVC)
-    callee: str = Field(pattern=SVC)
-    at: int | None = None
+    caller: str = Field(pattern=SVC, description="The service that calls, e.g. svc:checkout")
+    callee: str = Field(pattern=SVC, description="The service it calls (depends on), e.g. svc:payments")
+    at: int | None = Field(None, description="Epoch seconds the dependency started or stopped; defaults to now")
 
 
 def _name(service: str) -> str:
