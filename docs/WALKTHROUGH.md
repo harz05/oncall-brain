@@ -128,6 +128,21 @@ The one-liner: take FalkorDB out and nothing runs, not because a database is mis
 
 ---
 
+### Three more, about the product (Oct 16)
+
+- **"Why is the MCP server the product and not the web page?"** An on-call engineer already lives in Claude Code,
+  Slack and their alerting tool. The MCP server exposes the same 24 tools the agents use (`mcp_server/__init__.py`
+  builds them from the registry), with instructions and two prompts, so Claude Code or Claude Desktop can work an alert
+  or answer "who owns kafka" without our UI. The webhook (`POST .../alerts?respond=true`) and the Slack post
+  (`adapters/slack.py`) close the loop headlessly. The inbox is where a human reviews and confirms. `docs/PRODUCT.md`.
+- **"How do you know a model picks the right tool?"** `python -m scripts.mcp_pick` gives Claude only what an MCP
+  client gets (instructions + tool list) and 14 plain requests; it picked right 14/14 (`docs/MCP_PICK.md`). Inside the
+  product, every step records `by` (model id or `rules`) and the model's own one-line reason; `docs/LLM_RUN.md` has
+  60/60 model decisions with 0 fallbacks.
+- **"What stops a model from running up a bill or confirming its own guess?"** `RunBudget` caps tokens per run
+  (`LLM_RUN_TOKEN_CAP`) and hands the rest to the rules; `resolve_incident` and the event tools are `agent=False`, so
+  no agent run is ever offered them (`agents/registry.py`, enforced again in `agents/loop.py::_call`).
+
 ## 4. Exercises
 
 All commands start from `graphhacks/` after `source /media/harsh/MyPassport1/devenv/env.sh`. `T1` is `1792036800` (act 1 alert time, 2026-10-15 09:30 IST). To put `tenant_acme` back to pristine at any time:

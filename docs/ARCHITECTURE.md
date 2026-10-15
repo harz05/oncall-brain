@@ -207,6 +207,22 @@ The app is stateless. All state lives in FalkorDB, so you can run more app repli
 
 ---
 
+### 2.4 Product surfaces (Oct 16): the brain is the product, each surface is a window
+
+The same registry and the same `respond()` use case serve five surfaces; nothing is defined twice.
+
+| Surface | Entry point | What it adds |
+|---|---|---|
+| **MCP** (primary) | `python -m oncall_brain.mcp_server` (stdio) or `--http` (Streamable HTTP, bearer token when `API_TOKEN` is set) | Server `instructions` (the three workflows, id formats), 24 tools with every argument described, `readOnlyHint`, two prompts (`work_alert`, `company_question`) that script the workflows; results carry every Cypher run and `by` per step. `scripts/mcp_pick.py` measures that an outside model picks the right tool from the list alone (14/14, `docs/MCP_PICK.md`). `tests/unit/test_mcp_surface.py` fails the build if an argument lacks a description. |
+| **Headless webhook** | `POST /api/tenants/{t}/alerts?respond=true` | `raise_alert` then `respond()`; the incident, evidence and update land in the graph; `adapters/slack.py` posts the update to an incoming webhook when `SLACK_WEBHOOK_URL` is set (a failed post is reported, never raised). `make headless` runs it. |
+| **Streaming** | `POST .../alerts/{id}/respond/stream` (NDJSON) | `respond(..., on_step=)` calls back as each `TraceStep` is recorded (`agents/loop.py::record`); the API runs the use case in a worker thread and yields one line per step, then the result, then the memory ablation if asked. The run holds the tenant lock and finishes even if the client disconnects. |
+| **Web inbox** | `web/` (no build) | `GET .../alerts` (each alert with the incident handling it and whether a cause or update exists) and `GET .../incidents/{id}` (an incident as the graph has it: `outcome()` with an empty trace plus the stored `AgentStep`s), so the inbox survives reloads. Confirm / Wrong cause call `resolve`. |
+| **HTTP tools** | `POST .../tools/{name}` | Any registry tool, with the tenant lock for writers (`run_tool`). |
+
+Every stored `AgentStep` records `by`: the model id (`claude-opus-5-5`) or `rules`. The outcome adds `confidence`
+(`domain/verdict.py::confidence`: Confirmed, Very likely, Likely with its doubts, No cause found) and `sources`
+(the update's `CITES` targets with titles), both pure reads of the graph.
+
 ## 3. Deep dive (low-level design)
 
 ### 3.1 Package map
@@ -434,6 +450,19 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 By perturbation the graph agent is 66/66 on seeds with only the planted story, 48/51 with a cascade victim, 11/13 with a gap and 22/38 with noise on *c*. All 16 misses are noise-on-c seeds: a blip on *c*'s service makes *c* a supported suspect, and it then leads by being nearer, by an earlier onset or by the cascade rule (its service is upstream of the truth's and went red first), or because the truth has a gap and *c* does not. EVAL.md lists each miss with the agent's own reasons from the trace. The perturbations were added after mock judges called the first version (200/200, one decoy per verdict rule and nothing else in the window) built to be passed, and the ranking (cascade rule, gaps as weak support) changed in the same round by people who knew the perturbations. It is not a blind test; read it as "the checks hold on random topologies with this much noise", not as accuracy on real incidents.
 
 ---
+
+### 3.11 Who decides each step: Claude by default, rules as the floor
+
+`wiring.make_llm()` returns the deterministic planner unless `LLM_PROVIDER` names a real provider with a key. With a
+key, the model receives the system prompt in `adapters/llm/openai_compat.py` (the roles' playbook, "start every
+reply with one plain sentence saying what you are doing and why"), the incident board as the user message, and the
+agent tools as tool definitions; `guarded()` accepts its choice only if it is a known agent tool with valid arguments
+that has not already run with the same target, and stamps the decision `by=<model id>`. Anything else (unknown tool,
+bad arguments, a repeat, an HTTP error, a timeout) becomes the planner's decision with `by="rules"` and a reason that
+starts "LLM fallback:". `services/respond.py::RunBudget` wraps the provider per run: when the tokens the provider
+reports (`last_usage`) pass `LLM_RUN_TOKEN_CAP` (default 300k; a full run on Claude is 60-100k), the rules finish the
+incident and the trace says so. Tests, CI and no-key runs use the planner (`tests/conftest.py` pins it). Measured:
+Opus 5.5 and Sonnet 5.5 each drive all three acts with 0 fallbacks and the right cause (`docs/LLM_RUN.md`).
 
 ## 4. Scale and reliability
 
