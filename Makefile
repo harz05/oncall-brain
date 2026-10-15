@@ -59,6 +59,9 @@ demo:
 eval:
 	$(E) python -m scripts.eval --n 200
 
+bench-concurrency:
+	$(E) python -m scripts.concurrency
+
 docs:
 	$(E) python -m scripts.gen_queries_doc
 

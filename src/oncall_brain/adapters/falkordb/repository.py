@@ -11,9 +11,10 @@ from oncall_brain.adapters.falkordb import queries
 from oncall_brain.domain.models import QueryRun
 
 _TENANT = re.compile(r"^[a-z0-9_]{1,40}$")
-PREFIX, PRISTINE = "tenant_", "pristine_"
+PREFIX, PRISTINE, RESTORING = "tenant_", "pristine_", "restoring_"
 
-# Index every label we MERGE or look up by id. FalkorDB raises if an index already exists; that's fine.
+# Index every label we MERGE or look up by id, and give each a UNIQUE constraint on `id` (ensure_schema), so the
+# database itself refuses a second node with an id that exists. FalkorDB raises if an index already exists; that's fine.
 INDEXED_LABELS = ["Team", "Person", "Service", "Change", "Alert", "Anomaly", "Incident", "Hypothesis",
                   "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep"]
 TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window filters scan these
@@ -35,11 +36,16 @@ class FalkorRepository:
     def lock(self):
         """One agent run per tenant at a time, across processes (API, MCP, scripts): a Redis lock next to the graph.
         Each write query commits atomically, but MERGE is not a uniqueness guarantee under concurrency: in our test
-        (12 clients x 100 concurrent `MERGE (:N {id:7})` on an unconstrained label) FalkorDB created 2 nodes. And two
-        concurrent runs on one incident would redo each other's work. So whole runs on a tenant are serialised;
-        reads (tools called without an incident) stay concurrent, and different tenants run in parallel."""
+        (12 clients x 100 concurrent `MERGE (:N {id:7})` on an unconstrained label) FalkorDB created 2 nodes. Node ids
+        are now guarded by unique constraints (`_ensure_unique_ids`), but FalkorDB has no edge constraint, and
+        12 clients racing `MERGE` on one edge still made a duplicate (scripts/concurrency.py). And two concurrent runs
+        on one incident would redo each other's work. So whole runs on a tenant are serialised; reads (tools called
+        without an incident) stay concurrent, and different tenants run in parallel."""
         # The lease outlives any sane run (an LLM planner can take minutes); a crashed holder frees it after 15 min.
-        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=900, blocking_timeout=120)
+        # Waiters poll every 10 ms, not redis-py's default 100 ms: with 8 writers on one tenant the slowest write
+        # fell from 1.3 s to 0.3 s and p99 from 400 ms to 225 ms (scripts/concurrency.py, PERF.md "Concurrency").
+        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=900, blocking_timeout=120,
+                                        sleep=0.01)
 
     def _run(self, name: str, params: dict[str, Any], readonly: bool) -> QueryRun:
         q = queries.get(name)
@@ -57,6 +63,7 @@ class FalkorRepository:
         return self._run(name, params, readonly=False)
 
     def ensure_schema(self) -> None:
+        """Indexes and the UNIQUE `id` constraints the queries rely on (idempotent; a reset re-runs it)."""
         # Labels and properties come from the constants above, never from input.
         targets = [(label, "id") for label in INDEXED_LABELS] + [(label, "at") for label in TIME_INDEXED]
         stmts = [f"CREATE INDEX FOR (n:{label}) ON (n.{prop})" for label, prop in targets] + [
@@ -68,6 +75,41 @@ class FalkorRepository:
             except Exception as e:  # already indexed
                 if "already indexed" not in str(e):
                     raise
+        self._ensure_unique_ids()
+
+    def unique_constraints(self) -> dict[str, str]:
+        """{label: status} of the UNIQUE node constraints on `id`: OPERATIONAL once built, PENDING right after
+        creation, FAILED if the label already held two nodes with one id when the constraint was created."""
+        return {c["label"]: c["status"] for c in self._graph.list_constraints()
+                if c["type"] == "UNIQUE" and c["entitytype"] == "NODE" and list(c["properties"]) == ["id"]}
+
+    def _ensure_unique_ids(self, wait: float = 5.0) -> None:
+        """One UNIQUE constraint on `id` per indexed label (GRAPH.CONSTRAINT CREATE ... UNIQUE NODE <label>
+        PROPERTIES 1 id). From then on FalkorDB refuses any write that would make a second node with an existing id,
+        whoever the writer is, so uniqueness no longer rests on MERGE and the tenant lock alone (MERGE on the id keeps
+        updating in place). Creation is asynchronous: wait until every constraint is OPERATIONAL, so the writes that
+        follow are already guarded. GRAPH.COPY carries constraints, so pristine copies and resets keep them."""
+        have = self.unique_constraints()
+        for label in INDEXED_LABELS:
+            if label not in have:
+                try:
+                    self._graph.create_node_unique_constraint(label, "id")
+                except ResponseError as e:  # another seeder of the same graph got there first
+                    if "already exists" not in str(e):
+                        raise
+        deadline = time.monotonic() + wait
+        while True:
+            have = self.unique_constraints()
+            failed = sorted(label for label, status in have.items() if status == "FAILED")
+            if failed:
+                raise RuntimeError(f"unique id constraint failed on {', '.join(failed)}: the graph already holds two "
+                                   "nodes with one id; re-seed the tenant")
+            if all(have.get(label) == "OPERATIONAL" for label in INDEXED_LABELS):
+                return
+            if time.monotonic() > deadline:
+                pending = sorted(label for label in INDEXED_LABELS if have.get(label) != "OPERATIONAL")
+                raise RuntimeError(f"unique id constraints still not operational after {wait} s: {', '.join(pending)}")
+            time.sleep(0.02)
 
 
 class FalkorGraphStore:
@@ -107,15 +149,21 @@ class FalkorGraphStore:
         self._copy(PREFIX + _check_tenant(tenant), PRISTINE + tenant)
 
     def restore(self, tenant: str) -> bool:
-        """Replace the tenant graph with its pristine copy. False if there is no usable copy."""
+        """Replace the tenant graph with its pristine copy, in one step: GRAPH.COPY the pristine graph to a
+        staging key, then RENAME it over the tenant key. Redis renames atomically and FalkorDB follows the
+        rename (GRAPH.LIST, indexes and constraints all move with it), so readers never see a missing graph;
+        deleting first and copying after left a window in which every read failed with
+        'Invalid graph operation on empty key'. False if there is no usable copy."""
         if PRISTINE + _check_tenant(tenant) not in self._names():
             return False
-        if self.exists(tenant):
-            self.db.select_graph(PREFIX + tenant).delete()
+        staging = RESTORING + tenant
+        if staging in self._names():
+            self.db.select_graph(staging).delete()  # left behind by an interrupted restore
         try:
-            self._copy(PRISTINE + tenant, PREFIX + tenant)
+            self._copy(PRISTINE + tenant, staging)
         except ResponseError:
             return False  # caller re-seeds from scratch
+        self.db.connection.execute_command("RENAME", staging, PREFIX + tenant)
         return True
 
     def lock(self, tenant: str):
@@ -130,6 +178,6 @@ class FalkorGraphStore:
         return True
 
     def drop(self, tenant: str) -> None:
-        for name in (PREFIX + _check_tenant(tenant), PRISTINE + tenant):
+        for name in (PREFIX + _check_tenant(tenant), PRISTINE + tenant, RESTORING + tenant):
             if name in self._names():
                 self.db.select_graph(name).delete()

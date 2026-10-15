@@ -41,7 +41,7 @@ Ask the brain chat and the Connect page.
 | T2-3 | Procedural memory | 3 | `Runbook {uses, successes}` learned on confirm, reinforced on reuse, loses confidence when its suggestion is refuted (`record_evidence` adds a use); `memory_suspects` orders by `successes/uses`; the update's "Next action: ... (worked N of M times)" line; `test_memory_refuted_falls_back_to_traversal_then_gives_up` | No decay with time; a runbook that last worked a year ago ranks like one from yesterday. |
 | T2-4 | Persistent conversation history | 1 | Agent conversations persist: every step of every incident is an `AgentStep` node, replayable by `incident_steps` (`GET .../incidents/{id}/steps`). Human conversations do not: the Ask chat lives in the browser tab, nothing records who asked what, and a follow-up ("and who is on call for it?") cannot resolve "it" | Record each question as a `Question` node in a per-engineer `Session` (`ASKED`, `ABOUT` the linked entities, `ANSWERED_WITH` the sources), let `ask` resolve pronouns from the session's last entities, and expose "what did I ask about payments-gw" as a tool. This also gives T2-7 its per-user memory. |
 | T2-5 | Shared state and handoffs | 3 | Board + `handoff` steps (C3); three roles, each only reads the board and calls tools; a second responder joins an open storm incident instead of opening a duplicate (`triage.cypher: open_incident_for_alert`, `test_concurrent_responders_to_one_storm_make_one_incident`) | None. |
-| T2-6 | High-concurrency reads and writes | 1 | Reads are concurrent and never wait (`test_reads_without_an_incident_do_not_wait_for_the_tenant_lock`); writes on one tenant are serialised by a Redis lock (`FalkorRepository.lock`, 15 min lease); different tenants run in parallel; `test_concurrent_responders_do_not_duplicate_work_or_edges` (4 responders, 0 duplicate edges) | No numbers: nothing measures N tenants or N clients at once (EVAL latencies are single-client). No uniqueness constraints: `db.constraints()` is empty, so correctness under concurrency rests on the lock alone (`repository.py` records that 12 x 100 concurrent `MERGE`s once made 2 nodes). This build accepts `GRAPH.CONSTRAINT CREATE ... UNIQUE NODE <Label> PROPERTIES 1 id` (verified: duplicate `CREATE` refused, `MERGE` still fine). Plan: constraints on `id` for every label at `ensure_schema`, plus `scripts/concurrency.py` (parallel tenants, concurrent event writers and readers on one tenant) reporting p50/p95 and duplicate counts into `docs/PERF.md`, with a test. |
+| T2-6 | High-concurrency reads and writes | 2 | Unique constraints on `id` for every label (`FalkorRepository._ensure_unique_ids`, created at `ensure_schema`, carried by `GRAPH.COPY`, re-applied by `reset`): the database refuses a duplicate node even from a raw `CREATE`; reads use `GRAPH.RO_QUERY` and never take the lock; writes on one tenant serialise at a per-tenant Redis lock (10 ms poll); a reset swaps the graph in with `GRAPH.COPY` + `RENAME`, so reads never fail mid-reset; different tenants run in parallel. Measured by `scripts/concurrency.py` into `docs/PERF.md` (Concurrency): 8 tenants at once 0.85 s wall against 1.9 s sequential, 8 readers during 3 locked agent runs 1,236 reads / 0 errors / p50 24 ms, 8 writers x 75 events 0 duplicates / p50 2 ms / p99 about 200 ms, and the raw races (12 clients: 10 duplicate ids without constraints, 0 with; `MERGE` on one edge still duplicates). `tests/integration/test_concurrency.py` (5 tests) | Writes on one tenant still serialise: two incidents on the same tenant cannot be investigated at once, and the slowest contended write waits 0.3 to 0.5 s. A per-incident lock (plus the tenant lock only for `reset`) would let independent incidents proceed in parallel; FalkorDB has no edge constraint, so the lock cannot go away entirely. |
 | T2-7 | Separate memory per user or tenant | 2 | One graph per tenant (`tenant_<name>` + `pristine_<name>`, `FalkorGraphStore`), `MAX_TENANTS`, `test_tenants_are_isolated`, `test_reset_keeps_a_tenants_own_seed`; UI shows the tenant chip | Per tenant only. No per-user memory (T2-4 fixes that) and no per-user identity on any surface (documented: "no per-user auth"). |
 
 ## Track 03: company brain
@@ -66,15 +66,16 @@ Ask the brain chat and the Connect page.
 |---|---|
 | Challenge (C1-C5) | 14 / 15 |
 | Track 01 (T1-1..5) | 12 / 15 |
-| Track 02 (T2-1..7) | 15 / 21 |
+| Track 02 (T2-1..7) | 16 / 21 |
 | Track 03 (T3-1..5) | 14 / 15 |
 | Rule 3 | 3 / 3 |
-| **All** | **58 / 69** |
+| **All** | **59 / 69** |
 
 ## Weakest rows, in the order to close them
 
-1. **T2-6 concurrency (1).** Unique constraints on `id` for every label, a concurrency benchmark with p50/p95 and duplicate
-   counts, numbers in `docs/PERF.md`, a test. Cheap, and it turns "we hold a lock" into measured facts.
+1. **T2-6 concurrency (1, now 2).** Done: unique constraints on `id` for every label, `scripts/concurrency.py` with
+   p50/p95/p99 and duplicate counts in `docs/PERF.md`, an atomic reset, 5 tests. Left: a per-incident lock so two
+   incidents on one tenant can be investigated at once.
 2. **T1-2 algorithms (1).** One or two procedures that change a decision, each verified against the temporal edges and
    shown in the trace: PageRank criticality for who to page and warn first; WCC or label propagation to split a storm.
 3. **T2-4 conversation history (1) + T2-7 per-user memory (2).** `Session` and `Question` nodes per engineer, pronoun

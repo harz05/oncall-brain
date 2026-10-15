@@ -147,7 +147,7 @@ Ids are stable and human-readable, so writes can `MERGE` on them and a trace can
 | AgentStep | `<incident id>#<seq>` | `inc:refunds-latency#7` |
 | Meta | `meta` (one per graph) | `meta` |
 
-## Indexes, and why there are no uniqueness constraints
+## Indexes and constraints
 
 `FalkorRepository.ensure_schema` (run by every seed) creates one range index per label on `id`:
 `CREATE INDEX FOR (n:<Label>) ON (n.id)` for Team, Person, Service, Change, Alert, Anomaly, Incident, Hypothesis,
@@ -164,13 +164,20 @@ And it creates three FalkorDB full-text indexes (`repository.FULLTEXT`): `CREATE
 only `[a-z0-9]` kept, at most 12, joined with `|`), so nothing the user types reaches the index's query syntax.
 `GRAPH.COPY` carries these indexes, so a reset keeps them (`test_fulltext_index_is_idempotent_survives_reset_and_scenarios_still_load`).
 
-There are no uniqueness constraints, by design. Idempotency comes from `MERGE` on a stable id in every write
-statement, so re-loading, re-running a tool or replaying an act updates nodes instead of duplicating them. All writes
-go through a small set of named, reviewed statements, so a constraint would only guard against writers that do not
-exist. `MERGE` alone is not safe under concurrency (two writers can both miss an edge and both create it), so every
-agent run holds a per-tenant lock (see ARCHITECTURE 3.7). The one `CREATE` is `log_step`: agent steps are an
-append-only log whose `seq` is the incident's current step count + 1, and the lock makes the running agent its only
-writer.
+Every indexed label also has a unique node constraint on `id` (`GRAPH.CONSTRAINT CREATE <graph> UNIQUE NODE <Label>
+PROPERTIES 1 id`, created by `ensure_schema` after the index it needs; `FalkorRepository.unique_constraints()` lists
+them with their status, and `ensure_schema` waits for every one to be `OPERATIONAL`). Idempotency still comes from
+`MERGE` on a stable id in every write statement, so re-loading, re-running a tool or replaying an act updates nodes
+instead of duplicating them, and a `MERGE` never trips a constraint. What the constraint adds is that no writer, a
+future tool or a raw `GRAPH.QUERY` included, can create a second `Service` with an existing id: 12 clients racing
+`CREATE` on ten ids made ten duplicates without constraints and none with them (PERF.md, Concurrency). `GRAPH.COPY`
+carries constraints, so the pristine copy and every reset keep them, and `reset()` runs `ensure_schema()` after a
+restore so a copy made before the constraints existed gets them
+(`test_every_label_has_a_unique_id_constraint_that_reset_keeps_and_the_database_enforces`). FalkorDB has no
+constraint on relationships, and `MERGE` on an edge is not safe under concurrency (two writers can both miss it and
+both create it; measured in the same benchmark), so every agent run and write tool holds a per-tenant lock (see
+ARCHITECTURE 3.7). The one `CREATE` is `log_step`: agent steps are an append-only log whose `seq` is the incident's
+current step count + 1, and the lock makes the running agent its only writer.
 
 ## Memory, mapped to the model
 

@@ -51,9 +51,11 @@ def reset(store: GraphStore, tenant: str, seed_value: int | None = None, max_ten
         raise TenantLimitReached(f"tenant limit reached ({max_tenants}); reset an existing tenant or raise MAX_TENANTS")
     with store.lock(tenant):
         if store.restore(tenant):
-            rows = store.tenant(tenant).read("data_version").rows
+            repo = store.tenant(tenant)
+            rows = repo.read("data_version").rows
             seed_value = seed_value or (rows[0]["seed"] if rows else None) or 7  # keep the tenant's own seed
             if rows and rows[0]["version"] == fingerprint(generate(seed_value)):
+                repo.ensure_schema()  # a pristine copy made before the unique id constraints existed gets them now
                 return "restored"
         seed(store, tenant, seed_value or 7)  # no copy, or one built by an older generator
         return "seeded"
