@@ -55,7 +55,7 @@ Every query the product runs: 82 named, parameterised statements in `src/oncall_
 | [anomaly_baseline](#anomaly_baseline) | RO | investigate.cypher | The stronger flat baseline (no traversal, the same rule as the eval's anomaly-aware change log): of the in-window changes not rolled back, blame the one whose own service went red first after it. |
 | [incident_board](#incident_board) | RO | board.cypher | Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory. |
 | [log_step](#log_step) | W | board.cypher | Persist each agent step on the incident (queryable agent history; handoffs between roles are steps too). |
-| [incident_steps](#incident_steps) | RO | board.cypher | Replay an incident's persisted agent history in order. |
+| [incident_steps](#incident_steps) | RO | board.cypher | Replay an incident's persisted agent history in order, with who decided each step (the model id, or "rules"). |
 | [update_facts](#update_facts) | RO | comms_memory.cypher | Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used. |
 | [refuted_hypotheses](#refuted_hypotheses) | RO | comms_memory.cypher | Suspects the agents ruled out, with the reason recorded on their Evidence. |
 | [post_update](#post_update) | W | comms_memory.cypher | Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used. |
@@ -76,7 +76,7 @@ Every query the product runs: 82 named, parameterised statements in `src/oncall_
 | [search_knowledge](#search_knowledge) | RO | knowledge.cypher | Full-text search over docs, tickets and chat (one FalkorDB full-text index per label, $query is the caller's terms OR-ed), the best hits per label with author, for a doc the newer doc that supersedes it, and refs: what the hit MENTIONS, DECIDES, REQUESTED or was AUTHORED_BY (ask prefers hits tied to the entities the question names). |
 | [knowledge_context](#knowledge_context) | RO | knowledge.cypher | The graph around search hits: what each mentions, decides, requests, supersedes or cites, who wrote it, what mentions, supersedes or cites it, the incident a status update belongs to; then each neighbour's author, a change's service and a service's owning team. |
 | [record_consult](#record_consult) | W | knowledge.cypher | Comms records who it will ask about the culprit service (an action the who_knows ranking drives). |
-| [list_alerts](#list_alerts) | RO | api.cypher | The alerts a user can respond to from the UI, in story order (act 1, act 2). |
+| [list_alerts](#list_alerts) | RO | api.cypher | The UI's incident inbox: every alert in story order (act 1, 2, 3, then alerts raised live), with the incident handling it (opened for it, or one it was folded into) and that incident's status. |
 | [path_suspects_reference](#path_suspects_reference) | RO | reference.cypher | Reference implementation (the pre-rewrite path_suspects, kept verbatim): used only by tests/integration/test_query_equivalence.py and scripts/bench.py, never by the product. |
 | [memory_suspects_reference](#memory_suspects_reference) | RO | reference.cypher | Reference implementation (the pre-rewrite memory_suspects, kept verbatim): used only by tests/integration/test_query_equivalence.py and scripts/bench.py, never by the product. |
 | [recall_similar_reference](#recall_similar_reference) | RO | reference.cypher | Reference implementation (the pre-rewrite recall_similar, kept verbatim): used only by tests/integration/test_query_equivalence.py and scripts/bench.py, never by the product. |
@@ -398,7 +398,7 @@ RETURN i.id AS incident, i.status AS status, s.id AS service, a.at AS at, a.symp
 
 ### incident_head
 
-**RO** · `triage.cypher` · used by `oncall_brain.services.tools._head` (read)
+**RO** · `triage.cypher` · used by `oncall_brain.api.app.incident` (read), `oncall_brain.services.tools._head` (read)
 
 The incident's alerting service, alert time and status.
 
@@ -1004,21 +1004,21 @@ OPTIONAL MATCH (i)-[:LOGGED]->(prev:AgentStep)
 WITH i, count(prev) AS n
 CREATE (st:AgentStep {id: $incident_id + '#' + toString(n + 1), seq: n + 1, role: $role, tool: $tool,
                       target: $target, reason: $reason, summary: $summary, rows: $rows, ms: $ms,
-                      writes: $writes})
+                      writes: $writes, by: $by})
 CREATE (i)-[:LOGGED]->(st)
 RETURN st.seq AS seq
 ```
 
 ### incident_steps
 
-**RO** · `board.cypher` · used by `oncall_brain.api.app.steps` (read)
+**RO** · `board.cypher` · used by `oncall_brain.api.app.incident` (read), `oncall_brain.api.app.steps` (read)
 
-Replay an incident's persisted agent history in order.
+Replay an incident's persisted agent history in order, with who decided each step (the model id, or "rules").
 
 ```cypher
 MATCH (i:Incident {id: $incident_id})-[:LOGGED]->(st:AgentStep)
 RETURN st.seq AS seq, st.role AS role, st.tool AS tool, st.target AS target, st.reason AS reason,
-       st.summary AS summary
+       st.summary AS summary, coalesce(st.by, 'rules') AS by
 ORDER BY seq
 ```
 
@@ -1192,7 +1192,7 @@ RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
 
 ### incident_update
 
-**RO** · `comms_memory.cypher` · used by `oncall_brain.services.respond.outcome` (read)
+**RO** · `comms_memory.cypher` · used by `oncall_brain.api.app.incident` (read), `oncall_brain.api.app.resolve` (read), `oncall_brain.services.respond.outcome` (read)
 
 The status update the comms agent last posted on the incident.
 
@@ -1451,11 +1451,14 @@ ON CREATE SET x.for_service = $service, x.score = $score
 
 **RO** · `api.cypher` · used by `oncall_brain.api.app.alerts` (read), `oncall_brain.api.app.graph` (read)
 
-The alerts a user can respond to from the UI, in story order (act 1, act 2).
+The UI's incident inbox: every alert in story order (act 1, 2, 3, then alerts raised live), with the incident handling it (opened for it, or one it was folded into) and that incident's status.
 
 ```cypher
 MATCH (a:Alert)-[:FIRED_ON]->(s:Service)
-RETURN a.id AS id, a.name AS name, s.id AS service, a.symptom AS symptom, a.at AS at, a.act AS act
+OPTIONAL MATCH (i:Incident)-[:TRIGGERED_BY|CORRELATED_WITH]->(a)
+WITH a, s, collect(i)[0] AS i
+RETURN a.id AS id, a.name AS name, s.id AS service, a.symptom AS symptom, a.at AS at, a.act AS act,
+       i.id AS incident, i.status AS status
 ORDER BY act, at
 ```
 

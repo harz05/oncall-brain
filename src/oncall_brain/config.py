@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_base_url: str = ""
     llm_api_key: str = _secret()
+    # Most input + output tokens one incident run may spend on the model; past it the deterministic planner
+    # finishes the run (services/respond.py RunBudget). A full three-role run on Claude is ~60-90k tokens.
+    llm_run_token_cap: int = 300_000
     openai_api_key: str = _secret()
     gemini_api_key: str = _secret()
     google_api_key: str = _secret()

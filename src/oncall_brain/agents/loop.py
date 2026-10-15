@@ -30,7 +30,7 @@ def record(repo: GraphRepository, incident_id: str, trace: list[TraceStep], step
     trace.append(step)
     repo.write("log_step", incident_id=incident_id, role=step.role, tool=step.tool, target=target,
                reason=step.reason, summary=step.summary, rows=sum(q.row_count for q in step.queries),
-               ms=round(sum(q.ms for q in step.queries), 2), writes=step.writes)
+               ms=round(sum(q.ms for q in step.queries), 2), writes=step.writes, by=step.by)
     if on_step:
         on_step(step)
 
@@ -44,7 +44,7 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
         board, board_q = load_board(repo, incident_id)
         d = llm.decide(role, board, specs)
         if d.action == "done":
-            return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q, on_step)
+            return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q, on_step, d.by)
         try:
             out, tool, args = _call(ctx, d, incident_id)
         except (KeyError, ValueError, ValidationError) as e:
@@ -56,7 +56,7 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
             d = d.model_copy(update={"reason": f"fallback after tool error ({e}): {d.reason}"})
             out, tool, args = _call(ctx, d, incident_id)
         record(repo, incident_id, trace,
-               TraceStep(seq=len(trace) + 1, role=role, tool=d.tool, reason=d.reason, summary=out.summary,
+               TraceStep(seq=len(trace) + 1, role=role, tool=d.tool, reason=d.reason, by=d.by, summary=out.summary,
                          writes=tool.writes, queries=[board_q, *out.queries], highlight=out.highlight,
                          data=out.data), _target(args), on_step)
     # Out of budget: hand the board on rather than fail the incident; the next role works with what exists.
@@ -75,9 +75,9 @@ def _call(ctx: ToolContext, d: Decision, incident_id: str):
     return registry.call(d.tool, ctx, args), tool, args
 
 
-def _handoff(repo, incident_id, trace, role, nxt, reason, board_q, on_step=None) -> str | None:
+def _handoff(repo, incident_id, trace, role, nxt, reason, board_q, on_step=None, by="rules") -> str | None:
     record(repo, incident_id, trace,
-           TraceStep(seq=len(trace) + 1, role=role, tool="handoff", reason=reason,
+           TraceStep(seq=len(trace) + 1, role=role, tool="handoff", reason=reason, by=by,
                      summary=f"{role} hands off to {nxt or 'human'}", writes=True, queries=[board_q]),
            nxt or "human", on_step)
     return nxt

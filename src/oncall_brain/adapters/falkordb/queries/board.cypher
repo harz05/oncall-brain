@@ -29,13 +29,13 @@ OPTIONAL MATCH (i)-[:LOGGED]->(prev:AgentStep)
 WITH i, count(prev) AS n
 CREATE (st:AgentStep {id: $incident_id + '#' + toString(n + 1), seq: n + 1, role: $role, tool: $tool,
                       target: $target, reason: $reason, summary: $summary, rows: $rows, ms: $ms,
-                      writes: $writes})
+                      writes: $writes, by: $by})
 CREATE (i)-[:LOGGED]->(st)
 RETURN st.seq AS seq
 
 // name: incident_steps
-// purpose: Replay an incident's persisted agent history in order.
+// purpose: Replay an incident's persisted agent history in order, with who decided each step (the model id, or "rules").
 MATCH (i:Incident {id: $incident_id})-[:LOGGED]->(st:AgentStep)
 RETURN st.seq AS seq, st.role AS role, st.tool AS tool, st.target AS target, st.reason AS reason,
-       st.summary AS summary
+       st.summary AS summary, coalesce(st.by, 'rules') AS by
 ORDER BY seq

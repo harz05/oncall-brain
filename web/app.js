@@ -25,7 +25,7 @@ const EXAMPLES = ['Who owns kafka?', 'Why was legacy-billing retired?', 'Why was
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = encodeURIComponent;
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word) => `${n} ${n === 1 ? word : word === 'query' ? 'queries' : `${word}s`}`;
 const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
   timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST';
 
@@ -245,12 +245,12 @@ function renderProgress(cur) {
       h('p', {}, text));
   });
   const last = steps.at(-1);
-  $('progress').replaceChildren(h('div', { class: 'tiles' }, tiles),
+  $('progress').replaceChildren(...[h('div', { class: 'tiles' }, tiles),
     !cur.done && !cur.stored ? h('p', { class: 'progress-line' },
       h('span', { class: 'spinner' }), last ? [h('b', {}, `${last.role}: `), last.reason] : 'Opening the incident…',
       h('span', { class: 'muted' }, ` · steps chosen by ${plannerName()}`),
       h('button', { class: 'ghost', onclick: () => { state.skip = true; } }, 'Skip animation')) : null,
-    cur.error ? h('p', { class: 'error' }, cur.error) : null);
+    cur.error ? h('p', { class: 'error' }, cur.error) : null].filter(Boolean)); // replaceChildren(null) renders "null"
 }
 
 // The status update, rendered the way it lands in Slack: the comms agent's text, line by line ("Key: value").

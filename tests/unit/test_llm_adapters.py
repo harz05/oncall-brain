@@ -70,7 +70,7 @@ def test_anthropic_request_and_tool_use_parsing():
     seen: list[httpx.Request] = []
     p = make("anthropic", anthropic_reply("page_on_call", {"service": "svc:checkout"}), seen=seen)
     d = p.decide("triage", board(("blast_radius", "svc:checkout")), TOOLS)
-    assert (d.action, d.tool, d.reason) == ("call", "page_on_call", "LLM chose page_on_call")
+    assert (d.action, d.tool, d.reason) == ("call", "page_on_call", "The model chose page_on_call without saying why.")
     req = seen[0]
     body = json.loads(req.content)
     assert req.headers["x-api-key"] == "k-test" and req.headers["anthropic-version"] == "2023-06-01"
@@ -158,7 +158,7 @@ def test_malformed_replies_fall_back_instead_of_crashing(kind, body):
 @pytest.mark.parametrize("content", [None, "", [{"type": "text", "text": "parts, not a string"}]])
 def test_openai_odd_content_still_parses_the_call(content):
     d = make("openai", oa_msg(content=content, tool_calls=[{"function": CALL}])).decide("triage", board(), TOOLS)
-    assert (d.action, d.tool, d.reason) == ("call", "blast_radius", "LLM chose blast_radius")
+    assert (d.action, d.tool, d.reason) == ("call", "blast_radius", "The model chose blast_radius without saying why.")
 
 
 @pytest.mark.parametrize("kind", KINDS)

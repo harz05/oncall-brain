@@ -30,7 +30,7 @@ def make_llm(s: Settings | None = None) -> LLMProvider:
     if p == "anthropic":
         from oncall_brain.adapters.llm.anthropic import DEFAULT_MODEL, AnthropicProvider
 
-        return AnthropicProvider(key, s.llm_model or DEFAULT_MODEL)
+        return _capped(AnthropicProvider(key, s.llm_model or DEFAULT_MODEL), s)
     if p not in PRESETS and not s.llm_base_url:
         raise ValueError(f"LLM_PROVIDER={p!r}: use one of mock, anthropic, {', '.join(PRESETS)} or set LLM_BASE_URL")
     from oncall_brain.adapters.llm.openai_compat import OpenAICompatProvider
@@ -38,4 +38,9 @@ def make_llm(s: Settings | None = None) -> LLMProvider:
     base_url, model = PRESETS.get(p, ("", ""))
     if not (s.llm_model or model):
         raise ValueError(f"LLM_PROVIDER={p!r} has no default model; set LLM_MODEL")
-    return OpenAICompatProvider(key, s.llm_model or model, s.llm_base_url or base_url)
+    return _capped(OpenAICompatProvider(key, s.llm_model or model, s.llm_base_url or base_url), s)
+
+
+def _capped(provider: LLMProvider, s: Settings) -> LLMProvider:
+    provider.run_token_cap = s.llm_run_token_cap  # services/respond.py budgets each run with it (RunBudget)
+    return provider

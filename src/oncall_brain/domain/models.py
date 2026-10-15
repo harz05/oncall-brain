@@ -42,6 +42,7 @@ class Decision(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     reason: str
     handoff_to: str | None = None
+    by: str = "rules"  # who decided: "rules" (the deterministic planner) or the model id (e.g. claude-opus-5-5)
 
 
 class TraceStep(BaseModel):
@@ -50,6 +51,7 @@ class TraceStep(BaseModel):
     tool: str
     reason: str
     summary: str
+    by: str = "rules"  # see Decision.by
     writes: bool = False
     queries: list[QueryRun] = Field(default_factory=list)
     highlight: Highlight = Field(default_factory=Highlight)

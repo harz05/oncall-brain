@@ -6,18 +6,44 @@ from typing import Any
 from oncall_brain.agents import registry
 from oncall_brain.agents.loop import OnStep, record, run_role
 from oncall_brain.agents.registry import ToolContext
-from oncall_brain.domain.models import ToolOutput, TraceStep
-from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
+from oncall_brain.domain.models import Decision, ToolOutput, TraceStep
+from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW, next_decision
+from oncall_brain.domain.verdict import confidence
 from oncall_brain.ports import GraphRepository, GraphStore, LLMProvider
 
 # Importing the module registers the tools.
 from oncall_brain.services import tools as _tools  # noqa: F401
 
 
+class RunBudget:
+    """Caps what one incident run may spend on the model: input + output tokens, as the provider reports them in
+    `last_usage`. Past the cap every remaining decision is the deterministic planner's, and the trace says so, so a
+    model that dithers cannot run up a bill or stall an incident."""
+
+    def __init__(self, llm: LLMProvider, cap: int):
+        self.llm, self.cap, self.used, self.name = llm, cap, 0, llm.name
+
+    def decide(self, role: str, board: dict[str, Any], tools: list[dict[str, Any]]) -> Decision:
+        if self.used >= self.cap:
+            d = next_decision(role, board)
+            return d.model_copy(update={"reason": f"LLM fallback: token cap for this run ({self.cap:,}) reached. "
+                                                  f"{d.reason}"})
+        if hasattr(self.llm, "last_usage"):
+            self.llm.last_usage = 0  # a decision that never reached the API must not re-count the previous one
+        d = self.llm.decide(role, board, tools)
+        self.used += int(getattr(self.llm, "last_usage", 0) or 0)
+        return d
+
+
 def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None = None) -> dict[str, Any]:
-    """on_step is called with each step as it is recorded, so a caller can stream the run while it happens."""
+    """on_step is called with each step as it is recorded, so a caller can stream the run while it happens.
+    A provider with `run_token_cap` (set by wiring from LLM_RUN_TOKEN_CAP) is budgeted per run (RunBudget)."""
+    cap = int(getattr(llm, "run_token_cap", 0) or 0)
+    budget = RunBudget(llm, cap) if cap else None
     with repo.lock():  # one agent run per tenant at a time (see FalkorRepository.lock)
-        return _respond(repo, alert_id, llm, on_step)
+        run = _respond(repo, alert_id, budget or llm, on_step)
+    run["llm_tokens"] = budget.used if budget else 0
+    return run
 
 
 def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None) -> dict[str, Any]:
@@ -106,8 +132,10 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
     direct = {x["service"] for x in impacts if x["via"] in (None, opened["service"])} | alerting
     update = (repo.read("incident_update", incident_id=incident_id).rows or [{"text": None}])[0]["text"]
     posted = _data(trace, "post_update")
+    co = repo.read("co_causes", incident_id=incident_id).rows
     return {
         "root_cause": cause,
+        "confidence": confidence(cause, len(alerting), len(co)),
         "refuted": refuted,
         "baseline_pick": flat,
         "baseline_correct": bool(cause and flat and flat["change"] == cause["change"]),
@@ -120,7 +148,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "paged": repo.read("incident_paged", incident_id=incident_id).rows,
         "blast_radius": sorted(direct),
         "at_risk": sorted({x["service"] for x in impacts} - direct - set((cause or {}).get("live_path") or [])),
-        "co_causes": repo.read("co_causes", incident_id=incident_id).rows,
+        "co_causes": co,
         "update_text": update,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),

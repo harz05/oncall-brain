@@ -37,7 +37,9 @@ past incidents recalled from memory.
 - comms: page the owner of the culprit service and of any co-cause, ask who_knows the culprit service, warn its
   dependents (blast_radius), then post_update.
 Call exactly one tool per turn: one graph tool, or `finish` when your role's work is done. Never repeat a step that
-is already on the board with the same target. Use ids exactly as they appear on the board."""
+is already on the board with the same target. Use ids exactly as they appear on the board.
+Start every reply with one plain sentence (at most 25 words) telling the on-call engineer what you are doing and
+why, as you would in an incident channel; then make the tool call."""
 
 FINISH = {
     "name": "finish",
@@ -69,8 +71,9 @@ def _why(e: Exception) -> str:
     return "timeout" if isinstance(e, httpx.TimeoutException) else f"bad reply ({type(e).__name__})"
 
 
-def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: Ask) -> Decision:
-    """Ask the model, then accept its choice only if it is a known tool with valid args and not a repeat."""
+def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: Ask, by: str = "model") -> Decision:
+    """Ask the model, then accept its choice only if it is a known tool with valid args and not a repeat.
+    `by` names the model on the decisions it made; fallbacks are the planner's ("rules")."""
     try:
         name, args, text = ask(SYSTEM.format(role=role), json.dumps(board, default=str), tool_list(tools))
     except Exception as e:  # any malformed reply (null message, odd shapes) must not crash the run
@@ -80,7 +83,8 @@ def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: 
     if name == "finish":
         nxt = ROLES[ROLES.index(role) + 1:]
         handoff = args.get("handoff_to") if args.get("handoff_to") in nxt else (nxt[0] if nxt else None)
-        return Decision(action="done", handoff_to=handoff, reason=str(args.get("reason") or text or "LLM finished"))
+        return Decision(action="done", handoff_to=handoff, by=by,
+                        reason=str(args.get("reason") or text or "The model finished this role's work."))
     if name not in REGISTRY or not REGISTRY[name].agent:
         return fallback(role, board, f"unknown tool {name!r}")
     tool = REGISTRY[name]
@@ -100,18 +104,20 @@ def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: 
         return fallback(role, board, f"malformed {bad[0]}")
     if any(s["tool"] == name and s["target"] == _target(args) for s in board["steps"]):
         return fallback(role, board, f"{name} on {_target(args) or 'this incident'} already ran")
-    return Decision(action="call", tool=name, args=args, reason=text or f"LLM chose {name}")
+    return Decision(action="call", tool=name, args=args, by=by,
+                    reason=text or f"The model chose {name} without saying why.")
 
 
 class OpenAICompatProvider:
     def __init__(self, api_key: str, model: str, base_url: str, client: httpx.Client | None = None):
         self.model, self.url = model, base_url.rstrip("/") + "/chat/completions"
         self.name = f"{model} via openai-compatible API"
+        self.last_usage = 0  # tokens (prompt + completion) of the last request, for the per-run cap
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}  # ollama needs none
         self._client = client or httpx.Client(timeout=TIMEOUT)
 
     def decide(self, role: str, board: dict[str, Any], tools: list[dict[str, Any]]) -> Decision:
-        return guarded(role, board, tools, self._ask)
+        return guarded(role, board, tools, self._ask, self.model)
 
     def _ask(self, system: str, board: str, tools: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any], str]:
         body = {"model": self.model, "tool_choice": "auto",  # "required" is not accepted by every compatible API
@@ -120,7 +126,9 @@ class OpenAICompatProvider:
                                                             "parameters": t["input_schema"]}} for t in tools]}
         r = self._client.post(self.url, json=body, headers=self._headers)
         r.raise_for_status()
-        msg = r.json()["choices"][0]["message"]
+        data = r.json()
+        self.last_usage = int((data.get("usage") or {}).get("total_tokens") or 0)
+        msg = data["choices"][0]["message"]
         text = msg.get("content")
         text = text.strip() if isinstance(text, str) else ""  # null, or a list of parts on some servers
         calls = msg.get("tool_calls") or []

@@ -58,6 +58,32 @@ def judge(f: CheckFacts) -> Verdict:
     return Verdict("supports", "anomaly propagates " + chain, "supported")
 
 
+def confidence(cause: dict | None, alerting: int = 1, co_causes: int = 0) -> dict:
+    """How sure the agents are about the leading cause, in words an on-call engineer can act on. Pure: computed
+    from facts the outcome already carries (the cause's status, its monitoring gaps, how many of the alerting
+    services it explains, whether another change was needed as a co-cause)."""
+    if not cause:
+        return {"level": "none", "label": "No cause found",
+                "why": "no recent change on the dependency paths explains this alert; a human should look"}
+    if cause.get("status") == "confirmed":
+        return {"level": "confirmed", "label": "Confirmed", "why": "a human confirmed this cause"}
+    gaps = [_n(g) for g in cause.get("gaps") or []]
+    explained = len(cause.get("explained") or []) or 1
+    doubts = []
+    if gaps:
+        doubts.append(f"nothing was recorded on {', '.join(gaps)} along the way (monitoring gap)")
+    if explained < alerting:
+        doubts.append(f"it explains {explained} of {alerting} alerting services")
+    if co_causes:
+        doubts.append(f"{co_causes} other change{'s' if co_causes > 1 else ''} also needed to explain every alert")
+    if doubts:
+        return {"level": "medium", "label": "Likely", "why": "; ".join(doubts)}
+    why = "anomalies follow this change along the live dependency path to the alerting service"
+    if alerting > 1:
+        why += f", and it explains all {alerting} alerting services"
+    return {"level": "high", "label": "Very likely", "why": why}
+
+
 def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset()
             ) -> tuple[dict, list[tuple[dict, str]], list[tuple[dict, str]]]:
     """Several suspects survived their checks; keep one leading cause.
