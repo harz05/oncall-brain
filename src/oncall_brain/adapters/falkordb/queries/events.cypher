@@ -3,6 +3,11 @@
 MATCH (s:Service {id: $service})
 MERGE (c:Change {id: $id})
 SET c.kind = $kind, c.summary = $summary, c.at = $at, c.rolled_back_at = $rolled_back_at
+WITH s, c
+// Re-recording an id corrects the change: drop its old service and author links first.
+OPTIONAL MATCH (c)-[old:CHANGED|AUTHORED_BY]->()
+DELETE old
+WITH DISTINCT s, c
 MERGE (c)-[:CHANGED]->(s)
 WITH c
 OPTIONAL MATCH (p:Person {id: $author})
@@ -28,7 +33,15 @@ RETURN a.id AS alert
 // name: add_dependency
 // purpose: Keep knowledge current: caller starts depending on callee at $at (a new temporal DEPENDS_ON edge).
 MATCH (a:Service {id: $caller}), (b:Service {id: $callee})
-MERGE (a)-[d:DEPENDS_ON {valid_from: $at}]->(b)
+OPTIONAL MATCH (a)-[live:DEPENDS_ON]->(b)
+WHERE live.valid_to IS NULL
+WITH a, b, collect(live) AS existing
+// Only one live edge per pair: if the dependency already exists, keep it.
+FOREACH (_ IN CASE WHEN size(existing) = 0 THEN [1] ELSE [] END |
+  CREATE (a)-[:DEPENDS_ON {valid_from: $at}]->(b))
+WITH a, b
+MATCH (a)-[d:DEPENDS_ON]->(b)
+WHERE d.valid_to IS NULL
 RETURN a.id AS caller, b.id AS callee, d.valid_from AS valid_from
 
 // name: retire_dependency

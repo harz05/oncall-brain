@@ -4,7 +4,7 @@ Act 1: checkout is slow -> agents find the payments-gw config change by traversa
        A human confirms the fix -> it becomes memory (CAUSED_BY + a learned Runbook).
 Act 2: refunds is slow (3 days later) -> recalled from act 1, solved in one check.
 Proof: act 2 replayed on a fresh graph with no act-1 memory takes the long road.
-Act 3: three alerts at once -> correlated over the dependency graph (shared upstream + betweenness);
+Act 3: three alerts at once -> correlated over the dependency graph (shared red upstream, ranked by convergence);
        without that correlation the agent would blame a change that only explains one of the alerts.
 Exits non-zero if the story does not hold, so `make demo` doubles as an end-to-end check.
 """
@@ -37,10 +37,11 @@ def show(title: str, run: dict, cypher: bool) -> None:
     print(f"{G}root cause:{R} {rc['change']} on {rc['service']}: {rc['reason']}" if rc else "no root cause found")
     for r in o["refuted"]:
         print(f"{DIM}ruled out:{R} {r['change']} ({r['reason']})")
-    bp = o["baseline_pick"]
-    if bp:
-        print(f"flat change-log baseline would blame: {bp['change']} on {bp['service']} "
-              f"-> {'correct' if o['baseline_correct'] else 'WRONG'}")
+    for label, pick, ok in (("flat change log (newest change)", o["baseline_pick"], o["baseline_correct"]),
+                            ("anomaly-aware change log (no graph)", o["anomaly_baseline_pick"],
+                             o["anomaly_baseline_correct"])):
+        if pick:
+            print(f"{label} would blame: {pick['change']} on {pick['service']} -> {'correct' if ok else 'WRONG'}")
     print(f"investigator tool calls: {o['investigator_calls']}, hypotheses checked: {o['hypotheses_checked']} "
           f"(culprit on check {o['checks_to_culprit']}), solved by memory: {o['memory']['solved_by_memory']}")
     if o["update_text"]:

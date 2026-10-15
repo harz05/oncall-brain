@@ -43,16 +43,15 @@ WITH a, s, min(length(p)) AS hops
 MATCH (c:Change)-[:CHANGED]->(s)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops
-ORDER BY hops, at DESC
-LIMIT 10
+ORDER BY hops, at DESC, change
 
 // name: recent_changes
 // purpose: The flat baseline: newest changes anywhere before the alert, no traversal. This is what a change log alone would blame. ($since/$until are literal bounds so the Change.at range index is used.)
 MATCH (c:Change)-[:CHANGED]->(s:Service)
 WHERE c.at >= $since AND c.at <= $until
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary
-ORDER BY at DESC
-LIMIT 3
+ORDER BY at DESC, change
+LIMIT 5
 
 // name: add_hypotheses
 // purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).
@@ -109,14 +108,47 @@ RETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary
 // purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.
 MATCH (h:Hypothesis {id: $hypothesis_id})
 MERGE (e:Evidence {id: $evidence_id})
-SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at
+SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at, e.explains = $explains
+WITH h, e, h.status AS before
 // A human-confirmed cause stays confirmed whatever a later re-check says.
 SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
-                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END
+                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,
+    h.coverage = $explains
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
-WITH h
-// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.
+WITH h, before
+// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence (once).
 OPTIONAL MATCH (rb:Runbook {id: h.runbook})
-FOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)
+FOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'open' THEN [rb] ELSE [] END |
+  SET x.uses = x.uses + 1)
 RETURN h.id AS hypothesis, h.status AS status
+
+// name: record_outranked
+// purpose: When several suspects are supported, keep one leading cause and record why each other one lost (it explains fewer of the alerts, or sits further from the alert), as REFUTES evidence.
+UNWIND $rows AS r
+MATCH (h:Hypothesis {id: r.id})
+MERGE (e:Evidence {id: r.evidence_id})
+SET e.verdict = 'outranked', e.reason = r.reason, e.at = $at
+MERGE (e)-[:REFUTES]->(h)
+SET h.status = 'outranked'
+RETURN count(h) AS outranked
+
+// name: cause_facts
+// purpose: The incident's leading cause as the graph records it (confirmed, else supported) with its evidence.
+MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+WHERE h.status IN ['confirmed', 'supported']
+OPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)
+RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, e.path AS live_path,
+       h.status AS status
+ORDER BY status
+LIMIT 1
+
+// name: anomaly_baseline
+// purpose: The stronger flat baseline (no traversal, the same rule as the eval's anomaly-aware change log): of the in-window changes not rolled back, blame the one whose own service went red first after it.
+MATCH (c:Change)-[:CHANGED]->(s:Service)<-[:ON]-(x:Anomaly)
+WHERE c.at >= $since AND c.at <= $until AND (c.rolled_back_at IS NULL OR c.rolled_back_at > $until)
+  AND x.at >= c.at AND x.at <= $until
+WITH c, s, min(x.at) AS red_at
+RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, red_at
+ORDER BY red_at, at DESC, change
+LIMIT 1

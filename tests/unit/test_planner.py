@@ -81,3 +81,16 @@ def test_storm_puts_shared_upstream_suspects_first_in_betweenness_order():
     assert next_decision("investigator", b).args == {"hypothesis_id": "near"}  # no storm: nearest first
     b["shared_upstream"] = ["svc:pay", "svc:pg"]
     assert next_decision("investigator", b).args == {"hypothesis_id": "pay"}
+
+
+def test_several_supported_suspects_are_concluded_once():
+    b = board([("recall_similar", "inc:x"), ("propose_hypotheses", "inc:x")],
+              [hyp("a", status="supported"), hyp("b", status="supported")])
+    assert next_decision("investigator", b).tool == "conclude"
+    b["steps"].append({"tool": "conclude", "target": "inc:x", "role": "investigator"})
+    assert next_decision("investigator", b).action == "done"
+
+
+def test_a_confirmed_cause_counts_as_found_on_a_rerun():
+    b = board([("recall_similar", "inc:x"), ("propose_hypotheses", "inc:x")], [hyp("a", status="confirmed")])
+    assert next_decision("investigator", b).handoff_to == "comms"

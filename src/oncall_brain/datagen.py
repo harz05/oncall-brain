@@ -4,7 +4,8 @@ The story (fixed, hand-written so the demo is repeatable):
   Act 1 at T1: "checkout p99 latency" fires. Real cause: a config change on payments-gw (pool 200 -> 20),
   two hops upstream (checkout -> payments -> payments-gw). Decoys, each refuted by a different graph fact:
     - search deploy 8 min before:   most recent change anywhere (what a flat change log blames), no path
-    - legacy-billing deploy:        checkout used to depend on it, edge retired 3 days ago
+    - legacy-billing deploy:        checkout used to depend on it, edge retired 3 days ago. It also went red
+                                    first, so a change log that watches anomalies (no graph) blames it
     - pricing deploy:               on the path, but rolled back before the alert
     - cart deploy:                  on the path, but cart shows no anomaly
   Act 2 at T2 = T1 + 3 days: "refunds p99 latency". Same upstream (refunds -> payments -> payments-gw),
@@ -12,8 +13,9 @@ The story (fixed, hand-written so the demo is repeatable):
   first; with act 1 resolved, memory skips it and solves the incident in one check.
   Act 3 at T3 = T1 + 5 days: an alert storm. checkout, refunds and subscriptions alert within 4 minutes.
   Real cause: a config change on postgres-orders, which all three reach through payments. A deploy on
-  subscriptions 10 minutes earlier looks guilty from subscriptions' point of view alone, but it cannot
-  explain the checkout and refunds alerts: correlating the alerts over the dependency graph refutes it.
+  subscriptions half an hour earlier (and a blip right after it) looks guilty from subscriptions' point of view
+  alone, and it went red first; but it explains only one of the three alerts. Correlating the alerts over the
+  dependency graph keeps the postgres-orders change, which explains all three.
 Noise (random, seeded): extra people, changes, anomalies and past incidents, kept outside both act windows.
 All names are fake. All times are epoch seconds.
 """
@@ -117,7 +119,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
            "Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)", pay[1])
     change("chg:search-420", "deploy", "search", T1 - 8 * MIN, "Deploy search v4.2.0 (new ranking model)",
            team_people["storefront"][0], version="4.2.0")
-    change("chg:legacy-193", "deploy", "legacy-billing", T1 - 15 * MIN, "Deploy legacy-billing v1.9.3",
+    change("chg:legacy-193", "deploy", "legacy-billing", T1 - 50 * MIN, "Deploy legacy-billing v1.9.3",
            pay[2], version="1.9.3")
     change("chg:pricing-2140", "deploy", "pricing", T1 - 95 * MIN, "Deploy pricing v2.14.0",
            team_people["checkout"][1], rolled_back_at=T1 - 70 * MIN, version="2.14.0")
@@ -127,7 +129,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     anomaly("anom:pay-1", "payments", T1 - 36 * MIN, "latency", "p99 4.2s calling payments-gw")
     anomaly("anom:checkout-1", "checkout", T1 - 35 * MIN, "latency", "p99 5.1s on POST /checkout")
     anomaly("anom:search-1", "search", T1 - 6 * MIN, "errors", "cache miss rate up after deploy")
-    anomaly("anom:legacy-1", "legacy-billing", T1 - 12 * MIN, "errors", "5xx on /invoice")
+    anomaly("anom:legacy-1", "legacy-billing", T1 - 45 * MIN, "errors", "5xx on /invoice")
     d["tickets"].append({"id": "ticket:CR-881", "change": "chg:pgw-pool-1", "author": pay[1], "at": T1 - 2 * DAY,
                          "title": "CR-881 Reduce idle connections on payments-gw",
                          "text": "Cost review: pool is mostly idle overnight. Lower max_connections to 20."})
@@ -161,10 +163,11 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
                             "name": f"{svc} p99 latency above 2s"})
     change("chg:pg-conn-3", "config", "postgres-orders", T3 - 25 * MIN,
            "postgres-orders max_connections 500 -> 150 (memory tuning)", team_people["platform"][1])
-    change("chg:subs-88", "deploy", "subscriptions", T3 - 10 * MIN, "Deploy subscriptions v8.8.0 (billing cycles)",
+    change("chg:subs-88", "deploy", "subscriptions", T3 - 30 * MIN, "Deploy subscriptions v8.8.0 (billing cycles)",
            pay[0], version="8.8.0")
     change("chg:search-430", "deploy", "search", T3 - 3 * MIN, "Deploy search v4.3.0", team_people["storefront"][0],
            version="4.3.0")
+    anomaly("anom:subs-blip-3", "subscriptions", T3 - 28 * MIN, "errors", "renewal job retries after deploy")
     anomaly("anom:pg-3", "postgres-orders", T3 - 22 * MIN, "saturation", "connection slots exhausted")
     anomaly("anom:pay-3", "payments", T3 - 20 * MIN, "latency", "p99 3.1s waiting on postgres-orders")
     anomaly("anom:checkout-3", "checkout", T3 - 5 * MIN, "latency", "p99 4.0s on POST /checkout")

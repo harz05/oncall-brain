@@ -13,8 +13,9 @@ def status_update(facts: dict[str, Any], refuted: list[dict[str, Any]], origin: 
              else f"[{facts['alert']}] status: investigating, no change-related cause found yet"]
     lines.append("Impact: " + ", ".join(_short(s) for s in direct))
     if facts.get("change"):
-        lines.append(f"Likely cause: {facts['change_summary']} ({_short(facts['cause_service'])}, "
-                     f"by {facts['author']}).")
+        label = "Cause (confirmed)" if facts.get("cause_status") == "confirmed" else "Likely cause"
+        by = f", by {facts['author']}" if facts.get("author") else ""
+        lines.append(f"{label}: {facts['change_summary']} ({_short(facts['cause_service'])}{by}).")
     if refuted:
         lines.append("Ruled out: " + "; ".join(f"{_short(r['service'])} ({r['reason']})" for r in refuted))
     paged = [p for p in facts["paged"] if p.get("handle")]

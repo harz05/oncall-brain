@@ -117,6 +117,6 @@ MERGE (m:Meta {id: 'meta'})
 SET m.version = $version, m.seed = $seed
 
 // name: data_version
-// purpose: Read the data fingerprint a graph was seeded with.
+// purpose: Read the data fingerprint and generator seed a graph was seeded with.
 MATCH (m:Meta {id: 'meta'})
-RETURN m.version AS version
+RETURN m.version AS version, m.seed AS seed

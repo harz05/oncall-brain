@@ -18,9 +18,9 @@ OPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)
 // that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).
 OPTIONAL MATCH (rb:Runbook {id: h.runbook})
 OPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)
-WITH a, impacts, paged, experts, c, s, author, src, coalesce(rb, fx) AS rb
+WITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb
 RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,
-       s.id AS cause_service,
+       s.id AS cause_service, h.status AS cause_status,
        author.name AS author, collect(DISTINCT src.id) AS sources,
        collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,
                          uses: rb.uses}) AS runbooks
@@ -28,8 +28,10 @@ RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS ch
 // name: refuted_hypotheses
 // purpose: Suspects the agents ruled out, with the reason recorded on their Evidence.
 MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+WHERE h.status IN ['refuted', 'outranked']
 MATCH (e:Evidence)-[:REFUTES]->(h)
-RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, h.source AS source
+RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, h.source AS source,
+       h.status AS verdict
 
 // name: post_update
 // purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.
@@ -80,3 +82,8 @@ MATCH (t:Team)-[:OWNS]->(s:Service)
 OPTIONAL MATCH (s)-[d:DEPENDS_ON]->(x:Service)
 RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
        collect({to: x.id, live: d.valid_from <= $at AND (d.valid_to IS NULL OR d.valid_to > $at)}) AS deps
+
+// name: incident_update
+// purpose: The status update the comms agent last posted on the incident.
+MATCH (:Incident {id: $incident_id})-[:HAS_UPDATE]->(m:Message)
+RETURN m.text AS text

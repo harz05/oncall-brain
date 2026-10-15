@@ -25,6 +25,7 @@ class Tool:
     args_model: type[BaseModel]
     fn: Callable[[ToolContext, Any], ToolOutput]
     writes: bool
+    agent: bool  # False: only humans and outside clients may call it (confirming a fix, recording facts)
 
     def spec(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description, "writes": self.writes,
@@ -34,12 +35,13 @@ class Tool:
 REGISTRY: dict[str, Tool] = {}
 
 
-def tool(writes: bool = False):
-    """Register a function as a tool. Its docstring is the description agents and MCP clients see."""
+def tool(writes: bool = False, agent: bool = True):
+    """Register a function as a tool. Its docstring is the description agents and MCP clients see.
+    agent=False keeps it away from agent runs: an agent must not confirm its own fix or invent graph facts."""
 
     def deco(fn: Callable[[ToolContext, Any], ToolOutput]):
         args_model = list(inspect.signature(fn).parameters.values())[1].annotation
-        REGISTRY[fn.__name__] = Tool(fn.__name__, inspect.getdoc(fn) or "", args_model, fn, writes)
+        REGISTRY[fn.__name__] = Tool(fn.__name__, inspect.getdoc(fn) or "", args_model, fn, writes, agent)
         return fn
 
     return deco
@@ -52,5 +54,5 @@ def call(name: str, ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
     return t.fn(ctx, t.args_model.model_validate(args))
 
 
-def specs() -> list[dict[str, Any]]:
-    return [t.spec() for t in REGISTRY.values()]
+def specs(agents_only: bool = False) -> list[dict[str, Any]]:
+    return [t.spec() for t in REGISTRY.values() if t.agent or not agents_only]

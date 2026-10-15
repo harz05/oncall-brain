@@ -13,7 +13,7 @@ from oncall_brain.domain.planner import next_decision
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services.board import load_board
 
-MAX_STEPS_PER_ROLE = 20
+MAX_STEPS_PER_ROLE = 40
 NEXT_ROLE = {"triage": "investigator", "investigator": "comms", "comms": None}
 
 
@@ -32,7 +32,7 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
              trace: list[TraceStep]) -> str | None:
     """Run one role until it is done. Returns the role it hands off to (or None)."""
     ctx = ToolContext(repo)
-    specs = registry.specs()
+    specs = registry.specs(agents_only=True)
     for _ in range(MAX_STEPS_PER_ROLE):
         board, board_q = load_board(repo, incident_id)
         d = llm.decide(role, board, specs)

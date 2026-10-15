@@ -23,7 +23,7 @@ def _call(tool: str, reason: str, **args: Any) -> Decision:
 
 
 def check_order(h: dict[str, Any], shared: list[str] = ()) -> tuple:
-    """Memory-derived suspects first, then (in an alert storm) suspects on the shared upstream in betweenness
+    """Memory-derived suspects first, then (in an alert storm) suspects on the shared upstream in convergence
     order, then the closest on the dependency path, then the most recent."""
     hops = h["hops"] if h["hops"] is not None else 99
     rank = shared.index(h["service"]) if h["service"] in shared else len(shared)
@@ -57,11 +57,14 @@ def investigator(board: dict[str, Any]) -> Decision:
         h = open_[0]
         return _call("check_hypothesis", f"Test suspect {h['change_id']} on {h['service']} against the graph.",
                      hypothesis_id=h["id"])
-    supported = [h for h in hyps if h["status"] == "supported"]
+    supported = [h for h in hyps if h["status"] in ("supported", "confirmed")]
+    if len(supported) > 1 and not _ran(board, "conclude"):
+        return _call("conclude", f"{len(supported)} suspects are supported; keep the one that explains the most "
+                     "and record why the others lost.")
     if supported:
         h = supported[0]
         return Decision(action="done", handoff_to="comms",
-                        reason=f"Root cause supported: {h['change_id']} on {h['service']}; others refuted.")
+                        reason=f"Root cause supported: {h['change_id']} on {h['service']}; others ruled out.")
     if not _ran(board, "propose_hypotheses"):
         why = "Memory did not explain it" if _ran(board, "hypothesize_from_memory") else "No matching memory"
         return _call("propose_hypotheses",

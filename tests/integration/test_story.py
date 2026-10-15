@@ -176,7 +176,7 @@ def test_confirmed_cause_survives_a_recheck_and_update_rewrite(store, tenant):
     board = call("incident_board", ctx, {"incident_id": run["incident_id"]}).data
     assert {h["status"] for h in board["hypotheses"] if h["change_id"] == "chg:pgw-pool-1"} == {"confirmed"}
     text = call("post_update", ctx, {"incident_id": run["incident_id"]}).data["text"]
-    assert "Likely cause" in text and "Next action" in text
+    assert "Cause (confirmed)" in text and "Next action" in text
 
 
 def test_live_events_drive_a_new_investigation(store, tenant):
@@ -216,10 +216,12 @@ def test_act3_alert_storm_is_correlated_and_only_then_solved(store, tenant):
     run = respond(repo, ACTS[3], MockProvider())
     corr = next(s for s in run["steps"] if s.tool == "correlate_alerts").data
     assert {a["service"] for a in corr["alerts"]} == {"svc:checkout", "svc:refunds"}
-    assert corr["shared"][0]["service"] == "svc:payments"  # betweenness: where the dependency paths converge
+    assert corr["shared"][0]["service"] == "svc:payments"  # convergence: fewest total hops from the alerting services
     o = run["outcome"]
     assert o["root_cause"]["change"] == "chg:pg-conn-3" and o["checks_to_culprit"] == 1
-    assert "cannot explain the alerts" in {r["change"]: r["reason"] for r in o["refuted"]}["chg:subs-88"]
+    assert "explains 3 of the correlated alerts, this change 1" in {
+        r["change"]: r["reason"] for r in o["refuted"]}["chg:subs-88"]
+    assert not o["anomaly_baseline_correct"]  # the no-graph rule blames subs-88: it went red first
     assert not o["runbook"]  # no runbook led here, so none is suggested
     reset(store, tenant)
     assert respond(repo, ACTS[3], NoCorrelation())["outcome"]["root_cause"]["change"] == "chg:subs-88"
@@ -236,3 +238,70 @@ def test_write_tools_called_from_outside_take_the_tenant_lock(store, tenant, mon
     assert taken == []  # reads stay lock-free
     run_tool(repo, "record_anomaly", {"service": "svc:cart", "kind": "errors", "summary": "x"})
     assert taken == [1]
+
+
+def _unrelated_search_alert(repo, at):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    ctx = ToolContext(repo)
+    call("record_anomaly", ctx, {"service": "svc:search", "kind": "errors", "summary": "5xx", "at": at - 60})
+    call("raise_alert", ctx, {"service": "svc:search", "symptom": "errors", "name": "search 5xx", "at": at})
+
+
+def test_an_unrelated_alert_in_the_window_does_not_derail_the_investigation(store, tenant):
+    from oncall_brain.datagen import MIN, T1, T3
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    _unrelated_search_alert(repo, T1 - 5 * MIN)  # search shares only a quiet cache with checkout
+    run = respond(repo, ACTS[1], MockProvider())
+    assert "share no upstream service that went red" in next(
+        s for s in run["steps"] if s.tool == "correlate_alerts").summary
+    assert run["outcome"]["root_cause"]["change"] == "chg:pgw-pool-1"
+    reset(store, tenant)
+    _unrelated_search_alert(repo, T3 - 1 * MIN)
+    o = respond(repo, ACTS[3], MockProvider())["outcome"]
+    assert o["root_cause"]["change"] == "chg:pg-conn-3"
+    assert {a["service"] for a in o["storm"]["alerts"]} == {"svc:checkout", "svc:refunds"}  # search not folded in
+
+
+def test_rerunning_a_finished_incident_still_reports_its_cause(store, tenant):
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    respond(repo, ACTS[1], MockProvider())
+    again = respond(repo, ACTS[1], MockProvider())["outcome"]
+    assert again["root_cause"]["change"] == "chg:pgw-pool-1" and again["update_text"]
+    assert again["hypotheses_checked"] == 0  # nothing new was checked
+
+
+def test_event_tools_correct_rather_than_duplicate(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    ctx = ToolContext(repo)
+    for svc in ("svc:cart", "svc:pricing"):  # same id recorded twice: the second corrects the first
+        call("record_change", ctx, {"id": "chg:fix-1", "service": svc, "kind": "deploy", "summary": "x", "at": 1})
+    assert repo._graph.ro_query("MATCH (:Change {id:'chg:fix-1'})-[:CHANGED]->(s) RETURN collect(s.id)"
+                                ).result_set[0][0] == ["svc:pricing"]
+    call("add_dependency", ctx, {"caller": "svc:checkout", "callee": "svc:payments", "at": 5})  # already live
+    assert repo._graph.ro_query("MATCH (:Service {id:'svc:checkout'})-[d:DEPENDS_ON]->(:Service {id:'svc:payments'}) "
+                                "WHERE d.valid_to IS NULL RETURN count(d)").result_set[0][0] == 1
+
+
+def test_reset_keeps_a_tenants_own_seed(store, tenant):
+    from oncall_brain.datagen import generate
+    from oncall_brain.services.seeding import fingerprint
+
+    seed(store, tenant, 11)
+    assert reset(store, tenant) == "restored"
+    assert store.tenant(tenant).read("data_version").rows[0]["version"] == fingerprint(generate(11))
+
+
+def test_event_tools_are_never_offered_to_agents():
+    from oncall_brain.agents import registry
+
+    offered = {t["name"] for t in registry.specs(agents_only=True)}
+    assert not offered & {"record_change", "record_anomaly", "raise_alert", "add_dependency", "retire_dependency",
+                          "resolve_incident"}
+    assert {"check_hypothesis", "correlate_alerts", "conclude"} <= offered

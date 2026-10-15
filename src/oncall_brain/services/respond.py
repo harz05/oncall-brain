@@ -55,35 +55,50 @@ def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[An
 
 
 def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> dict[str, Any]:
-    checks = _data(trace, "check_hypothesis")
-    supported = [c for c in checks if c["verdict"] == "supports"]
+    """The result card. Cause, ruled-out suspects and the update come from the graph (so a re-run of a finished
+    incident still shows them); counters and memory come from this run's trace."""
     opened = trace[0].data  # respond() always opens the incident first
     at = opened["at"]
-    baseline = repo.read("recent_changes", since=at - WINDOW, until=at).rows
+    checks = _data(trace, "check_hypothesis")
+    cause = (repo.read("cause_facts", incident_id=incident_id).rows or [None])[0]
+    if cause:
+        checked = next((c for c in reversed(checks) if c["change"] == cause["change"]), {})
+        cause = {**cause, "verdict": "supports", "retired_path": [], **checked}
+    refuted = [{**r, "live_path": [], "retired_path": []} for r in
+               repo.read("refuted_hypotheses", incident_id=incident_id).rows]
+    window = {"since": at - WINDOW, "until": at}
+    flat = (repo.read("recent_changes", **window).rows or [None])[0]
+    smart = (repo.read("anomaly_baseline", **window).rows or [None])[0]
     investigator = [s for s in trace if s.role == "investigator" and s.tool != "handoff"]
     recalls = (_data(trace, "recall_similar") or [[]])[0]
     memory = _data(trace, "hypothesize_from_memory")
     blast = (_data(trace, "blast_radius", "triage") or [[]])[0]
     at_risk_rows = (_data(trace, "blast_radius", "comms") or [[]])[0]
-    direct = {r["service"] for r in blast}
-    updates = _data(trace, "post_update")
+    storm = next((d for d in _data(trace, "correlate_alerts") if d["alerts"]), None)
+    alerting = {opened["service"], *(x["service"] for x in (storm or {}).get("alerts", []))}
+    direct = {r["service"] for r in blast} | alerting
+    update = (repo.read("incident_update", incident_id=incident_id).rows or [{"text": None}])[0]["text"]
+    posted = _data(trace, "post_update")
     return {
-        "root_cause": supported[0] if supported else None,
-        "refuted": [c for c in checks if c["verdict"] != "supports"],
-        "baseline_pick": baseline[0] if baseline else None,
-        "baseline_correct": bool(supported and baseline and baseline[0]["change"] == supported[0]["change"]),
+        "root_cause": cause,
+        "refuted": refuted,
+        "baseline_pick": flat,
+        "baseline_correct": bool(cause and flat and flat["change"] == cause["change"]),
+        "anomaly_baseline_pick": smart,
+        "anomaly_baseline_correct": bool(cause and smart and smart["change"] == cause["change"]),
         "memory": {"recalled": [r for r in recalls if r["score"] >= RECALL_MIN_SCORE],
                    "suspects": memory[0] if memory else [],
-                   "solved_by_memory": bool(supported and memory and any(
-                       m["change"] == supported[0]["change"] for m in memory[0]))},
+                   "solved_by_memory": bool(cause and memory and any(
+                       m["change"] == cause["change"] for m in memory[0]))},
         "paged": list({p["person"]: p for p in _data(trace, "page_on_call")}.values()),
         "blast_radius": sorted(direct),
-        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct - {opened["service"]}),
-        "update_text": updates[0]["text"] if updates else None,
+        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct),
+        "update_text": update,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),
-        "checks_to_culprit": next((i + 1 for i, c in enumerate(checks) if c["verdict"] == "supports"), None),
-        "runbook": updates[0]["runbook"] if updates else None,
-        "expert": updates[0]["expert"] if updates else None,
-        "storm": next((d for d in _data(trace, "correlate_alerts") if d["alerts"]), None),
+        "checks_to_culprit": next((i + 1 for i, c in enumerate(checks) if cause and c["change"] == cause["change"]),
+                                  None),
+        "runbook": posted[0]["runbook"] if posted else None,
+        "expert": posted[0]["expert"] if posted else None,
+        "storm": storm,
     }

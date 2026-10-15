@@ -1,4 +1,4 @@
-from oncall_brain.domain.verdict import CheckFacts, judge
+from oncall_brain.domain.verdict import CheckFacts, judge, leading
 
 PATH = ["svc:checkout", "svc:payments", "svc:payments-gw"]
 
@@ -37,6 +37,14 @@ def test_change_on_the_alerting_service_itself():
                        anomalous={"svc:checkout"})).verdict == "supports"
 
 
-def test_storm_suspect_that_cannot_reach_every_alerting_service_is_refuted():
-    v = judge(facts(storm_unexplained=("svc:refunds", "svc:checkout")))
-    assert v.verdict == "refutes" and "cannot explain the alerts on refunds, checkout" in v.reason
+def h(cid, coverage=1, source="dependency-path", hops=1, at=0):
+    return {"change_id": cid, "coverage": coverage, "source": source, "hops": hops, "at": at}
+
+
+def test_leading_cause_explains_the_most_alerts_then_memory_then_nearest():
+    lead, lost = leading([h("subs", coverage=1, hops=0), h("pg", coverage=3, hops=2)])
+    assert lead["change_id"] == "pg" and "explains 3" in lost[0][1]
+    lead, lost = leading([h("near", hops=0), h("mem", source="memory", hops=3)])
+    assert lead["change_id"] == "mem" and "memory" in lost[0][1]
+    lead, lost = leading([h("far", hops=3), h("near", hops=1)])
+    assert lead["change_id"] == "near" and "nearer" in lost[0][1]

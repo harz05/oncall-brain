@@ -35,7 +35,8 @@ class FalkorRepository:
         """One writer per tenant across processes (API, MCP, scripts): a Redis lock next to the graph.
         FalkorDB commits each write query atomically, but two agents MERGE-ing the same edge at the same
         moment can both miss it and both create it, so whole agent runs on a tenant are serialised."""
-        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=120, blocking_timeout=120)
+        # The lease outlives any sane run (an LLM planner can take minutes); a crashed holder frees it after 15 min.
+        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=900, blocking_timeout=120)
 
     def _run(self, name: str, params: dict[str, Any], readonly: bool) -> QueryRun:
         q = queries.get(name)

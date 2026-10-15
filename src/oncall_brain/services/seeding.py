@@ -40,7 +40,7 @@ class TenantLimitReached(Exception):
     pass
 
 
-def reset(store: GraphStore, tenant: str, seed_value: int = 7, max_tenants: int | None = None) -> str:
+def reset(store: GraphStore, tenant: str, seed_value: int | None = None, max_tenants: int | None = None) -> str:
     """Restore the pristine copy (GRAPH.COPY); seed from scratch if there is none (or it can't be copied).
     A new tenant costs two graphs, so callers facing the network pass a cap; existing tenants always reset."""
     # ponytail: check-then-seed race, so concurrent new-tenant resets can overshoot a little; fine for a soft cap.
@@ -50,7 +50,8 @@ def reset(store: GraphStore, tenant: str, seed_value: int = 7, max_tenants: int 
     with store.lock(tenant):
         if store.restore(tenant):
             rows = store.tenant(tenant).read("data_version").rows
+            seed_value = seed_value or (rows[0]["seed"] if rows else None) or 7  # keep the tenant's own seed
             if rows and rows[0]["version"] == fingerprint(generate(seed_value)):
                 return "restored"
-        seed(store, tenant, seed_value)  # no copy, or one built by an older generator
+        seed(store, tenant, seed_value or 7)  # no copy, or one built by an older generator
         return "seeded"

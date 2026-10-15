@@ -21,6 +21,6 @@ def load_board(repo: GraphRepository, incident_id: str) -> tuple[dict[str, Any],
         "recalls": [x for x in r["recalls"] if x["incident"]],
         "cause_service": next((h["service"] for h in hyps if h["status"] in ("confirmed", "supported")), None),
         "storm": r["storm"],  # other alerts in the storm window
-        "shared_upstream": r["shared_upstream"],  # set by correlate_alerts, betweenness order
+        "shared_upstream": r["shared_upstream"],  # set by correlate_alerts, convergence order (fewest total hops first)
     }
     return board, q

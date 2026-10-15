@@ -10,7 +10,7 @@ from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain import update
 from oncall_brain.domain.models import Highlight, ToolOutput
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, STORM_WINDOW, WINDOW
-from oncall_brain.domain.verdict import CheckFacts, judge
+from oncall_brain.domain.verdict import CheckFacts, judge, leading
 
 
 def _path_edges(path: list[str], rel: str = "DEPENDS_ON") -> list[tuple[str, str, str]]:
@@ -121,35 +121,47 @@ def page_on_call(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
 
 @tool(writes=True)
 def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Alert storm: fold other alerts from the last 15 minutes into this incident, find the services every
-    alerting service depends on (shared upstream), and rank them with betweenness centrality (algo.betweenness:
-    where dependency paths converge). Investigators then check suspects there first, and a suspect that cannot
-    reach every alerting service is refuted."""
+    """Alert storm: of the alerts from the last 15 minutes, fold into this incident the ones that share an
+    upstream service which went red, find the services all of them depend on (shared upstream) and rank those by
+    convergence (fewest total hops from the alerting services). Suspects there are checked first, and each
+    supported suspect is scored by how many of the correlated alerts it can explain."""
     head, qs = _head(ctx, a.incident_id)
     storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, window=STORM_WINDOW)
     qs.append(storm)
+    origin = head["service"]
     if not storm.rows:
         return ToolOutput(summary="No other alerts in the storm window", data={"alerts": [], "shared": []},
                           queries=qs)
-    services = sorted({head["service"], *(r["service"] for r in storm.rows)})
-    shared_q = ctx.repo.read("shared_upstream", services=services, at=head["at"])
-    qs.append(shared_q)
-    shared_ids = [r["service"] for r in shared_q.rows]
-    ranked: list[dict] = []
-    if shared_ids:
-        cq = ctx.repo.read("chokepoints", services=shared_ids)
-        qs.append(cq)
-        ranked = [{"service": r["service"], "score": r["score"], "rank": i + 1} for i, r in enumerate(cq.rows)]
-    qs.append(ctx.repo.write("record_correlation", incident_id=a.incident_id, origin=head["service"],
-                             alerts=[{"alert": r["alert"], "service": r["service"]} for r in storm.rows],
-                             shared=ranked))
-    names = ", ".join(r["service"].removeprefix("svc:") for r in storm.rows)
-    top = ranked[0]["service"].removeprefix("svc:") if ranked else None
-    summary = (f"{len(storm.rows) + 1} alerts ({names} too) share {len(ranked)} upstream services; "
-               f"paths converge on {top}" if ranked else f"{len(storm.rows) + 1} alerts share no upstream service")
-    hl = Highlight(nodes=services + [r["service"] for r in ranked],
-                   edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in storm.rows])
-    return ToolOutput(summary=summary, data={"alerts": storm.rows, "shared": ranked}, queries=qs, highlight=hl)
+    up = ctx.repo.read("storm_upstream", services=sorted({origin, *(r["service"] for r in storm.rows)}),
+                       at=head["at"], since=head["at"] - WINDOW)
+    qs.append(up)
+    cover: dict[str, dict[str, int]] = {}
+    red = set()
+    for r in up.rows:
+        cover.setdefault(r["service"], {})[r["alerting"]] = r["hops"]
+        if r["red"]:
+            red.add(r["service"])
+    # Related = shares with this alert an upstream service that actually went red. Unrelated alerts that merely
+    # share a quiet piece of infrastructure (a cache everyone uses) stay separate incidents.
+    related = {s for u in red if origin in cover[u] for s in cover[u]} - {origin}
+    alerts = [r for r in storm.rows if r["service"] in related]
+    if not alerts:
+        return ToolOutput(summary=f"{len(storm.rows)} other alert(s) in the window share no upstream service that "
+                          "went red; investigating this one on its own", data={"alerts": [], "shared": []}, queries=qs)
+    group = {origin, *related}
+    shared = sorted((u for u, c in cover.items() if group <= c.keys()),
+                    key=lambda u: (sum(cover[u][s] for s in group), u))
+    ranked = [{"service": u, "hops": sum(cover[u][s] for s in group), "rank": i + 1, "red": u in red}
+              for i, u in enumerate(shared)]
+    qs.append(ctx.repo.write("record_correlation", incident_id=a.incident_id, origin=origin,
+                             alerts=[{"alert": r["alert"], "service": r["service"]} for r in alerts], shared=ranked))
+    names = ", ".join(r["service"].removeprefix("svc:") for r in alerts)
+    summary = (f"{len(alerts) + 1} related alerts ({names} too) share {len(ranked)} upstream services; "
+               f"paths converge on {ranked[0]['service'].removeprefix('svc:')}" if ranked
+               else f"{len(alerts) + 1} related alerts share no common upstream service")
+    hl = Highlight(nodes=sorted(group) + [r["service"] for r in ranked],
+                   edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in alerts])
+    return ToolOutput(summary=summary, data={"alerts": alerts, "shared": ranked}, queries=qs, highlight=hl)
 
 
 @tool(writes=True)
@@ -253,18 +265,47 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
     facts = CheckFacts(
         change_service=f["service"], alert_service=f["origin"],
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],
-        live_path=live_path, any_path=any_path, anomalous=anomalous, storm_unexplained=tuple(unexplained))
+        live_path=live_path, any_path=any_path, anomalous=anomalous)
     v = judge(facts)
+    explains = 1 + len(others) - len(unexplained)  # of the correlated alerts (just this one outside a storm)
+    reason = v.reason
+    if v.verdict == "supports" and others:
+        reason += f"; explains {explains} of {len(others) + 1} correlated alerts" + (
+            f" (not {', '.join(x.removeprefix('svc:') for x in unexplained)})" if unexplained else "")
+    v = type(v)(v.verdict, reason)
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,
-                             reason=v.reason, path=live_path or any_path, at=f["at"]))
+                             reason=v.reason, path=live_path or any_path, at=f["at"], explains=explains))
     shown = live_path or any_path
     hl = Highlight(nodes=shown + [f["change"]], edges=_path_edges(shown) + [(f["change"], f["service"], "CHANGED")])
     return ToolOutput(summary=f"{v.verdict.upper()} {f['change']}: {v.reason}",
                       data={"change": f["change"], "service": f["service"], "summary": f["summary"],
                             "verdict": v.verdict, "reason": v.reason, "live_path": live_path,
-                            "retired_path": any_path},
+                            "retired_path": any_path, "explains": explains},
                       queries=qs, highlight=hl)
+
+
+@tool(writes=True)
+def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
+    """Several suspects survived their checks: keep one leading cause (explains the most correlated alerts, then
+    a memory suggestion, then nearest the alert, then newest) and record why each other one lost."""
+    from oncall_brain.services.board import load_board
+
+    head, qs = _head(ctx, a.incident_id)
+    board, bq = load_board(ctx.repo, a.incident_id)
+    qs.append(bq)
+    supported = [h for h in board["hypotheses"] if h["status"] == "supported"]
+    if len(supported) < 2:
+        return ToolOutput(summary="Nothing to rank", data={"leading": supported[0]["change_id"] if supported
+                                                            else None, "outranked": []}, queries=qs)
+    lead, lost = leading(supported)
+    qs.append(ctx.repo.write("record_outranked", at=head["at"], rows=[
+        {"id": h["id"], "evidence_id": "ev:" + h["id"].removeprefix("hyp:"), "reason": why} for h, why in lost]))
+    return ToolOutput(summary=f"Leading cause {lead['change_id']}; outranked " +
+                      ", ".join(h["change_id"] for h, _ in lost),
+                      data={"leading": lead["change_id"],
+                            "outranked": [{"change": h["change_id"], "reason": why} for h, why in lost]},
+                      queries=qs, highlight=Highlight(nodes=[lead["change_id"], lead["service"]]))
 
 
 @tool(writes=True)
@@ -289,7 +330,7 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
                       queries=qs, highlight=Highlight(nodes=cites))
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def resolve_incident(ctx: ToolContext, a: ResolveArgs) -> ToolOutput:
     """Human-confirmed fix: mark the cause, resolve the incident and learn (or reinforce) a runbook for that
     service and change kind. This is what the next incident will recall."""
@@ -424,7 +465,7 @@ def _name(service: str) -> str:
     return service.removeprefix("svc:")
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def record_change(ctx: ToolContext, a: ChangeEvent) -> ToolOutput:
     """Record a deploy or config change on a service (from CI/CD or a human). Investigations see it at once."""
     at = a.at or int(time.time())
@@ -437,7 +478,7 @@ def record_change(ctx: ToolContext, a: ChangeEvent) -> ToolOutput:
                       highlight=Highlight(nodes=[cid, a.service], edges=[(cid, a.service, "CHANGED")]))
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def record_anomaly(ctx: ToolContext, a: AnomalyEvent) -> ToolOutput:
     """Record a monitoring anomaly (latency, errors, saturation) on a service."""
     at = a.at or int(time.time())
@@ -449,7 +490,7 @@ def record_anomaly(ctx: ToolContext, a: AnomalyEvent) -> ToolOutput:
                       queries=[q], highlight=Highlight(nodes=[a.service]))
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def raise_alert(ctx: ToolContext, a: AlertEvent) -> ToolOutput:
     """Record an alert on a service. Respond to it with respond_to_alert (MCP) or POST .../alerts/{id}/respond."""
     at = a.at or int(time.time())
@@ -462,7 +503,7 @@ def raise_alert(ctx: ToolContext, a: AlertEvent) -> ToolOutput:
                       highlight=Highlight(nodes=[a.service]))
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def add_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
     """Record that `caller` starts depending on `callee` (a new DEPENDS_ON edge valid from `at`)."""
     at = a.at or int(time.time())
@@ -473,7 +514,7 @@ def add_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
                       highlight=Highlight(nodes=[a.caller, a.callee], edges=[(a.caller, a.callee, "DEPENDS_ON")]))
 
 
-@tool(writes=True)
+@tool(writes=True, agent=False)
 def retire_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
     """Record that `caller` stopped depending on `callee` at `at`. History stays; later investigations
     no longer follow that edge (and say so when they refute a suspect behind it)."""

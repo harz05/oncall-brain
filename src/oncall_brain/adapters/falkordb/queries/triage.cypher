@@ -52,25 +52,17 @@ WHERE other.id <> a.id AND other.at >= a.at - $window AND other.at <= a.at
 RETURN other.id AS alert, other.name AS name, s.id AS service, other.at AS at
 ORDER BY at
 
-// name: shared_upstream
-// purpose: Services that every alerting service depends on (live edges at alert time, 0..6 hops): where one common cause would have to sit.
+// name: storm_upstream
+// purpose: For each alerting service, every service it depends on at alert time (live edges, 0..6 hops) with the hop count, and whether that upstream service went red in the window. Related alerts share a red upstream; their common upstream is where one cause would sit.
 UNWIND $services AS sid
 MATCH p = (:Service {id: sid})-[:DEPENDS_ON*0..6]->(u:Service)
 WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
-WITH u, count(DISTINCT sid) AS covers
-WHERE covers = size($services)
-RETURN u.id AS service
-
-// name: chokepoints
-// purpose: Graph algorithm: betweenness centrality over Service/DEPENDS_ON (algo.betweenness) ranks the shared upstream by how many dependency paths run through each service. Exact on this graph size (samplingSize > node count, fixed seed).
-CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON'], samplingSize: 1000,
-                       samplingSeed: 1}) YIELD node, score
-WHERE node.id IN $services
-RETURN node.id AS service, score
-ORDER BY score DESC, service
+WITH u, sid, min(length(p)) AS hops
+RETURN u.id AS service, sid AS alerting, hops,
+       size([(x:Anomaly)-[:ON]->(u) WHERE x.at >= $since AND x.at <= $at | x]) > 0 AS red
 
 // name: record_correlation
-// purpose: Fold the other alerts into this incident (one incident, not one per alert), count their services as impacted, and mark the ranked shared upstream.
+// purpose: Fold the related alerts into this incident (one incident, not one per alert), count their services as impacted, and mark the shared upstream ranked by convergence (fewest total hops from the alerting services).
 MATCH (i:Incident {id: $incident_id})
 FOREACH (r IN $alerts |
   MERGE (other:Alert {id: r.alert})
@@ -84,5 +76,5 @@ WITH DISTINCT i
 UNWIND $shared AS u
 MATCH (svc:Service {id: u.service})
 MERGE (i)-[x:SHARED_UPSTREAM]->(svc)
-SET x.rank = u.rank, x.betweenness = u.score
+SET x.rank = u.rank, x.hops = u.hops
 RETURN count(svc) AS shared

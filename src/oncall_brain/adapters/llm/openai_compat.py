@@ -21,7 +21,6 @@ from oncall_brain.domain.planner import next_decision
 
 TIMEOUT = 15.0
 ROLES = ["triage", "investigator", "comms"]  # handoffs only go forward, so a model cannot loop the roles
-HUMAN_ONLY = {"resolve_incident"}  # confirming the root cause is the human's call, never an agent's
 ID_PREFIX = {"service": "svc", "from_service": "svc", "to_service": "svc", "change_id": "chg"}
 
 SYSTEM = """You are the {role} agent of an on-call team: triage -> investigator -> comms.
@@ -50,7 +49,8 @@ Ask = Callable[[str, str, list[dict[str, Any]]], tuple[str | None, dict[str, Any
 
 def tool_list(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     keep = ("name", "description", "input_schema")
-    return [{k: t[k] for k in keep} for t in tools if t["name"] not in HUMAN_ONLY] + [FINISH]
+    # Tools registered with agent=False (confirming a fix, recording graph facts) are never offered.
+    return [{k: t[k] for k in keep} for t in tools if REGISTRY[t["name"]].agent] + [FINISH]
 
 
 def fallback(role: str, board: dict[str, Any], why: str) -> Decision:
@@ -76,7 +76,7 @@ def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: 
         nxt = ROLES[ROLES.index(role) + 1:]
         handoff = args.get("handoff_to") if args.get("handoff_to") in nxt else (nxt[0] if nxt else None)
         return Decision(action="done", handoff_to=handoff, reason=str(args.get("reason") or text or "LLM finished"))
-    if name not in REGISTRY or name in HUMAN_ONLY:
+    if name not in REGISTRY or not REGISTRY[name].agent:
         return fallback(role, board, f"unknown tool {name!r}")
     tool = REGISTRY[name]
     fields = tool.args_model.model_fields
