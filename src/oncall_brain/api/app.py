@@ -227,12 +227,12 @@ def respond_stream(repo: Repo, alert_id: str, compare: Literal["memory"] | None 
 
 @app.get("/api/tenants/{tenant}/incidents/{incident_id}")
 def incident(repo: Repo, incident_id: str) -> dict[str, Any]:
-    """An incident as the graph has it: head (alert, service, status), the latest status update and its steps."""
+    """An incident as the graph has it: head (alert, service, status), its outcome (cause, confidence, pages,
+    sources, update; counters are 0 without a live trace) and its persisted steps."""
     head = repo.read("incident_head", incident_id=incident_id).rows
     if not head:
         raise HTTPException(404, f"unknown incident {incident_id!r}")
-    update = repo.read("incident_update", incident_id=incident_id).rows
-    return {**head[0], "update_text": update[0]["text"] if update else None,
+    return {**head[0], "outcome": respond_svc.outcome(repo, incident_id, []),
             "steps": repo.read("incident_steps", incident_id=incident_id).rows}
 
 

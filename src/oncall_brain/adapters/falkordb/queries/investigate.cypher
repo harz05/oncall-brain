@@ -245,8 +245,9 @@ ORDER BY change
 MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WHERE h.status IN ['confirmed', 'supported']
 OPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)
-RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, e.path AS live_path,
-       h.status AS status
+OPTIONAL MATCH (c)-[:AUTHORED_BY]->(p:Person)
+RETURN c.id AS change, s.id AS service, c.summary AS summary, c.kind AS kind, c.at AS at, p.name AS author,
+       e.reason AS reason, e.path AS live_path, h.status AS status
 ORDER BY status, size(coalesce(e.path, [])) DESC
 LIMIT 1
 

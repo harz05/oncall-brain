@@ -119,6 +119,13 @@ RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
 MATCH (:Incident {id: $incident_id})-[:HAS_UPDATE]->(m:Message)
 RETURN m.text AS text
 
+// name: incident_sources
+// purpose: What the incident's status update cites (CITES edges), with a human title per node, so the UI can show "CR-881 Reduce idle connections" instead of an id.
+MATCH (:Incident {id: $incident_id})-[:HAS_UPDATE]->(:Message)-[:CITES]->(n)
+RETURN n.id AS id, labels(n)[0] AS kind,
+       coalesce(n.title, n.summary, n.name, n.channel) AS title, n.at AS at
+ORDER BY kind, at
+
 // name: cause_context
 // purpose: Company knowledge behind the cause: current docs that mention the culprit change, then decision records and postmortems about its service, written before the incident. The update cites them so the on-call engineer sees the decision history.
 MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)

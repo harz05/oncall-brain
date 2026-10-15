@@ -1,8 +1,9 @@
 // On-call Brain UI. Three views:
-//   Incidents  an inbox; each incident shows the agents working live, then the update the comms agent posted (with
-//              Confirm / Wrong cause), and "Show me why": the graph, every agent step and the Cypher behind it.
-//   Ask        company questions answered from the graph, as a chat.
-//   Connect    how to plug it in: MCP (Claude Code), the alert webhook, Slack, your own data.
+//   Incidents  an inbox (list left, the open incident right). An incident leads with the answer: likely cause with a
+//              confidence label, what broke, who is paged, the fix, Confirm / Wrong cause; "Show me why" is the
+//              incident subgraph, the three agents' steps and the Cypher behind every call.
+//   Ask        company questions answered from the graph, as a chat with source chips.
+//   Connect    how to plug it in: the alert webhook, MCP (Claude Code), Slack, your own data.
 // No build step. Every piece of data reaches the DOM as text (see h()), never as HTML.
 
 import * as G from './graph.js';
@@ -10,28 +11,43 @@ import * as G from './graph.js';
 const { kindOf, short, names } = G;
 const params = new URLSearchParams(location.search);
 const OFFLINE = params.has('offline'); // ?offline=1 replays web/fixtures (recorded from the real code)
-const STEP_MS = Number(params.get('step_ms')) || 750; // fastest pace at which steps appear (an LLM is slower anyway)
+const STEP_MS = Number(params.get('step_ms')) || 700; // fastest pace at which steps appear (a model is slower anyway)
 const ROLES = ['triage', 'investigator', 'comms'];
+const ROLE_N = { triage: 1, investigator: 2, comms: 3 };
 const ROLE_JOB = { triage: 'Finds who is hurt and pages on-call', investigator: 'Tests every recent change against the graph',
   comms: 'Writes the update, with sources' };
 const SCENARIO_NOTE = {
-  1: 'A bad config change hides among four other recent changes. Watch each decoy get ruled out.',
-  2: 'The same kind of failure again. Confirm the first fix and memory solves this one in a few steps.',
+  1: 'A bad config change hides among four other recent changes.',
+  2: 'The same failure again. Confirm the first fix and memory solves this one in a few steps.',
   3: 'Three services alert within four minutes. One shared cause, or three?',
 };
 const EXAMPLES = ['Who owns kafka?', 'Why was legacy-billing retired?', 'Why was the payments gateway pool lowered?',
   'How do I roll back a bad deploy on cart?', 'What happened to auth?', 'Who knows payments-gw?'];
+const MODELS = { 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-haiku-5-5': 'Claude Haiku 5.5', 'claude-fable-5-1': 'Claude Fable 5.1', rules: 'Rules' };
+const SYMPTOM_WORD = { latency: 'slowdown', errors: 'errors', saturation: 'saturation' };
+const KIND_WORD = { Doc: 'Doc', Ticket: 'Ticket', Message: 'Chat', Change: 'Change', Person: 'Person', Runbook: 'Runbook',
+  design: 'Design', decision: 'Decision', postmortem: 'Postmortem', runbook: 'Runbook', chat: 'Chat', ticket: 'Ticket',
+  status_update: 'Status update', service: 'Service', team: 'Team', person: 'Person', change: 'Change', incident: 'Incident',
+  message: 'Chat', doc: 'Doc' };
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = encodeURIComponent;
 const plural = (n, word) => `${n} ${n === 1 ? word : word === 'query' ? 'queries' : `${word}s`}`;
 const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
-  timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST';
+  timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).replace(',', '');
+// Human text never shows graph id prefixes.
+const plain = (text) => String(text ?? '').replace(/\b(svc|chg|inc|hyp|rb|alert|person|team|doc|ticket|msg|ev):/g, '');
+const idIn = (text, kind) => (String(text || '').match(new RegExp(`\\b${kind}:[A-Za-z0-9_.:-]+`)) || [null])[0];
+const modelName = (by) => MODELS[by] || by || 'Rules';
+const kindWord = (k) => KIND_WORD[k] || String(k || '').replace(/_/g, ' ');
+const minutesBetween = (a, b) => Math.round(Math.abs(a - b) / 60);
+const mobile = () => matchMedia('(max-width: 900px)').matches;
 
 // running: an agent run is streaming; graphOwner: whose picture the graph shows (a run, 'ask', or null)
-const state = { tenant: '', health: null, caption: '', stats: '', alerts: [], runs: [], current: null,
-  view: 'incidents', tab: 'answer', running: false, skip: false, chat: [], graphOwner: null };
+const state = { tenant: '', health: null, graph: null, alerts: [], runs: [], current: null, view: 'incidents',
+  tab: 'answer', running: false, skip: false, chat: [], graphOwner: null, asking: false };
 
 // ---------- DOM: strings become text nodes, so API data is never parsed as HTML ----------
 function h(tag, attrs = {}, ...kids) {
@@ -45,19 +61,23 @@ function h(tag, attrs = {}, ...kids) {
   for (const k of kids.flat(Infinity)) if (k != null && k !== false) el.append(k instanceof Node ? k : String(k));
   return el;
 }
+const set = (id, ...kids) => $(id).replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+const chip = (text, cls = '') => h('span', { class: `chip-static ${cls}` }, text);
 const pathChips = (ids) => h('span', { class: 'path' }, ids.map((id, i) => [i ? h('span', { class: 'arrow' }, '→') : null,
   h('span', { class: 'hop' }, short(id))]));
-const goto = (view, label) => h('a', { href: '#', class: 'link', onclick: (e) => { e.preventDefault(); showView(view); } }, label);
+const skel = (w = '70%') => h('span', { class: 'skel', style: `width:${w}` });
 
 let toastTimer;
 function toast(text, isError = false) {
   const el = $('toast');
   el.textContent = text;
   el.classList.toggle('error', isError);
+  el.setAttribute('role', isError ? 'alert' : 'status');
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 10000 : 5000);
 }
+const announce = (text) => { $('sr-status').textContent = text; };
 
 // ---------- API ----------
 const T = () => `/api/tenants/${enc(state.tenant)}`;
@@ -112,19 +132,22 @@ async function* runEvents(path) {
 
 // ---------- runs and incidents ----------
 // A run is one agent response to an alert, kept for this page's lifetime. An incident handled before the page was
-// opened is loaded from the graph instead (GET /incidents/{id}): its update and steps, without the trace details.
+// opened is loaded from the graph instead (GET /incidents/{id}): its outcome and steps, without the live trace.
 function newRun(alert, alerts, act) {
   return { alert, alerts, act, home: alert.service, incident: null, steps: [], res: null, ablation: null,
     resolved: null, done: false, error: null, folded: alerts.length < 2, showAlt: false,
     touched: G.empty(), cause: G.empty() };
 }
 
-function statusOf(run, serverStatus) {
-  if (run?.error) return ['error', 'Failed'];
-  if (run && !run.done) return ['working', 'Investigating'];
-  if (run?.resolved || serverStatus === 'resolved' || run?.status === 'resolved') return ['resolved', 'Resolved'];
-  if (run?.res) return run.res.outcome.root_cause ? ['found', 'Cause found'] : ['human', 'Needs a human'];
-  return ['open', 'Open'];
+const outcomeOf = (cur) => cur?.res?.outcome || null;
+
+function statusOf(cur, serverStatus) {
+  if (cur?.error) return ['error', 'Failed'];
+  if (cur && !cur.done) return ['working', 'Investigating'];
+  if (cur?.resolved || serverStatus === 'resolved' || cur?.status === 'resolved') return ['confirmed', 'Confirmed'];
+  const o = outcomeOf(cur);
+  if (o) return o.root_cause ? ['found', 'Cause found'] : ['human', 'Needs a human'];
+  return serverStatus ? ['open', 'Open'] : ['new', 'New'];
 }
 
 function scenarios() { // the demo company's scripted alerts, grouped by act; the act's last alert is the one answered
@@ -136,8 +159,9 @@ function scenarios() { // the demo company's scripted alerts, grouped by act; th
   });
 }
 const fired = (sc) => !!sc.trigger.incident || state.runs.some((r) => r.act === sc.act);
-const scenarioTitle = (sc) => (sc.alerts.length > 1 ? `${sc.alerts.length} alerts at once`
-  : `${short(sc.trigger.service)} is ${sc.trigger.symptom === 'latency' ? 'slow' : `showing ${sc.trigger.symptom}`}`);
+const nextScenario = () => scenarios().find((s) => !fired(s));
+const scenarioTitle = (sc) => (sc.alerts.length > 1 ? 'Three alerts at once'
+  : `${short(sc.trigger.service)} is ${sc.trigger.symptom === 'latency' ? 'slow' : `throwing ${sc.trigger.symptom}`}`);
 
 function inboxItems() {
   const items = new Map();
@@ -153,217 +177,344 @@ function inboxItems() {
     else if (run.folded) rows.push({ incident: run.incident, alerts: run.alerts, run });
     else for (const a of run.alerts) rows.push({ incident: null, alerts: [a], run }); // a storm before correlation
   }
+  // Alerts raised through the webhook that nobody has run the agents on yet.
+  for (const a of state.alerts) {
+    if (!a.incident && a.act == null && !state.runs.some((r) => r.alert.id === a.id)) rows.push({ fresh: a, alerts: [a] });
+  }
   const latest = (it) => Math.max(...it.alerts.map((a) => a.at));
   return rows.sort((x, y) => latest(y) - latest(x));
 }
 
-// ---------- rendering: inbox, demo alerts, landing ----------
+// ---------- header: simulate menu ----------
+function closeMenus() {
+  for (const id of ['simulate-menu']) {
+    $(id).hidden = true;
+    $('btn-simulate').setAttribute('aria-expanded', 'false');
+  }
+}
+
+function renderSimulateMenu() {
+  const list = scenarios(), next = nextScenario();
+  const items = list.map((sc) => {
+    const done = fired(sc);
+    return h('div', { class: `menu-item${sc === next ? ' next' : ''}`, role: 'none' },
+      h('div', { class: 'mi-text' }, h('b', {}, scenarioTitle(sc)), h('span', { class: 'muted small' }, SCENARIO_NOTE[sc.act] || '')),
+      h('button', { class: sc === next ? 'primary-btn' : 'ghost', role: 'menuitem', disabled: done || state.running,
+        onclick: () => { closeMenus(); fire(sc.act); } }, done ? 'Simulated ✓' : 'Simulate'));
+  });
+  const svcs = [...(state.graph?.nodes || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const custom = OFFLINE ? null : h('details', { class: 'custom' },
+    h('summary', {}, 'Raise a custom alert'),
+    h('form', { class: 'custom-form', onsubmit: (e) => { e.preventDefault(); closeMenus(); raiseCustom(e.target); } },
+      h('label', {}, 'Service', h('select', { name: 'service', required: true }, svcs.map((n) => h('option', { value: n.id }, n.name)))),
+      h('label', {}, 'Symptom', h('select', { name: 'symptom' }, ['latency', 'errors', 'saturation'].map((s) => h('option', { value: s }, s)))),
+      h('label', {}, 'Alert name', h('input', { name: 'name', maxlength: 200, placeholder: 'cart 5xx above 1%', required: true })),
+      h('button', { class: 'primary-btn', disabled: state.running }, 'Raise and investigate')));
+  set('simulate-menu', h('p', { class: 'menu-head' }, 'Simulate an incident', h('span', { class: 'muted small' }, 'Synthetic company, real agents')),
+    items, custom,
+    h('div', { class: 'menu-foot' },
+      h('span', {}, `Steps chosen by ${plannerLabel()} · This company: ${state.tenant}`),
+      h('button', { class: 'ghost', disabled: state.running, onclick: () => { closeMenus(); doReset(); } }, 'Reset demo company')));
+}
+
+function plannerLabel() {
+  const p = state.health?.planner || '';
+  return /deterministic|mock/i.test(p) ? 'the rule planner' : modelName(p.split(' ')[0]);
+}
+const modelDecides = () => !/deterministic|mock/i.test(state.health?.planner || 'mock');
+
+// ---------- rendering: inbox and landing ----------
 function renderInbox() {
   const rows = inboxItems();
-  $('inbox-count').textContent = rows.length ? String(rows.length) : '';
-  $('inbox').replaceChildren(...(rows.length ? rows.map((it) => {
+  const open = rows.filter((it) => statusOf(it.run, it.status)[0] !== 'confirmed').length;
+  set('inbox-counts', rows.length ? `${open} open · ${rows.length - open} confirmed` : '');
+  set('inbox', rows.length ? rows.map((it) => {
     const [cls, label] = statusOf(it.run, it.status);
-    const trigger = it.run?.alert || it.alerts.find((a) => `inc:${short(a.id)}` === it.incident) || it.alerts.at(-1);
+    const trigger = it.run?.alert || it.fresh || it.alerts.find((a) => `inc:${short(a.id)}` === it.incident) || it.alerts.at(-1);
     const many = it.alerts.length > 1;
     const selected = state.current && (state.current === it.run || (it.incident && state.current.incident === it.incident));
+    const open = () => (it.run ? openRun(it.run) : it.fresh ? runAlert(it.fresh, [it.fresh], null) : openStored(it.incident));
     return h('li', {},
-      h('button', { class: `inbox-item${selected ? ' selected' : ''}`, onclick: () => (it.run ? openRun(it.run) : openStored(it.incident)) },
+      h('button', { class: `inbox-item${selected ? ' selected' : ''}`, title: trigger.name, onclick: open, 'aria-current': selected ? 'true' : null },
         h('span', { class: `dot ${cls}` }),
         h('span', { class: 'ii-main' },
-          h('span', { class: 'ii-title' }, many ? `${it.alerts.length} alerts → 1 incident` : trigger.name),
+          h('span', { class: 'ii-title' }, many ? `${it.alerts.length} alerts, 1 incident` : trigger.name),
           h('span', { class: 'ii-sub' }, many ? it.alerts.map((a) => short(a.service)).join(', ') : short(trigger.service),
             ` · ${ist(trigger.at)}`)),
         h('span', { class: `status-pill ${cls}` }, label)));
-  }) : [h('li', { class: 'inbox-empty' }, h('p', {}, 'No incidents.'),
-    h('p', { class: 'muted small' }, 'Fire a demo alert below, or send one in through the webhook (Connect).'))]));
-}
-
-function renderScenarios() {
-  const list = scenarios(), next = list.find((s) => !fired(s));
-  $('scenarios').replaceChildren(...list.map((sc) => {
-    const done = fired(sc);
-    return h('li', { class: `scenario${done ? ' done' : ''}${sc === next ? ' next' : ''}` },
-      h('div', { class: 'sc-text' }, h('b', {}, scenarioTitle(sc)), h('span', { class: 'muted small' }, SCENARIO_NOTE[sc.act] || '')),
-      h('button', { class: sc === next ? 'primary-btn' : 'ghost', disabled: done || state.running,
-        onclick: () => fire(sc.act) }, done ? 'Fired' : 'Fire'));
-  }));
+  }) : [h('li', { class: 'inbox-empty' }, h('p', {}, h('b', {}, 'No open incidents.')),
+    h('p', { class: 'muted small' }, 'Alerts from your monitoring land here. ',
+      h('button', { class: 'link-btn', onclick: () => fireNext() }, 'Simulate one'), ', or ',
+      h('button', { class: 'link-btn', onclick: () => showView('connect') }, 'connect your alerts'), '.'))]);
+  set('panel-foot', state.health ? [h('span', { class: `dot ${state.health.falkordb ? 'confirmed' : 'error'}` }),
+    ` FalkorDB ${state.health.falkordb ? 'connected' : 'down'} · steps chosen by ${plannerLabel()} · company: ${state.tenant}`] : '');
 }
 
 function renderLanding() {
-  const next = scenarios().find((s) => !fired(s));
-  const how = (n, title, text) => h('li', {}, h('span', { class: 'how-n' }, n), h('div', {}, h('b', {}, title), h('p', {}, text)));
-  $('landing').replaceChildren(h('div', { class: 'hero' },
-    h('p', { class: 'eyebrow' }, 'Incident response on a knowledge graph · FalkorDB'),
-    h('h2', {}, 'Your AI on-call teammate'),
-    h('p', { class: 'lede' }, 'When an alert fires, three AI agents work it over your company’s knowledge graph: what '
-      + 'depends on what, who owns it, what changed, and what fixed it last time. You get the likely cause, who to page '
-      + 'and the fix, with sources. Confirm the fix and it remembers.'),
+  const next = nextScenario(), g = state.graph;
+  const step = (n, title, text) => h('li', {}, h('span', { class: 'how-n' }, n), h('div', {}, h('b', {}, title), h('p', {}, text)));
+  set('landing', h('div', { class: 'hero' },
+    h('h2', {}, 'What broke, why, who’s paged, and the fix.'),
+    h('p', { class: 'lede' }, 'When an alert fires, three agents read your company graph: what depends on what, who owns it, '
+      + 'what changed, what fixed it last time. Confirm the cause and it remembers.'),
+    h('div', { class: 'cta-row' },
+      h('button', { class: 'cta', disabled: state.running || !state.alerts.length, onclick: () => fireNext() },
+        next ? `Simulate an incident: ${scenarioTitle(next).toLowerCase()}` : 'All demo incidents handled. Reset demo company'),
+      h('button', { class: 'ghost tall', onclick: () => showView('connect') }, 'Connect your alerts')),
     h('ol', { class: 'how' },
-      how('1', 'An alert fires', 'From your monitoring through a webhook, or from the demo alerts on the left.'),
-      how('2', 'Agents investigate the graph', 'Triage finds who is hurt and pages on-call. The investigator tests every '
-        + 'recent change against the dependency graph and rules out the decoys. Comms writes the update.'),
-      how('3', 'You confirm, it learns', 'Your call becomes memory in the graph, so the next similar incident is solved '
-        + 'in a few steps.')),
-    next ? h('button', { class: 'cta', disabled: state.running || !state.alerts.length, onclick: () => fire(next.act) },
-      `${next.act === 1 ? 'Fire the first alert' : 'Fire the next alert'}: ${scenarioTitle(next)}`)
-      : h('p', { class: 'muted' }, 'All demo alerts have been handled. Pick one on the left, or reset the demo.'),
-    h('p', { class: 'muted small' }, state.stats ? `Demo company: ${state.stats}, all synthetic. ` : '',
-      goto('ask', 'Ask the company brain'), ' · ', goto('connect', 'Use it from Claude Code or your alerting'))));
+      step('1', 'An alert fires', 'From your monitoring through a webhook, or simulated here.'),
+      step('2', 'Three agents investigate on the graph', 'Triage finds who is hurt and pages on-call. The investigator tests every '
+        + 'recent change on the dependency paths. Comms writes the update, with sources.'),
+      step('3', 'You confirm, it remembers', 'Your call becomes memory in the graph, so the next similar incident is solved in a few steps.')),
+    g ? h('p', { class: 'muted small facts' }, `Demo company: ${g.nodes.length} services, ${new Set(g.nodes.map((n) => n.team)).size} teams, `
+      + `${g.edges.length} dependencies, all synthetic · one FalkorDB graph per company`) : null));
 }
 
 // ---------- rendering: one incident ----------
+function titleOf(cur) {
+  return cur.alerts.length > 1 ? `${cur.alerts.length} alerts, 1 incident` : cur.alert.name;
+}
+
+function stormLine(cur) {
+  const o = outcomeOf(cur), st = o?.storm;
+  if (!st && cur.alerts.length < 2) return null;
+  const svcs = [...new Set([...(st?.alerts || []).map((a) => a.service), ...cur.alerts.map((a) => a.service), cur.home])].map(short);
+  const list = svcs.length > 1 ? `${svcs.slice(0, -1).join(', ')} and ${svcs.at(-1)}` : svcs[0];
+  const shared = (st?.shared || []).slice(0, 2).map((s) => short(s.service));
+  return h('p', { class: 'storm-line' }, h('b', {}, `${svcs.length} alerts, 1 incident: `), `${list} fired within minutes`,
+    shared.length ? ` and share ${shared.join(' and ')}.` : '.');
+}
+
 function renderHead(cur) {
   const [cls, label] = statusOf(cur, cur.status);
   $('inc-status').className = `status-pill ${cls}`;
   $('inc-status').textContent = label;
-  $('inc-title').textContent = cur.alerts.length > 1
-    ? `${cur.alerts.length} alerts: ${cur.alerts.map((a) => short(a.service)).join(', ')}` : cur.alert.name;
-  $('inc-sub').textContent = `${short(cur.home)} · ${ist(cur.alert.at)}${cur.incident ? ` · ${cur.incident}` : ''}`;
+  $('inc-title').textContent = titleOf(cur);
+  set('inc-sub', `${short(cur.home)} · ${ist(cur.alert.at)}`);
+  $('btn-back').hidden = !mobile();
+  document.querySelector('.incidents').classList.toggle('has-current', true);
 }
 
-function plannerName() {
-  const p = state.health?.planner || '';
-  return /deterministic|mock/i.test(p) ? 'the rule planner' : p.split(' via ')[0];
+// What the run knows so far (live) or knew at the end (final): one shape for both, so the answer card can render
+// while the agents work and fill in as steps land.
+function facts(cur) {
+  const o = outcomeOf(cur), steps = cur.steps || [];
+  const data = (tool) => steps.filter((s) => s.tool === tool && s.data).map((s) => s.data);
+  const checks = data('check_hypothesis');
+  const suspects = new Map();
+  for (const d of data('hypothesize_from_memory')) for (const s of Array.isArray(d) ? d : []) suspects.set(s.change, { ...s, source: 'memory' });
+  for (const d of data('propose_hypotheses')) for (const s of d.suspects || []) suspects.set(s.change, s);
+  for (const c of checks) suspects.set(c.change, { ...suspects.get(c.change), ...c });
+  const conclude = data('conclude')[0];
+  const broke = o ? o.blast_radius.map(short) : [...new Set(data('blast_radius').flat().map((r) => short(r.service)))];
+  const paged = o ? o.paged : data('page_on_call').filter((d) => d.person).map((d) => ({ ...d }));
+  const rc = o ? o.root_cause : (conclude?.leading ? suspects.get(conclude.leading) : checks.find((c) => c.verdict === 'supports')) || null;
+  const posted = data('post_update')[0];
+  return {
+    o, rc, suspects: [...suspects.values()], checks, broke, paged,
+    atRisk: o ? o.at_risk.map(short) : [],
+    runbook: o?.runbook || posted?.runbook || null,
+    expert: o?.expert || posted?.expert || data('who_knows')[0]?.[0] || null,
+    refuted: o ? o.refuted : [...suspects.values()].filter((s) => s.verdict === 'refutes'),
+    recalled: o ? o.memory.recalled[0] : data('recall_similar')[0]?.find((r) => r.score >= 3) || null,
+    solvedByMemory: !!o?.memory.solved_by_memory,
+    sources: o?.sources || [],
+    update: cur.resolved?.update_text || o?.update_text || posted?.text || null,
+  };
 }
 
 function renderProgress(cur) {
+  if (cur.done || cur.stored) return set('progress');
   const steps = cur.steps || [];
   const handed = new Set(steps.filter((s) => s.tool === 'handoff').map((s) => s.role));
-  const working = cur.done ? null : ROLES.find((r) => !handed.has(r));
-  const checks = steps.filter((s) => s.tool === 'check_hypothesis' && s.data);
-  const tiles = ROLES.map((role) => {
+  const working = ROLES.find((r) => !handed.has(r));
+  const cells = ROLES.map((role) => {
     const mine = steps.filter((s) => s.role === role && s.tool !== 'handoff');
-    const st = handed.has(role) || (cur.done && mine.length) ? 'done' : role === working ? 'working' : 'waiting';
-    let text = st === 'waiting' ? ROLE_JOB[role] : mine.at(-1)?.summary || 'Reading the incident board…';
-    if (role === 'investigator' && checks.length) {
-      const out = checks.filter((s) => s.data.verdict !== 'supports').length;
-      text = `Tested ${plural(checks.length, 'suspect')}, ruled out ${out}. ${st === 'working' ? `Now: ${mine.at(-1)?.summary || ''}` : ''}`;
-    }
-    return h('div', { class: `tile ${st} ${role}` },
-      h('div', { class: 'tile-head' }, h('span', { class: `role ${role}` }, role),
-        h('span', { class: 'tile-state' }, st === 'done' ? '✓ done' : st === 'working' ? 'working…' : 'waiting')),
+    const st = handed.has(role) ? 'done' : role === working ? 'working' : 'waiting';
+    const last = mine.at(-1);
+    const text = st === 'waiting' ? ROLE_JOB[role] : last ? stepResult(last) : 'Reading the incident board…';
+    return h('div', { class: `cell ${st} ${role}` },
+      h('div', { class: 'cell-head' }, h('span', { class: `role ${role}` }, `${ROLE_N[role]} ${role}`),
+        h('span', { class: 'cell-state' }, st === 'done' ? '✓ done' : st === 'working' ? '● working' : '○ waiting')),
       h('p', {}, text));
   });
   const last = steps.at(-1);
-  $('progress').replaceChildren(...[h('div', { class: 'tiles' }, tiles),
-    !cur.done && !cur.stored ? h('p', { class: 'progress-line' },
-      h('span', { class: 'spinner' }), last ? [h('b', {}, `${last.role}: `), last.reason] : 'Opening the incident…',
-      h('span', { class: 'muted' }, ` · steps chosen by ${plannerName()}`),
-      h('button', { class: 'ghost', onclick: () => { state.skip = true; } }, 'Skip animation')) : null,
-    cur.error ? h('p', { class: 'error' }, cur.error) : null].filter(Boolean)); // replaceChildren(null) renders "null"
+  set('progress', h('div', { class: 'strip' }, cells),
+    h('p', { class: 'live-line' }, h('span', { class: 'spinner' }),
+      last ? [h('b', {}, `${last.role[0].toUpperCase()}${last.role.slice(1)}: `), plain(last.reason)] : 'Opening the incident…',
+      h('button', { class: 'ghost', onclick: () => { state.skip = true; } }, 'Skip to answer')));
 }
 
-// The status update, rendered the way it lands in Slack: the comms agent's text, line by line ("Key: value").
-function slackCard(cur) {
-  const text = cur.resolved?.update_text || cur.res?.outcome.update_text || cur.update_text;
-  const head = h('div', { class: 'slack-head' }, h('span', { class: 'logo sm' }),
-    h('b', {}, 'On-call Brain'), h('span', { class: 'app' }, 'APP'), h('span', { class: 'muted' }, ist(cur.alert.at)));
-  if (!text) {
-    return h('div', { class: 'slack pending' }, h('div', { class: 'channel' }, '# incidents'), head,
-      h('p', { class: 'muted' }, cur.done ? 'No update was posted.' : 'The comms agent posts here once the cause is clear…'),
-      cur.done ? null : [h('div', { class: 'skel' }), h('div', { class: 'skel short' })]);
-  }
-  const [first, ...rest] = text.split('\n');
-  const m = first.match(/^\[(.*)\]\s*status:\s*(.*)$/);
-  const lines = rest.map((line) => {
-    const k = line.match(/^([A-Z][\w ()]{1,30}):\s(.*)$/);
-    if (!k) return h('p', {}, line);
-    if (k[1] === 'Sources') return h('p', { class: 'sources' }, h('b', {}, 'Sources: '), k[2].split(', ').map((s) => h('span', { class: 'src' }, s)));
-    return h('p', { class: /cause/i.test(k[1]) ? 'cause-line' : null }, h('b', {}, `${k[1]}: `), k[2]);
-  });
-  const slack = cur.resolved?.slack || cur.res?.slack;
-  return h('div', { class: 'slack' }, h('div', { class: 'channel' }, '# incidents'), head,
-    m ? h('p', { class: 'slack-title' }, h('span', { class: 'siren' }, '●'), h('b', {}, m[1]), ' — ', m[2]) : h('p', {}, first),
-    lines,
-    actions(cur),
-    slack === 'posted' ? h('p', { class: 'slack-note ok' }, '✓ Also posted to your Slack channel')
-      : slack && slack !== 'off' ? h('p', { class: 'slack-note bad' }, `Slack post ${slack}`)
-        : cur.res ? h('p', { class: 'slack-note' }, 'Shown here only. ', goto('connect', 'Connect Slack'), ' to post it to a real channel.') : null);
-}
+// The answer, in reading order: memory banner, verdict + confidence, actions, what broke / who's paged / fix,
+// ruled out, the path, the Slack preview. Right rail: live suspects (while working), the change-log comparison,
+// sources. Skeleton slots stand in for what the agents have not found yet.
+function renderAnswer(cur) {
+  const f = facts(cur), o = f.o, rc = f.rc, live = !cur.done && !cur.stored, conf = o?.confidence;
+  const alertAt = cur.alert.at;
+  const resolved = !!cur.resolved || cur.status === 'resolved';
 
-function actions(cur) {
-  if (cur.stored || !cur.res) return null;
-  const o = cur.res.outcome, rc = o.root_cause;
-  if (cur.resolved) {
-    const d = cur.resolved.data;
-    return h('div', { class: 'learned' }, h('p', {}, h('span', { class: 'pill rb' }, 'saved to memory'), ' ',
-      d ? [`Fix confirmed. Runbook `, h('b', {}, `“${d.title}”`), ` now has ${plural(d.successes, 'success')}.`] : cur.resolved.summary),
-      d?.steps ? h('ol', {}, d.steps.map((s) => h('li', {}, s))) : null);
-  }
-  const alts = [...o.refuted, ...(o.co_causes || [])].filter((r) => r.change !== rc?.change);
-  return h('div', { class: 'actions' },
-    rc ? h('button', { class: 'confirm', disabled: state.running && !cur.done,
-      onclick: () => resolve(cur, rc.change) }, `✓ Confirm: ${short(rc.change)} caused it`)
-      : h('p', { class: 'muted' }, 'No recent change explains this alert, so a human needs to look.'),
-    alts.length ? h('button', { class: 'ghost', onclick: () => { cur.showAlt = !cur.showAlt; renderAnswer(cur); } },
-      rc ? 'Wrong cause?' : 'Pick the cause yourself') : null,
+  // Memory banner / line.
+  const wo = cur.ablation?.without_memory;
+  const memory = f.recalled && f.solvedByMemory
+    ? h('div', { class: 'banner memory' },
+      h('div', { class: 'banner-text' },
+        h('b', {}, 'Seen this before. '), `“${f.recalled.title}” (${short(f.recalled.incident)}) was fixed with `,
+        h('b', {}, `“${f.recalled.runbook_title}”`), ', so the same fix was tried first.'),
+      wo ? h('div', { class: 'bignums' },
+        h('div', {}, h('span', { class: 'big' }, o.investigator_calls), h('span', { class: 'lbl' }, `steps instead of ${wo.investigator_calls}`)),
+        h('div', {}, h('span', { class: 'big' }, o.hypotheses_checked), h('span', { class: 'lbl' }, `suspect${o.hypotheses_checked === 1 ? '' : 's'} tested instead of ${wo.hypotheses_checked}`)))
+        : cur.act === 2 && !cur.ablation && !cur.stored ? h('span', { class: 'muted small' }, 'Replaying it without memory for comparison…') : null)
+    : f.recalled && (o || cur.steps.some((s) => s.tool === 'propose_hypotheses'))
+      ? h('p', { class: 'memory-line' }, h('b', {}, 'Seen something like this: '), `“${f.recalled.title}” (${short(f.recalled.incident)}). Its fix didn’t apply here, so the search widened.`)
+      : null;
+
+  // Verdict block.
+  const kindOfChange = (k) => (k === 'deploy' ? 'Deploy' : k ? 'Config change' : 'Change');
+  const label = resolved ? 'Cause confirmed' : rc ? 'Likely cause' : live ? 'Likely cause' : 'No single cause yet';
+  const chipText = resolved ? 'Confirmed by you'
+    : conf && rc ? `${conf.label}${conf.level === 'high' && f.checks.length > 1 ? ` · ${f.refuted.length} of ${f.checks.length} suspects ruled out` : conf.level === 'confirmed' ? '' : ` · ${conf.why}`}`
+    : null;
+  const verdict = h('div', { class: `verdict ${resolved ? 'confirmed' : ''}` },
+    h('p', { class: 'k' }, label),
+    rc ? [h('h3', { class: 'cause-line' }, h('span', { class: 'cause-svc' }, short(rc.service)), ' ', rc.summary),
+      h('p', { class: 'byline' }, `${kindOfChange(rc.kind)}${rc.author ? ` by ${rc.author}` : ''}`,
+        rc.at ? ` · ${ist(rc.at)} · ${minutesBetween(rc.at, alertAt)} min before the alert` : ''),
+      chipText ? h('span', { class: `conf ${resolved ? 'confirmed' : conf?.level || ''}` }, chipText) : null]
+      : live ? [h('h3', { class: 'cause-line' }, skel('60%')), h('p', { class: 'byline' }, skel('40%'))]
+        : [h('h3', { class: 'cause-line muted' }, 'No recent change explains this alert.'),
+          h('p', { class: 'byline' }, 'A human should look. The suspects the agents tested are listed below.')]);
+
+  // Actions.
+  const alts = o ? [...o.refuted, ...(o.co_causes || [])].filter((r) => r.change !== rc?.change) : [];
+  const actions = !cur.stored && o && !resolved ? h('div', { class: 'actions' },
+    rc ? h('button', { class: 'confirm', disabled: state.running && !cur.done, onclick: () => resolve(cur, rc.change) }, '✓ Confirm cause') : null,
+    alts.length ? h('button', { class: 'ghost tall', onclick: () => { cur.showAlt = !cur.showAlt; renderAnswer(cur); } }, rc ? 'Wrong cause' : 'Pick the cause') : null,
+    h('button', { class: 'link-btn', onclick: () => showTab('why') }, 'Show me why →'),
     cur.showAlt ? h('div', { class: 'alts' },
       h('p', { class: 'muted small' }, 'Pick the change that really caused it. Your call is written to the graph and becomes memory.'),
-      h('ul', {}, alts.map((r) => h('li', {}, h('span', {}, h('b', {}, short(r.change)), ` on ${short(r.service)} `,
+      h('ul', {}, alts.map((r) => h('li', {}, h('span', {}, h('b', {}, short(r.change)), ` on ${short(r.service)}: ${r.summary || ''} `,
         h('span', { class: 'pill out' }, r.tag || 'suspect')),
-        h('button', { class: 'ghost', onclick: () => resolve(cur, r.change) }, 'This one'))))) : null);
-}
+        h('button', { class: 'ghost', onclick: () => resolve(cur, r.change) }, 'This one'))))) : null) : null;
+  const learned = cur.resolved?.data ? h('div', { class: 'learned' },
+    h('p', {}, h('span', { class: 'pill rb' }, 'saved to memory'), ' ', `Next time a change on ${short(rc?.service)} hurts ${short(cur.home)}, `,
+      h('b', {}, `“${cur.resolved.data.title}”`), ' is tried first.'),
+    cur.resolved.data.steps ? h('details', {}, h('summary', {}, `Show ${plural(cur.resolved.data.steps.length, 'step')}`),
+      h('ol', {}, cur.resolved.data.steps.map((s) => h('li', {}, s)))) : null) : null;
 
-function sideCards(cur) {
-  if (cur.stored) {
-    return [h('div', { class: 'card' }, h('h3', {}, 'From the graph'),
-      h('p', {}, 'This incident was handled before this page was opened. Its update and every agent step are stored on '
-        + 'the incident in FalkorDB; see them under “Show me why”.'))];
-  }
-  const steps = cur.steps, checks = steps.filter((s) => s.tool === 'check_hypothesis' && s.data);
-  if (!cur.res) {
-    return [h('div', { class: 'card' }, h('h3', {}, 'What the agents can see'),
-      h('p', {}, 'Services and their dependencies (with dates), owners, on-call rotas, every deploy and config change, '
-        + 'anomalies, past incidents and what fixed them, docs, tickets and chat: one FalkorDB graph per company.'),
-      h('p', { class: 'muted small' }, 'Open “Show me why” to watch them walk it.'))];
-  }
-  const o = cur.res.outcome, rc = o.root_cause, mem = o.memory, recalled = mem.recalled[0], wo = cur.ablation?.without_memory;
-  const cards = [];
-  if (o.storm) {
-    const alerts = [...o.storm.alerts.map((a) => a.service), cur.home];
-    cards.push(h('div', { class: 'card storm' }, h('h3', {}, 'Alert storm'),
-      h('p', { class: 'big-line' }, h('b', {}, `${new Set(alerts).size} alerts`), ' → 1 incident'),
-      h('p', {}, 'They share upstream services; the nearest to all of them: ',
-        h('b', {}, o.storm.shared.slice(0, 2).map((s) => short(s.service)).join(', ') || 'none')),
-      h('p', { class: 'muted small' }, 'Without correlating them first, the same agents blame a change that explains only one alert.')));
-  }
-  if (rc) {
-    cards.push(h('div', { class: 'card cause' }, h('h3', {}, 'Why this change'),
-      rc.live_path?.length > 1 ? pathChips(rc.live_path) : null,
-      h('p', {}, rc.reason),
-      h('p', { class: 'muted small' }, `${plural(checks.length, 'suspect')} tested against the graph, `
-        + `${checks.filter((s) => s.data.verdict !== 'supports').length} ruled out (each with its reason, in the update).`),
-      (o.co_causes || []).map((c) => h('p', { class: 'small' }, 'Also contributing: ', h('b', {}, short(c.change)), ` on ${short(c.service)}`))));
-  }
-  const bp = o.baseline_pick, ab = o.anomaly_baseline_pick;
+  // Three columns.
+  const col = (title, ...kids) => h('div', { class: 'col' }, h('h4', {}, title), ...kids);
+  const broke = col('What broke', h('p', {}, cur.alerts.length > 1 ? cur.alerts.map((a) => a.name).join(' · ') : cur.alert.name),
+    f.broke.length ? h('div', { class: 'chips' }, f.broke.map((s) => chip(s, s === short(cur.home) ? 'alerting' : ''))) : live ? skel('80%') : h('p', { class: 'muted' }, 'Impact not mapped.'),
+    f.atRisk.length ? h('p', { class: 'muted small' }, `Also at risk: ${f.atRisk.join(', ')}`) : null);
+  const paged = col('Who’s paged', f.paged.length ? h('ul', { class: 'people' }, f.paged.map((p) => h('li', {},
+    h('span', { class: 'avatar' }, (p.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2)),
+    h('span', {}, h('b', {}, p.name), h('span', { class: 'muted'}, ` · ${p.team_name || p.team} · on-call${p.service ? ` for ${short(p.service)}` : ''}`)))))
+    : live ? skel('70%') : h('p', { class: 'muted' }, 'Nobody paged.'),
+    f.expert ? h('p', { class: 'small' }, `Knows ${short(f.expert.service || rc?.service || cur.home)} best: `, h('b', {}, f.expert.name), ` (${f.expert.handle})`) : null);
+  const rb = f.runbook;
+  const fix = col('Fix', learned || (rb ? [h('p', {}, h('b', {}, rb.title)),
+    h('p', { class: 'muted small' }, rb.uses > 1 ? `worked ${rb.successes ?? 0} of ${rb.uses} times` : rb.uses === 1 ? 'confirmed once' : 'from memory'),
+    rb.steps?.length ? h('details', {}, h('summary', {}, `Show ${plural(rb.steps.length, 'step')}`), h('ol', {}, rb.steps.map((s) => h('li', {}, s)))) : null]
+    : live ? skel('60%') : h('p', { class: 'muted' }, 'No runbook for this yet. Confirm the cause and the fix is saved for next time.')));
+
+  // Ruled out.
+  const outranked = (o?.refuted || []).filter((r) => r.verdict === 'outranked');
+  const ruledRows = f.refuted.filter((r) => r.verdict !== 'outranked');
+  const ruled = ruledRows.length || outranked.length || (o?.co_causes || []).length ? h('div', { class: 'ruled' },
+    h('h4', {}, `Ruled out (${ruledRows.length})`),
+    h('ul', {}, ruledRows.map((r) => h('li', {}, h('b', {}, short(r.change)), ` on ${short(r.service)}`, h('span', { class: 'pill out' }, r.tag || 'ruled out'),
+      h('span', { class: 'muted small' }, ` ${plain(r.reason)}`))),
+    outranked.map((r) => h('li', { class: 'also' }, h('b', {}, 'Also possible: '), `${short(r.change)} on ${short(r.service)}`,
+      h('span', { class: 'muted small' }, ` · ${plain(r.reason).replace(/^outranked:\s*/, '')}`))),
+    (o?.co_causes || []).map((c) => h('li', { class: 'also' }, h('b', {}, 'Also contributing: '), `${short(c.change)} on ${short(c.service)}`,
+      h('span', { class: 'muted small' }, ` · ${plain(c.reason || '')}`))))) : null;
+
+  // Why this change (the path).
+  const sym = SYMPTOM_WORD[cur.alert.symptom] || 'problem';
+  const path = rc?.live_path?.length > 1 ? h('div', { class: 'why-path' }, h('h4', {}, 'Why this change'),
+    pathChips([...rc.live_path].reverse()),
+    h('p', {}, `The ${sym} travels ${[...rc.live_path].reverse().map(short).join(' → ')}, the same path the alert came up.`,
+      rc.gaps?.length ? ` Nothing was recorded on ${rc.gaps.map(short).join(', ')} along the way (monitoring gap).` : '',
+      rc.explained?.length > 1 ? ` It explains all ${rc.explained.length} alerting services.` : '')) : null;
+
+  // Slack preview (collapsed).
+  const slack = cur.resolved?.slack || cur.res?.slack;
+  const preview = f.update ? h('details', { class: 'slack-wrap', open: mobile() ? null : null },
+    h('summary', {}, h('span', { class: 'logo sm' }), h('b', {}, 'Status update drafted for #incidents'),
+      h('span', { class: 'muted small' }, slack === 'posted' ? ' · posted to your Slack' : ' · preview'),
+      cur.res && slack !== 'posted' ? h('span', { class: 'muted small' }, ' · ', h('button', { class: 'link-btn', onclick: (e) => { e.preventDefault(); showView('connect'); } }, 'Connect Slack to post it')) : null),
+    slackCard(f.update, cur.alert.at)) : live ? h('div', { class: 'slack-wrap pending' }, h('p', { class: 'muted small' }, 'Comms drafts the #incidents update once the cause is clear…')) : null;
+
+  // Right rail.
+  const rail = [];
+  if (live || (!o && f.suspects.length)) rail.push(suspectsCard(f, live));
+  const bp = o?.baseline_pick, ab = o?.anomaly_baseline_pick;
   if (bp || ab) {
-    const row = (label, pick, ok) => pick && h('li', { class: ok ? 'ok' : 'bad' }, h('span', {}, label),
-      h('b', {}, short(pick.change)), h('span', { class: 'pill' }, ok ? 'same answer' : 'wrong'));
-    cards.push(h('div', { class: 'card nograph' }, h('h3', {}, 'Without the graph'),
+    const row = (label, pick, ok) => pick && h('li', { class: ok ? 'ok' : 'bad' }, h('span', {}, label), h('b', {}, short(pick.change)), h('span', { class: 'pill' }, ok ? 'same answer' : 'wrong'));
+    rail.push(h('div', { class: 'card nograph' }, h('h4', {}, 'What a change log alone would blame'),
       h('ul', {}, row('Newest change', bp, o.baseline_correct), row('Change log + anomalies', ab, o.anomaly_baseline_correct)),
-      h('p', { class: 'muted small' }, 'What you would blame from a change log and dashboards alone, without walking the dependencies.')));
+      h('p', { class: 'muted small' }, 'The same facts without walking the dependency graph.')));
   }
-  cards.push(h('div', { class: 'card memory-card' }, h('h3', {}, 'Memory'),
-    recalled ? h('p', {}, 'Recalled ', h('b', {}, `“${recalled.title}”`), ' and its fix ', h('b', {}, `“${recalled.runbook_title}”`), '. ',
-      mem.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory')
-        : h('span', { class: 'muted' }, 'It did not apply here, so the search widened.'))
-      : h('p', { class: 'muted' }, 'No similar past incident on this dependency path.'),
-    wo ? h('div', { class: 'compare' }, h('p', { class: 'muted small' }, 'Same incident, replayed on the graph without this memory:'),
-      h('div', { class: 'nums' },
-        h('div', {}, h('span', { class: 'big' }, h('span', { class: 'before' }, wo.investigator_calls), ' → ', o.investigator_calls),
-          h('span', { class: 'lbl' }, 'investigator steps')),
-        h('div', {}, h('span', { class: 'big' }, h('span', { class: 'before' }, wo.hypotheses_checked), ' → ', o.hypotheses_checked),
-          h('span', { class: 'lbl' }, 'suspects tested'))))
-      : cur.act === 2 && !cur.ablation ? h('p', { class: 'muted small' }, 'Replaying it without memory for comparison…') : null));
-  return cards;
+  if (f.sources.length) rail.push(h('div', { class: 'card' }, h('h4', {}, 'Sources'),
+    h('div', { class: 'chips' }, f.sources.map((s) => h('span', { class: 'chip-static src', title: s.id }, h('span', { class: 'pill kind' }, kindWord(s.kind)), ' ', s.title || short(s.id))))));
+  if (o?.storm) rail.push(h('div', { class: 'card storm' }, h('h4', {}, 'Alert storm'),
+    h('p', {}, h('b', {}, `${o.storm.alerts.length + 1} alerts → 1 incident`)),
+    h('p', { class: 'small' }, 'Nearest shared upstream: ', h('b', {}, o.storm.shared.slice(0, 2).map((s) => short(s.service)).join(', ') || 'none')),
+    h('p', { class: 'muted small' }, 'Without correlating them first, the same agents blame a change that explains only one alert.')));
+  if (cur.res?.llm_tokens || cur.res?.planner) rail.push(h('p', { class: 'muted small foot' },
+    `Steps chosen by ${modelDecides() ? modelName((cur.res.planner || '').split(' ')[0]) : 'the rule planner'}`
+    + (cur.res.llm_tokens ? ` · ${(cur.res.llm_tokens / 1000).toFixed(0)}k tokens` : '')));
+
+  set('answer', h('div', { class: 'answer-grid' },
+    h('div', { class: 'answer-main' }, memory, verdict, actions, h('div', { class: 'cols' }, broke, paged, fix), ruled, path, preview),
+    h('div', { class: 'answer-rail' }, rail)));
 }
 
-function renderAnswer(cur) {
-  $('answer-main').replaceChildren(slackCard(cur));
-  $('answer-side').replaceChildren(...sideCards(cur));
+function suspectsCard(f, live) {
+  const rows = f.suspects.length ? f.suspects.map((s) => {
+    const st = s.verdict === 'refutes' ? 'out' : s.verdict === 'supports' ? 'yes' : 'open';
+    return h('li', { class: st }, h('span', { class: 'sus-ic' }, st === 'out' ? '✗' : st === 'yes' ? '✓' : '?'),
+      h('span', {}, h('b', {}, short(s.change)), ` on ${short(s.service)}`,
+        h('span', { class: 'muted small' }, st === 'out' ? ` · ruled out: ${s.tag}` : st === 'yes' ? ' · supported' : s.source === 'memory' ? ' · from memory' : ' · open')));
+  }) : [h('li', { class: 'muted' }, live ? 'Listing recent changes on the dependency paths…' : 'No suspects.')];
+  return h('div', { class: 'card suspects' }, h('h4', {}, `Suspects${f.suspects.length ? ` (${f.suspects.length})` : ''}`), h('ul', {}, rows));
 }
 
-// ---------- rendering: show me why (trace) ----------
+// The status update the way it lands in Slack: the comms agent's text, line by line ("Key: value").
+function slackCard(text, at) {
+  const [first, ...rest] = text.split('\n');
+  const m = first.match(/^\[(.*)\]\s*status:\s*(.*)$/);
+  return h('div', { class: 'slack' },
+    h('div', { class: 'slack-head' }, h('span', { class: 'logo sm' }), h('b', {}, 'On-call Brain'), h('span', { class: 'app' }, 'APP'), h('span', { class: 'muted' }, ist(at))),
+    m ? h('p', { class: 'slack-title' }, h('span', { class: 'siren' }, '●'), h('b', {}, m[1]), ' — ', m[2]) : h('p', {}, first),
+    rest.map((line) => {
+      const k = line.match(/^([A-Z][\w ()]{1,30}):\s(.*)$/);
+      if (!k) return h('p', {}, line);
+      return h('p', { class: /cause/i.test(k[1]) ? 'cause-line-slack' : null }, h('b', {}, `${k[1]}: `), k[2]);
+    }));
+}
+
+// ---------- rendering: show me why (timeline) ----------
+const TOOL_TITLE = {
+  open_incident: () => 'Open a shared incident record',
+  blast_radius: (s) => `Who depends on ${short(idIn(s.summary, 'svc') || '')}?`,
+  page_on_call: (s) => `Who is on call for ${short(idIn(s.summary, 'svc') || '')}?`,
+  correlate_alerts: () => 'Do these alerts share a cause?',
+  recall_similar: () => 'Have we seen this before?',
+  hypothesize_from_memory: () => 'Does the remembered fix apply?',
+  propose_hypotheses: () => 'Which recent changes could be the cause?',
+  check_hypothesis: (s) => `Test suspect: ${short(s.data?.change || '')}`,
+  conclude: () => 'Which suspect explains the most?',
+  who_knows: (s) => `Who knows ${short(idIn(s.summary, 'svc') || '')} best?`,
+  post_update: () => 'Draft the status update',
+};
+const stepTitle = (s) => (TOOL_TITLE[s.tool] ? TOOL_TITLE[s.tool](s) : s.tool.replace(/_/g, ' '));
+function stepResult(s) {
+  const d = s.data;
+  if (s.tool === 'check_hypothesis' && d) return `${d.verdict === 'supports' ? 'Supported' : 'Ruled out'}: ${short(d.change)} on ${short(d.service)} · ${plain(d.reason)}`;
+  return plain(s.summary);
+}
+
 function learnNames(step) {
   const d = step.data;
   if (step.tool === 'page_on_call' && d?.person) {
@@ -374,81 +525,91 @@ function learnNames(step) {
   if (step.tool === 'ask') for (const r of d?.related || []) if (['person', 'team'].includes(kindOf(r.id))) names.set(r.id, r.name);
 }
 
+function copyBtn(text) {
+  return h('button', { class: 'ghost copy', onclick: (e) => { e.preventDefault(); navigator.clipboard?.writeText(text).then(() => toast('Copied.')); } }, 'Copy');
+}
+
 function queryBlock(q) {
   return h('div', { class: 'q' },
     h('div', { class: 'qhead' }, h('b', {}, q.name),
-      h('span', { class: `rw ${q.readonly ? 'ro' : 'w'}`, title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' }, q.readonly ? 'RO' : 'W'),
-      h('span', { class: 'muted' }, `${q.rows.length} rows · ${q.ms} ms`),
-      q.name === 'incident_board' ? h('span', { class: 'tag' }, 'the agent reads the shared board') : null),
+      h('span', { class: `rw ${q.readonly ? 'ro' : 'w'}`, title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' }, q.readonly ? 'read' : 'write'),
+      h('span', { class: 'muted' }, `${plural(q.rows.length, 'row')} · ${q.ms} ms`),
+      q.name === 'incident_board' ? h('span', { class: 'tag' }, 'the agent reads the shared board') : null, copyBtn(q.cypher)),
     h('pre', { class: 'cypher' }, q.cypher),
     h('pre', { class: 'params' }, `params ${JSON.stringify(q.params)}`),
-    q.rows.length ? h('details', { class: 'rows' }, h('summary', {}, `rows (${q.rows.length})`),
-      h('pre', {}, JSON.stringify(q.rows, null, 1))) : null);
+    q.rows.length ? h('details', { class: 'rows' }, h('summary', {}, `rows (${q.rows.length})`), h('pre', {}, JSON.stringify(q.rows, null, 1))) : null);
 }
 
 function cypherList(queries) {
   if (!queries?.length) return null;
   const ms = queries.reduce((a, q) => a + q.ms, 0), rows = queries.reduce((a, q) => a + q.rows.length, 0);
   return h('details', { class: 'cypher-list' },
-    h('summary', {}, `Cypher: ${plural(queries.length, 'query')}, ${plural(rows, 'row')}, ${ms.toFixed(1)} ms`),
+    h('summary', {}, `Cypher · ${plural(queries.length, 'query')} · ${plural(rows, 'row')} · ${ms.toFixed(1)} ms`),
     queries.map(queryBlock));
 }
 
-function stepCard(step, i) {
-  if (step.tool === 'handoff') {
-    const to = (step.summary.match(/hands off to (\S+)/) || [])[1] || '?';
-    return h('li', { class: 'handoff', 'data-i': i },
-      h('div', { class: 'handoff-line' }, h('span', { class: `role ${step.role}` }, step.role), h('span', { class: 'arrow' }, '→'),
-        h('span', { class: `role ${to}` }, to)),
-      h('p', { class: 'why' }, step.reason));
-  }
+function stepRow(step, i) {
   const d = step.data, verdict = step.tool === 'check_hypothesis' && d ? d.verdict : null;
-  const body = verdict
-    ? h('p', { class: 'summary' }, h('span', { class: `verdict ${verdict}` }, verdict.toUpperCase()), ' ',
-      verdict === 'supports' ? h('b', {}, short(d.change)) : h('s', {}, short(d.change)), ` on ${short(d.service)}: `,
-      h('span', { class: 'reason' }, d.reason),
-      verdict === 'supports' && d.live_path?.length > 1 ? pathChips(d.live_path) : null)
-    : h('p', { class: 'summary' }, step.summary);
-  return h('li', { class: `card ${step.role}${verdict ? ` v-${verdict}` : ''}`, 'data-i': i, tabindex: 0 },
-    h('div', { class: 'card-head' }, h('span', { class: `role ${step.role}` }, step.role), h('code', { class: 'tool' }, step.tool),
-      h('span', { class: 'seq' }, `#${step.seq}`)),
-    body,
-    h('p', { class: 'why' }, h('span', { class: 'why-label' }, 'why '), step.reason),
+  return h('li', { class: `step ${step.role}${verdict ? ` v-${verdict}` : ''}`, 'data-i': i, tabindex: 0, role: 'button' },
+    h('div', { class: 'step-head' }, h('span', { class: 'seq' }, step.seq), h('b', { class: 'step-title' }, stepTitle(step)),
+      h('code', { class: 'tool' }, step.tool), h('span', { class: `by ${step.by === 'rules' ? 'rules' : 'model'}` }, modelName(step.by))),
+    verdict ? h('p', { class: 'summary' }, h('span', { class: `verdict ${verdict}` }, verdict === 'supports' ? '✓ supports' : '✗ ruled out'), ' ',
+      h('b', {}, short(d.change)), ` on ${short(d.service)}: `, h('span', { class: 'reason' }, plain(d.reason)),
+      verdict === 'supports' && d.live_path?.length > 1 ? pathChips([...d.live_path].reverse()) : null)
+      : h('p', { class: 'summary' }, plain(step.summary)),
+    h('p', { class: 'why' }, h('span', { class: 'why-label' }, 'why '), plain(step.reason)),
     cypherList(step.queries));
 }
 
-function renderTrace(cur) {
-  $('trace').replaceChildren(...(cur.steps || []).map(stepCard));
-  $('trace-count').textContent = cur.steps?.length ? plural(cur.steps.length, 'step') : '';
-  $('btn-skip').hidden = cur.done || !!cur.stored;
+function renderWhy(cur) {
+  const steps = cur.steps || [];
+  const ms = steps.reduce((a, s) => a + (s.queries || []).reduce((b, q) => b + q.ms, 0), 0);
+  const byModel = steps.filter((s) => s.by && s.by !== 'rules').length;
+  const groups = ROLES.map((role) => {
+    const mine = steps.map((s, i) => [s, i]).filter(([s]) => s.role === role);
+    if (!mine.length) return null;
+    const hand = mine.find(([s]) => s.tool === 'handoff')?.[0];
+    return h('details', { class: `group ${role}`, open: true },
+      h('summary', {}, h('span', { class: `role ${role}` }, `${ROLE_N[role]} ${role}`),
+        h('span', { class: 'muted small' }, plural(mine.filter(([s]) => s.tool !== 'handoff').length, 'step')),
+        hand ? h('span', { class: 'hand' }, `→ ${hand.summary.includes('human') ? 'Handed to you' : `Handed to ${hand.summary.split('to ')[1] || ''}`}: ${plain(hand.reason)}`) : null),
+      h('ol', { class: 'steps' }, mine.filter(([s]) => s.tool !== 'handoff').map(([s, i]) => stepRow(s, i))));
+  });
+  set('why-side', h('div', { class: 'why-head' }, h('h3', {}, `Agent steps · ${steps.length}`),
+    h('span', { class: 'muted small' }, ms ? `${(ms / 1000).toFixed(1)} s on the graph` : '')),
+    h('div', { class: 'why-groups' }, groups),
+    h('p', { class: 'muted small foot' }, steps.length ? `Steps chosen by ${byModel ? `${modelName(steps.find((s) => s.by !== 'rules')?.by)} (${byModel})` : ''}`
+      + `${byModel && steps.length - byModel ? ' and ' : ''}${steps.length - byModel ? `the rule planner (${steps.length - byModel})` : ''}` : ''));
 }
 
-function appendTrace(cur, step) {
-  const li = stepCard(step, cur.steps.length - 1);
-  $('trace').querySelector('.current')?.classList.remove('current');
-  li.classList.add('current');
-  $('trace').append(li);
-  if (state.tab === 'why') li.scrollIntoView({ block: 'nearest', behavior: state.skip ? 'auto' : 'smooth' });
-  $('trace-count').textContent = plural(cur.steps.length, 'step');
-}
-
-function onTraceClick(ev) {
-  if (ev.target.closest('summary, pre, details[open] *')) return; // let people read and expand the Cypher
+function onStepClick(ev) {
+  if (ev.target.closest('summary, pre, details[open] *, button')) return; // let people read and expand the Cypher
   const li = ev.target.closest('li[data-i]'), cur = state.current;
   if (!li || !cur?.steps) return;
-  $('trace').querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
+  $('why-side').querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
   li.classList.add('selected');
   const eles = cur.steps[Number(li.dataset.i)]?.eles;
   if (eles && state.graphOwner === cur) G.paint(cur, eles, G.near(eles));
 }
 
 // ---------- the graph's picture of a run ----------
-function hudFor(cur) {
-  $('hud').replaceChildren(...(cur
-    ? [h('span', { class: 'pill alert' }, cur.alerts.length > 1 ? 'ALERTS' : 'ALERT'),
-      h('b', {}, cur.alerts.length > 1 ? cur.alerts.map((a) => short(a.service)).join(', ') : cur.alert.name),
-      h('span', { class: 'muted' }, `${ist(cur.alert.at)}${cur.incident ? ` · ${cur.incident}` : ''}`)]
-    : [h('span', { class: 'muted' }, state.caption)]));
+function renderGraphTools() {
+  const owner = state.graphOwner, scoped = G.isScoped();
+  const g = state.graph;
+  let caption = g ? `${g.nodes.length} services · ${g.edges.length} dependencies` : '';
+  if (owner && owner !== 'ask' && g) {
+    const shown = scoped ? (G.select('.svc:visible')?.length ?? g.nodes.length) : g.nodes.length;
+    caption = scoped ? `Showing ${shown} of ${g.nodes.length} services: what this incident touched, plus one hop` : `Whole company: ${g.nodes.length} services`;
+  } else if (owner === 'ask' && g) caption = scoped ? 'Showing what this answer is linked to' : `Whole company: ${g.nodes.length} services`;
+  set('hud', h('span', { class: 'muted' }, caption));
+  set('graph-tools', owner && G.ready() ? h('button', { class: 'ghost', onclick: () => { scoped ? G.scopeAll() : rescope(); renderGraphTools(); } },
+    scoped ? 'Show whole company' : 'Incident only') : null);
+}
+
+function rescope() {
+  const cur = state.current;
+  if (state.graphOwner === 'ask') return state.askEles?.nonempty() && G.scopeTo(state.askEles);
+  if (cur?.touched?.nonempty()) G.scopeTo(cur.touched);
 }
 
 function applyStep(run, step, live) {
@@ -465,38 +626,46 @@ function applyStep(run, step, live) {
   if (live) G.paint(run, eles, step.tool === 'correlate_alerts' ? eles : G.near(eles));
 }
 
-// End on the answer, big enough to read: a storm ends on the alerting services, shared upstream and cause; otherwise
-// the cause path and, if memory solved it, the chain new incident -> recalled incident -> its runbook.
+// End on the answer: the incident subgraph, with the cause path (and the memory chain, if memory solved it) lit.
 function finalPaint(run) {
-  const o = run.res.outcome;
-  const memo = o.memory.solved_by_memory ? G.elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
+  const o = outcomeOf(run);
+  if (!o || !G.ready()) return;
+  const memo = o.memory?.solved_by_memory ? G.elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
     [[run.incident, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }, run) : null;
   if (memo) run.touched = run.touched.union(memo);
   const learned = run.resolved && G.elementsFor(run.resolved.highlight, run);
   if (learned) run.touched = run.touched.union(learned);
+  G.scopeTo(run.touched);
   const storm = o.storm ? G.select('.storm, .shared') : null;
   const focus = storm ? run.cause.union(storm) : run.cause.nonempty() ? run.cause.union(memo || G.empty()) : null;
   G.paint(run, learned || memo, focus);
+  renderGraphTools();
 }
 
 // Rebuild the graph's picture of a run from its steps (switching incidents, or back from Ask).
 function replayGraph(cur) {
   state.graphOwner = cur;
-  hudFor(cur);
-  if (!G.ready()) return;
+  if (!G.ready()) return renderGraphTools();
   G.clear(false);
-  if (!cur) return G.paint(null);
+  if (!cur) { G.paint(null); return renderGraphTools(); }
   cur.touched = G.empty();
   cur.cause = G.empty();
   G.mark(cur.home, 'alerting');
   for (const s of cur.steps || []) applyStep(cur, s, false);
-  if (cur.res) finalPaint(cur);
+  if (cur.stored) { // no live trace: light the cause path the graph remembers
+    const rc = outcomeOf(cur)?.root_cause, p = rc?.live_path || [];
+    const eles = G.elementsFor({ nodes: p, edges: p.slice(1).map((n, i) => [p[i], n, 'DEPENDS_ON']) }, cur);
+    if (eles) { cur.touched = cur.touched.union(eles); cur.cause = eles; }
+  }
+  if (outcomeOf(cur)) finalPaint(cur);
   else G.paint(cur, null, cur.touched.nonempty() ? cur.touched : G.select(`[id = "${cur.home}"]`));
+  renderGraphTools();
 }
 
 // ---------- views ----------
 function showView(view) {
   state.view = view;
+  closeMenus();
   for (const b of document.querySelectorAll('.view-tab')) b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
   for (const v of ['incidents', 'ask', 'connect']) $(`view-${v}`).hidden = v !== view;
   if (view === 'connect') renderConnect();
@@ -508,8 +677,11 @@ function showTab(tab) {
   state.tab = tab;
   $('tab-answer').setAttribute('aria-selected', String(tab === 'answer'));
   $('tab-why').setAttribute('aria-selected', String(tab === 'why'));
+  $('tab-answer').tabIndex = tab === 'answer' ? 0 : -1;
+  $('tab-why').tabIndex = tab === 'why' ? 0 : -1;
   $('answer-view').hidden = tab !== 'answer';
   $('why-view').hidden = tab !== 'why';
+  if (tab === 'why' && state.current) renderWhy(state.current);
   placeGraph();
 }
 
@@ -520,34 +692,37 @@ function placeGraph() {
   if ($('graph-wrap').parentElement !== slot) slot.append($('graph-wrap'));
   if (ask && state.graphOwner !== 'ask') {
     state.graphOwner = 'ask';
-    hudFor(null);
     G.clear(false);
+    renderGraphTools();
   } else if (!ask && state.tab === 'why' && state.graphOwner !== state.current) replayGraph(state.current);
-  requestAnimationFrame(() => G.refit());
+  requestAnimationFrame(() => { G.refit(); });
 }
 
 function showIncident(cur) {
   state.current = cur;
   $('landing').hidden = !!cur;
   $('incident').hidden = !cur;
+  document.querySelector('.incidents').classList.toggle('has-current', !!cur);
   renderAll();
   if (state.view !== 'incidents') showView('incidents');
   else placeGraph();
+  if (cur && mobile()) $('incident-main').scrollTo({ top: 0 });
 }
 
 function renderAll() {
   renderInbox();
-  renderScenarios();
+  renderSimulateMenu();
   const cur = state.current;
   if (!cur) return renderLanding();
   renderHead(cur);
   renderProgress(cur);
   renderAnswer(cur);
-  renderTrace(cur);
+  if (state.tab === 'why') renderWhy(cur);
 }
 
 function openRun(run) {
   if (state.current === run) return;
+  showTab('answer');
   showIncident(run);
 }
 
@@ -555,9 +730,12 @@ async function openStored(incident) {
   try {
     const d = await api('GET', `${T()}/incidents/${enc(incident)}`);
     const alerts = state.alerts.filter((a) => a.incident === incident);
-    const alert = { id: d.alert, name: d.alert_name, service: d.service, at: d.at };
-    showIncident({ stored: true, done: true, incident, alert, alerts: alerts.length ? alerts : [alert], home: d.service,
-      status: d.status, update_text: d.update_text, steps: d.steps, touched: G.empty(), cause: G.empty() });
+    const alert = { id: d.alert, name: d.alert_name, service: d.service, at: d.at, symptom: d.symptom };
+    const cur = { stored: true, done: true, incident, alert, alerts: alerts.length ? alerts : [alert], home: d.service,
+      status: d.status, res: { outcome: d.outcome, steps: d.steps, planner: null, llm_tokens: 0 }, steps: d.steps,
+      resolved: null, touched: G.empty(), cause: G.empty() };
+    showTab('answer');
+    showIncident(cur);
   } catch (e) {
     toast(e.message, true);
   }
@@ -574,25 +752,46 @@ async function refreshAlerts() {
 
 function setRunning(on) {
   state.running = on;
-  $('btn-reset').disabled = on;
-  renderScenarios();
+  $('btn-simulate').disabled = on;
+  renderSimulateMenu();
   if (!state.current) renderLanding();
 }
 
-async function fire(act) {
-  if (state.running) return;
+function fireNext() {
+  const next = nextScenario();
+  if (next) fire(next.act);
+  else doReset();
+}
+
+function fire(act) {
   const sc = scenarios().find((s) => s.act === act);
-  if (!sc) return;
-  const run = newRun(sc.trigger, sc.alerts, act);
+  if (sc) runAlert(sc.trigger, sc.alerts, act);
+}
+
+async function raiseCustom(form) {
+  const body = Object.fromEntries(new FormData(form));
+  try {
+    const r = await api('POST', `${T()}/alerts`, body);
+    await refreshAlerts();
+    const alert = state.alerts.find((a) => a.id === r.alert) || { id: r.alert, name: body.name, service: body.service, at: r.at, symptom: body.symptom };
+    runAlert(alert, [alert], null);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function runAlert(alert, alerts, act) {
+  if (state.running) return;
+  const run = newRun(alert, alerts, act);
   state.runs.push(run);
   state.skip = false;
   setRunning(true);
-  showIncident(run);
   showTab('answer');
+  showIncident(run);
   replayGraph(run);
   let last = 0;
   try {
-    for await (const ev of runEvents(`${T()}/alerts/${enc(sc.trigger.id)}/respond/stream${act === 2 ? '?compare=memory' : ''}`)) {
+    for await (const ev of runEvents(`${T()}/alerts/${enc(alert.id)}/respond/stream${act === 2 ? '?compare=memory' : ''}`)) {
       if (ev.step) {
         if (!state.skip) await sleep(Math.max(0, last + STEP_MS - performance.now()));
         last = performance.now();
@@ -607,7 +806,8 @@ async function fire(act) {
   } catch (e) {
     run.error = e.message;
     run.done = true;
-    toast(`Agent run failed: ${e.message}`, true);
+    toast(`The agents could not finish: ${e.message}`, true);
+    if (state.current === run) renderAll();
   } finally {
     setRunning(false);
     await refreshAlerts();
@@ -620,12 +820,13 @@ function onStep(run, step) {
   if (step.tool === 'open_incident' && step.data?.incident) run.incident = step.data.incident;
   if (step.tool === 'correlate_alerts') run.folded = true;
   if (state.graphOwner === run) applyStep(run, step, true);
+  announce(`${step.role}: ${plain(step.reason)}`);
   renderInbox();
   if (state.current !== run) return;
   renderHead(run);
   renderProgress(run);
-  appendTrace(run, step);
-  if (step.tool === 'post_update') renderAnswer(run);
+  renderAnswer(run);
+  if (state.tab === 'why') renderWhy(run);
 }
 
 function onResult(run, res) {
@@ -636,8 +837,8 @@ function onResult(run, res) {
   if (state.graphOwner === run) finalPaint(run);
   if (state.current === run) renderAll();
   const rc = res.outcome.root_cause;
-  toast(rc ? `Cause found: ${short(rc.change)} on ${short(rc.service)}. Confirm it to save the fix to memory.`
-    : 'No change explains this alert; the update asks a human to look.');
+  announce(rc ? `Cause found: ${short(rc.change)} on ${short(rc.service)}` : 'No cause found; a human should look.');
+  if (state.current !== run) toast(rc ? `Cause found for ${titleOf(run)}.` : `${titleOf(run)}: no cause found.`);
 }
 
 async function resolve(cur, change) {
@@ -647,7 +848,8 @@ async function resolve(cur, change) {
     cur.showAlt = false;
     if (r.data) names.set(r.data.runbook, 'runbook');
     if (state.graphOwner === cur) finalPaint(cur);
-    toast(r.summary);
+    toast('Cause confirmed and the fix saved to memory.');
+    announce('Cause confirmed and the fix saved to memory.');
   } catch (e) {
     toast(e.message, true);
   }
@@ -659,45 +861,64 @@ async function doReset() {
   try {
     const r = await api('POST', `${T()}/reset`);
     names.clear();
-    Object.assign(state, { runs: [], chat: [], graphOwner: null });
+    Object.assign(state, { runs: [], chat: [], graphOwner: null, askEles: null });
     await loadTenant();
     showIncident(null);
-    toast(r.status === 'seeded' ? 'Loaded the demo company into FalkorDB.' : 'Demo reset: the graph was restored from its pristine copy (GRAPH.COPY).');
+    toast(r.status === 'seeded' ? 'Loaded the demo company into FalkorDB.' : 'Demo company reset: the graph was restored from its pristine copy.');
   } catch (e) {
     toast(e.message, true);
   }
 }
 
 // ---------- ask the brain ----------
+// The answer first (one or two sentences), then at most five source chips, then the rest behind disclosures.
+function splitAnswer(text) {
+  const sentences = String(text || '').match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
+  let lead = '';
+  for (const s of sentences) {
+    if (lead && lead.length + s.length > 260) break;
+    lead += s;
+  }
+  return [lead.trim(), text.slice(lead.length).trim()];
+}
+
 function brainMessage(m) {
   if (m.pending) return h('div', { class: 'msg brain' }, h('p', { class: 'muted' }, h('span', { class: 'spinner' }), 'Searching the graph…'));
   if (m.error) return h('div', { class: 'msg brain' }, h('p', { class: 'error' }, m.error));
-  const d = m.data;
+  const d = m.data, [lead, rest] = splitAnswer(d.answer);
+  const hits = (d.hits || []).slice(0, 5), more = (d.related || []);
   return h('div', { class: 'msg brain' },
-    h('p', { class: 'answer' }, d.answer),
-    d.hits?.length ? [h('p', { class: 'k' }, 'Sources'), h('ol', { class: 'hits' }, d.hits.map((x) => h('li', {},
-      h('div', {}, h('span', { class: 'pill kind' }, x.kind), ' ', h('b', {}, x.title),
-        x.superseded_by ? [' ', h('span', { class: 'pill out' }, `superseded by ${short(x.superseded_by)}`)] : null),
-      h('div', { class: 'reason' }, x.snippet))))] : null,
-    d.related?.length ? [h('p', { class: 'k' }, 'Linked in the graph'), h('div', { class: 'chips' }, d.related.map((r) =>
-      h('span', { class: 'chip-static' }, h('span', { class: 'pill kind' }, r.kind), ' ', r.name)))] : null,
+    h('p', { class: 'answer' }, lead),
+    rest ? h('details', { class: 'more' }, h('summary', {}, 'More detail'), h('p', { class: 'small' }, rest)) : null,
+    hits.length ? h('div', { class: 'sources' }, h('span', { class: 'k' }, 'Sources'),
+      h('div', { class: 'chips' }, hits.map((x) => h('button', { class: 'chip-btn src', onclick: (e) => {
+        const q = e.currentTarget.nextElementSibling; if (q) q.hidden = !q.hidden; },
+      title: x.title }, h('span', { class: 'pill kind' }, kindWord(x.kind)), ' ', x.title,
+      x.superseded_by ? h('span', { class: 'pill out' }, 'superseded') : null),
+      h('blockquote', { class: 'quote small', hidden: true }, x.snippet)).flat())) : null,
+    more.length ? h('details', { class: 'more' }, h('summary', {}, `More linked (${more.length})`),
+      h('div', { class: 'chips' }, more.map((r) => h('span', { class: 'chip-static' }, h('span', { class: 'pill kind' }, kindWord(r.kind)), ' ', r.name)))) : null,
+    mobile() ? h('button', { class: 'ghost small-btn', onclick: () => toggleAskGraph() }, 'Show on graph') : null,
     cypherList(m.queries));
+}
+
+function toggleAskGraph() {
+  const on = document.body.classList.toggle('ask-graph-open');
+  requestAnimationFrame(() => G.refit());
+  return on;
 }
 
 function renderChat() {
   const log = $('chat-log');
   if (!state.chat.length) {
-    log.replaceChildren(h('div', { class: 'chat-empty' },
+    set('chat-log', h('div', { class: 'chat-empty' },
       h('h2', {}, 'Ask the company brain'),
-      h('p', { class: 'muted' }, 'Answers come from the same graph the agents use: services, owners, on-call, changes, '
-        + 'past incidents, docs, tickets and chat. Every answer cites its sources. No LLM writes it: it is assembled '
-        + 'from graph facts and quoted text.'),
-      OFFLINE ? h('p', { class: 'note' }, 'This page is a recorded replay, so questions need the live server '
-        + '(run make dev and open it without ?offline=1). Questions it answers, for example:') : null,
+      h('p', { class: 'muted' }, 'Who owns what, why something was decided, what fixed it last time: answered from the same graph the agents use, with sources.'),
+      OFFLINE ? h('p', { class: 'note' }, 'This page is a recorded replay, so questions need the live server (make dev). Questions it answers, for example:') : null,
       h('div', { class: 'chips' }, EXAMPLES.map((q) => h('button', { class: 'chip-btn', disabled: OFFLINE, onclick: () => askQ(q) }, q)))));
     return;
   }
-  log.replaceChildren(...state.chat.map((m) => (m.who === 'you' ? h('div', { class: 'msg you' }, m.text) : brainMessage(m))));
+  set('chat-log', state.chat.map((m) => (m.who === 'you' ? h('div', { class: 'msg you' }, m.text) : brainMessage(m))));
   log.scrollTop = log.scrollHeight;
 }
 
@@ -712,11 +933,14 @@ async function askQ(q) {
     const r = await api('POST', `${T()}/tools/ask`, { question: q });
     Object.assign(m, { pending: false, data: r.data, queries: r.queries });
     learnNames({ tool: 'ask', data: r.data });
+    announce(splitAnswer(r.data.answer)[0]);
     if (state.view === 'ask' && G.ready()) {
       state.graphOwner = 'ask';
       G.clear(false);
       const eles = G.elementsFor(r.highlight, null);
-      G.paint(null, eles, eles?.nonempty() ? G.near(eles) : null);
+      state.askEles = eles;
+      if (eles?.nonempty()) { G.scopeTo(eles); G.paint(null, eles, eles); }
+      renderGraphTools();
     }
   } catch (e) {
     Object.assign(m, { pending: false, error: e.message });
@@ -730,64 +954,76 @@ async function askQ(q) {
 // ---------- connect ----------
 function renderConnect() {
   const origin = OFFLINE ? 'http://localhost:8000' : location.origin;
-  const code = (text) => h('pre', { class: 'code' }, text);
+  const code = (text) => h('div', { class: 'code-wrap' }, h('pre', { class: 'code' }, text), copyBtn(text));
   const card = (title, ...kids) => h('div', { class: 'card connect-card' }, h('h3', {}, title), ...kids);
-  $('connect').replaceChildren(
+  const hl = state.health;
+  const pill = (label, value, ok) => h('span', { class: `status-pill ${ok ? 'confirmed' : 'open'}` }, `${label} · ${value}`);
+  const curl = `curl -X POST '${origin}${T()}/alerts?respond=true' \\\n  -H 'content-type: application/json' \\\n  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s"}'`;
+  set('connect',
     h('div', { class: 'connect-intro' }, h('h2', {}, 'Plug it into your stack'),
-      h('p', { class: 'muted' }, 'Every agent tool is defined once and exposed three ways: to the agents, over MCP, and over HTTP.')),
+      h('p', { class: 'muted' }, 'Every agent tool is defined once and exposed three ways: to the agents, over MCP, and over HTTP.'),
+      h('div', { class: 'status-row' },
+        pill('FalkorDB', hl?.falkordb ? 'connected' : 'down', !!hl?.falkordb),
+        pill('Alert webhook', 'ready', true),
+        pill('Slack', hl?.slack ? 'connected' : 'not connected', !!hl?.slack),
+        pill('Steps chosen by', plannerLabel(), modelDecides()))),
     h('div', { class: 'connect-grid' },
-      card('Use it from Claude Code (MCP)',
-        h('p', {}, 'The same graph tools the agents use (blast radius, dependency paths, suspects, who knows, ask…) plus '
-          + '“respond to alert”, for any MCP client.'),
-        code('claude mcp add --transport stdio oncall-brain -- \\\n  <venv>/bin/python -m oncall_brain.mcp_server'),
-        h('p', { class: 'muted small' }, 'Then ask Claude: “checkout is slow. Use oncall-brain to find out why.” '
-          + 'Over HTTP instead: python -m oncall_brain.mcp_server --http --port 8001')),
       card('Send alerts in (webhook)',
-        h('p', {}, 'Point your alerting tool at this endpoint (map its payload to service, symptom and name). With '
-          + 'respond=true the agents start on it right away.'),
-        code(`curl -X POST '${origin}${T()}/alerts?respond=true' \\\n  -H 'content-type: application/json' \\\n`
-          + `  -d '{"service": "svc:checkout", "symptom": "latency",\n       "name": "checkout p99 latency above 2s"}'`),
-        h('p', { class: 'muted small' }, 'symptom is latency, errors or saturation. New alerts show up in the inbox.')),
+        h('p', {}, 'Point your alerting tool at this endpoint and map its payload to service, symptom (latency, errors or saturation) and name. With respond=true the agents start right away; new alerts show up in the inbox.'),
+        code(curl)),
+      card('Use it from Claude Code (MCP)',
+        h('p', {}, 'The same graph tools the agents use (who depends on what, dependency paths, suspects, who knows, ask) plus “respond to alert”, for any MCP client.'),
+        code('claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server'),
+        h('p', { class: 'muted small' }, 'Then ask Claude: “checkout is slow. Use oncall-brain to find out why.” Over HTTP instead:'),
+        code('python -m oncall_brain.mcp_server --http --port 8001')),
       card('Post updates to Slack',
-        state.health?.slack ? h('p', { class: 'ok-line' }, '✓ Connected: every status update is also posted to your channel.')
-          : h('p', {}, 'Not connected. Create an incoming webhook in Slack (Apps → Incoming Webhooks), then add it to .env '
-            + 'and restart:'),
-        state.health?.slack ? null : code('SLACK_WEBHOOK_URL=https://hooks.slack.com/services/…')),
+        hl?.slack ? h('p', { class: 'ok-line' }, 'Connected: every status update is also posted to your channel.')
+          : [h('p', {}, h('b', {}, 'Not connected. '), 'Create an incoming webhook in Slack (Apps → Incoming Webhooks), add it to .env and restart:'),
+            code('SLACK_WEBHOOK_URL=https://hooks.slack.com/services/…')]),
       card('Bring your own data',
-        h('p', {}, `This demo runs on a synthetic company (${state.stats || 'services, teams, people, changes'}). Real `
-          + 'systems feed the same graph as things happen, through write tools on MCP and HTTP:'),
+        h('p', {}, `This demo runs on a synthetic company (${state.graph ? `${state.graph.nodes.length} services` : 'services'}, teams, people, changes). Real systems feed the same graph as things happen, through write tools on MCP and HTTP:`),
         h('ul', { class: 'small' },
           h('li', {}, h('code', {}, 'record_change'), ' from CI/CD (deploys, config changes)'),
           h('li', {}, h('code', {}, 'record_anomaly'), ' and ', h('code', {}, 'raise_alert'), ' from monitoring'),
           h('li', {}, h('code', {}, 'add_dependency'), ' / ', h('code', {}, 'retire_dependency'), ' from the service catalog')),
         h('p', { class: 'muted small' }, 'Every write is an idempotent MERGE, so replays and retries are safe.')),
-      card('Who decides each step',
-        h('p', {}, 'Now: ', h('b', {}, plannerName()), '. Set LLM_PROVIDER (anthropic, openai, gemini, groq, ollama…) and a key '
-          + 'in .env to let a model choose the tools; without one, rules choose each step from what the graph returns. '
-          + 'Either way, every fact comes from a Cypher query.')),
       card('Each company is its own graph',
-        h('p', {}, 'One FalkorDB graph per tenant: memory, incidents and knowledge never mix between companies. This page '
-          + 'shows tenant ', h('b', {}, state.tenant), '; add ?tenant=<name> to the URL and Reset demo to try another.'))));
+        h('p', {}, 'One FalkorDB graph per company (tenant): memory, incidents and knowledge never mix. ', h('b', {}, `This company: ${state.tenant}.`),
+          ' Add ?tenant=<name> to the URL to open another.'),
+        h('button', { class: 'ghost tall', disabled: state.running, onclick: () => doReset() }, 'Reset demo company')),
+      card('Who decides each step',
+        h('p', {}, 'Now: ', h('b', {}, plannerLabel()), '. Set LLM_PROVIDER (anthropic, openai, gemini, groq, ollama) and a key in .env to let a model choose the tools; '
+          + 'without one, rules choose each step from what the graph returns. Either way, every fact comes from a graph query, and each run is capped in tokens.'))));
 }
 
 // ---------- startup ----------
 async function loadTenant() {
   state.alerts = await api('GET', `${T()}/alerts`);
-  const g = await api('GET', `${T()}/graph`);
-  state.caption = G.build($('graph'), g);
-  state.stats = `${g.nodes.length} services, ${new Set(g.nodes.map((n) => n.team)).size} teams, ${g.edges.length} dependencies`;
+  const g = state.graph = await api('GET', `${T()}/graph`);
+  G.build($('graph'), g);
   state.graphOwner = null;
-  hudFor(null);
+  renderGraphTools();
 }
 
 async function init() {
   for (const b of document.querySelectorAll('.view-tab')) b.onclick = () => showView(b.dataset.view);
   $('tab-answer').onclick = () => showTab('answer');
   $('tab-why').onclick = () => showTab('why');
-  $('btn-reset').onclick = doReset;
-  $('btn-skip').onclick = () => { state.skip = true; };
-  $('trace').addEventListener('click', onTraceClick);
-  $('trace').addEventListener('keydown', (e) => { if (e.key === 'Enter') onTraceClick(e); });
+  document.querySelector('.seg').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { showTab(state.tab === 'answer' ? 'why' : 'answer'); $(state.tab === 'answer' ? 'tab-answer' : 'tab-why').focus(); }
+  });
+  $('btn-back').onclick = () => showIncident(null);
+  $('btn-simulate').onclick = (e) => {
+    e.stopPropagation();
+    const open = $('simulate-menu').hidden;
+    closeMenus();
+    if (open) { renderSimulateMenu(); $('simulate-menu').hidden = false; $('btn-simulate').setAttribute('aria-expanded', 'true'); }
+  };
+  $('simulate-menu').addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', closeMenus);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+  $('why-side').addEventListener('click', onStepClick);
+  $('why-side').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { if (e.target.closest('li[data-i]')) { e.preventDefault(); onStepClick(e); } } });
   $('ask-form').onsubmit = (e) => {
     e.preventDefault(); // the native form gives Enter-to-ask; never navigate
     const q = $('ask-q').value.trim();
@@ -795,22 +1031,14 @@ async function init() {
     askQ(q);
   };
   if (OFFLINE) $('ask-q').disabled = $('ask-go').disabled = true;
+  matchMedia('(max-width: 900px)').addEventListener('change', () => { renderAll(); placeGraph(); });
   placeGraph();
   showIncident(null);
   try {
     const hl = state.health = await api('GET', '/api/health');
     const tenant = params.get('tenant');
     state.tenant = tenant && /^[a-z0-9_]{1,40}$/.test(tenant) ? tenant : hl.default_tenant;
-    $('tenant').textContent = `company: ${state.tenant}`;
-    if (OFFLINE) { // a recording, not a connection: no green dot
-      $('db').textContent = 'recorded replay';
-      $('db').title = 'Replaying runs recorded from the real code (web/fixtures); no FalkorDB behind this page';
-    } else {
-      $('db').textContent = hl.falkordb ? 'FalkorDB' : 'FalkorDB down';
-      $('db').classList.add(hl.falkordb ? 'ok' : 'bad');
-    }
-    $('planner').textContent = /deterministic|mock/i.test(hl.planner) ? 'planner: rules' : `planner: ${plannerName()}`;
-    $('planner').title = hl.planner;
+    if (OFFLINE) hl.falkordb = true; // a recording of real runs; the live dot is not shown offline anyway
   } catch (e) {
     if (!OFFLINE) { // no backend (e.g. a static host): replay the recorded runs instead
       params.set('offline', '1');
@@ -823,7 +1051,7 @@ async function init() {
   try {
     await loadTenant();
   } catch (e) {
-    toast(`${e.message}. Press “Reset demo” to load the demo company.`, true);
+    toast(`${e.message}. Use “Reset demo company” in the Simulate menu to load the demo company.`, true);
   }
   renderAll();
 }

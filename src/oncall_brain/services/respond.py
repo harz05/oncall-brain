@@ -106,9 +106,10 @@ def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[An
 
 
 def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> dict[str, Any]:
-    """The result card. Cause, ruled-out suspects and the update come from the graph (so a re-run of a finished
-    incident still shows them); counters and memory come from this run's trace."""
-    opened = trace[0].data  # respond() always opens the incident first
+    """The result card. Cause, ruled-out suspects, pages, sources and the update come from the graph (so a finished
+    incident shows them again after a reload, with an empty trace); counters and memory come from this run's trace."""
+    # respond() always opens the incident first; a stored incident (no trace) reads the same facts from the graph.
+    opened = trace[0].data if trace else repo.read("incident_head", incident_id=incident_id).rows[0]
     at = opened["at"]
     checks = _data(trace, "check_hypothesis")
     cause = (repo.read("cause_facts", incident_id=incident_id).rows or [None])[0]
@@ -150,6 +151,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "at_risk": sorted({x["service"] for x in impacts} - direct - set((cause or {}).get("live_path") or [])),
         "co_causes": co,
         "update_text": update,
+        "sources": repo.read("incident_sources", incident_id=incident_id).rows,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),
         "checks_to_culprit": next((i + 1 for i, c in enumerate(checks) if cause and c["change"] == cause["change"]),
