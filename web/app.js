@@ -467,7 +467,7 @@ function renderAnswer(cur) {
       h('p', { class: 'muted small' }, 'The same facts without walking the dependency graph.')));
   }
   if (f.sources.length) rail.push(h('div', { class: 'card' }, h('h4', {}, 'Sources'),
-    h('div', { class: 'chips' }, f.sources.map((s) => h('span', { class: 'chip-static src', title: s.id }, h('span', { class: 'pill kind' }, kindWord(s.kind)), ' ', s.title || short(s.id))))));
+    h('div', { class: 'chips' }, f.sources.map((s) => h('span', { class: 'chip-static src', title: s.id }, h('span', { class: 'pill kind' }, kindWord(s.kind)), ' ', plain(s.title || short(s.id)))))));
   if (o?.storm) rail.push(h('div', { class: 'card storm' }, h('h4', {}, 'Alert storm'),
     h('p', {}, h('b', {}, `${o.storm.alerts.length + 1} alerts → 1 incident`)),
     h('p', { class: 'small' }, 'Nearest shared upstream: ', h('b', {}, o.storm.shared.slice(0, 2).map((s) => short(s.service)).join(', ') || 'none')),

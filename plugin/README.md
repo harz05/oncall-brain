@@ -20,7 +20,9 @@ claude --plugin-dir ./plugin            # or: /plugin install oncall-brain --mar
 ```
 
 `plugin/bin/oncall-brain-mcp` finds the checkout as the plugin's parent directory; when the plugin is installed
-from a marketplace instead, set `ONCALL_BRAIN_HOME=/path/to/checkout` in your environment. Settings (`.env`) are
-read from the checkout; the deterministic planner needs no key, `LLM_PROVIDER` picks a model for the agents.
+from a marketplace instead, set `ONCALL_BRAIN_HOME=/path/to/checkout` in your environment. It runs the active venv's
+interpreter (`$VIRTUAL_ENV/bin/python`, or `ONCALL_BRAIN_PYTHON` if set), else the checkout's `.venv` that `make setup`
+creates. Settings (`.env`) are read from the checkout; the deterministic planner needs no key, `LLM_PROVIDER` picks a
+model for the agents.
 
 Try: `/oncall-brain:incident alert:checkout-latency`, then `/oncall-brain:who-owns kafka`.
