@@ -5,7 +5,11 @@
   "service": "svc:checkout",
   "symptom": "latency",
   "at": 1792036800,
-  "act": 1
+  "act": 1,
+  "incident": null,
+  "status": null,
+  "has_cause": false,
+  "has_update": false
  },
  {
   "id": "alert:refunds-latency",
@@ -13,7 +17,11 @@
   "service": "svc:refunds",
   "symptom": "latency",
   "at": 1792296000,
-  "act": 2
+  "act": 2,
+  "incident": null,
+  "status": null,
+  "has_cause": false,
+  "has_update": false
  },
  {
   "id": "alert:checkout-latency-3",
@@ -21,7 +29,11 @@
   "service": "svc:checkout",
   "symptom": "latency",
   "at": 1792468560,
-  "act": 3
+  "act": 3,
+  "incident": null,
+  "status": null,
+  "has_cause": false,
+  "has_update": false
  },
  {
   "id": "alert:refunds-latency-3",
@@ -29,7 +41,11 @@
   "service": "svc:refunds",
   "symptom": "latency",
   "at": 1792468680,
-  "act": 3
+  "act": 3,
+  "incident": null,
+  "status": null,
+  "has_cause": false,
+  "has_update": false
  },
  {
   "id": "alert:subscriptions-latency",
@@ -37,6 +53,10 @@
   "service": "svc:subscriptions",
   "symptom": "latency",
   "at": 1792468800,
-  "act": 3
+  "act": 3,
+  "incident": null,
+  "status": null,
+  "has_cause": false,
+  "has_update": false
  }
 ]

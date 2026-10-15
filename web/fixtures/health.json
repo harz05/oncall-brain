@@ -1,6 +1,7 @@
 {
  "ok": true,
  "falkordb": true,
- "planner": "deterministic planner",
- "default_tenant": "acme"
+ "planner": "claude-opus-5-5 via Anthropic Messages API",
+ "default_tenant": "acme",
+ "slack": false
 }

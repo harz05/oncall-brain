@@ -35,14 +35,41 @@ python -m oncall_brain.mcp_server --http --port 8001
 ```
 
 Over HTTP the server checks the `Host` and `Origin` headers against `ALLOWED_HOSTS` (plus the local names) on any
-bind address, which blocks DNS rebinding. It has no token and no per-user auth: anyone who can reach it can use any
-tenant. Keep it on localhost, or see [DEPLOY.md](DEPLOY.md) before exposing it.
+bind address, which blocks DNS rebinding. Set `API_TOKEN` and every request must carry
+`Authorization: Bearer <token>` (the same token guards the HTTP API), which is what a remote connector for Claude
+Desktop or claude.ai needs. There is no per-user auth: anyone with the token can use any tenant. See
+[DEPLOY.md](DEPLOY.md) before exposing it.
 
-Which Python to use:
-- On Harsh's machine, the venv lives on the external drive: `<venv>/bin/python`.
-- Elsewhere, after `make setup`, it is the project venv: `<repo>/.venv/bin/python`.
+`<venv>/bin/python` below is the interpreter `make setup` created (`<repo>/.venv/bin/python`, or wherever your
+`VIRTUAL_ENV` points).
 
-The commands below use the first. Swap in the second on another machine.
+## What an outside model sees, and whether it picks right
+
+The server publishes `instructions` (the three ways to use it and what ids look like), 24 tools with a description
+and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
+`readOnlyHint` annotations, and two prompts:
+
+| Prompt | Arguments | Expands to |
+|---|---|---|
+| `work_alert` | `tenant`, `alert_id` | "Call respond_to_alert ... report the likely cause with its confidence, who is paged, the fix, what was ruled out, the update; then offer resolve_incident" |
+| `company_question` | `tenant`, `question` | "Call ask ... lead with the answer, then the sources; who_knows / change_story when they add something" |
+
+`python -m scripts.mcp_pick` gives Claude only what an MCP client gets (instructions + tool list) and 14 plain
+requests ("who owns kafka?", "we just deployed cart v3.2.0, record that", "inc:checkout-latency is confirmed:
+chg:pgw-pool-1 caused it"...). Result: **14/14 right on claude-opus-5-5**, table in [MCP_PICK.md](MCP_PICK.md).
+
+## Headless: alert in, answer and update out, no UI open
+
+```bash
+curl -X POST 'http://localhost:8000/api/tenants/acme/alerts?respond=true' \
+  -H 'content-type: application/json' \
+  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s"}'
+```
+
+records the alert (`raise_alert`), runs the three agents, writes the incident, its evidence and the status update
+into the graph, and, with `SLACK_WEBHOOK_URL` set, posts the update to your channel. The response is the same run
+object the UI shows; the inbox lists the incident the next time anyone opens it. Over MCP the equivalent is
+`raise_alert` then `respond_to_alert`.
 
 ## Claude Code
 
@@ -59,7 +86,10 @@ claude mcp add --transport http oncall-brain http://127.0.0.1:8001/mcp
 ```
 
 Then, in Claude Code, ask e.g. *"Using oncall-brain on tenant demo: reset it, then respond to
-alert:checkout-latency and tell me the root cause and which suspects were ruled out."*
+alert:checkout-latency and tell me the root cause and which suspects were ruled out."*, or use the server's prompts
+(`/mcp` lists them as `/oncall-brain:work_alert` and `/oncall-brain:company_question`). A Claude Code plugin
+(`plugin/`: `plugin.json`, `.mcp.json`, skills, `marketplace.json`) packages the same server for a one-minute
+install; see the README once it lands.
 
 ## Claude Desktop
 
@@ -81,8 +111,6 @@ and restart Claude Desktop. Claude Desktop does not start in the repo, so pass t
 ## MCP Inspector
 
 ```bash
-# On Harsh's machine, source env.sh first so the npm cache stays on the external drive.
-source /media/harsh/MyPassport1/devenv/env.sh
 npx @modelcontextprotocol/inspector <venv>/bin/python -m oncall_brain.mcp_server
 ```
 
@@ -183,4 +211,5 @@ alert makes the agents refute suspects behind it ("checkout no longer depends on
 `tests/integration/test_mcp.py` drives the server in-process with the SDK's own `mcp.Client`. It lists the tools,
 seeds a throwaway tenant through `reset_tenant` and calls `blast_radius` on it; it is skipped when FalkorDB is not
 reachable. `test_mcp_over_http_refuses_foreign_host_and_origin` checks that MCP over HTTP answers a foreign `Host`
-with 421 and a foreign `Origin` with 403.
+with 421 and a foreign `Origin` with 403. `tests/unit/test_mcp_surface.py` checks every tool and argument is
+described, the prompts render, and the remote transport refuses requests without the token when `API_TOKEN` is set.
