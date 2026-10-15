@@ -36,6 +36,9 @@ INTROS = {  # file -> one-paragraph intro; files not listed still get a section
     "knowledge.cypher": "**Knowledge (company brain).** Who knows a service and where a change came from, answered "
     "from ownership, authorship, paging and source edges.",
     "api.cypher": "**API.** Read models for the HTTP API and the UI.",
+    "reference.cypher": "**Reference implementations (tests and bench only).** The earlier, simpler forms of the hot "
+    "traversals: they enumerate every path and then filter. `tests/integration/test_query_equivalence.py` checks the "
+    "shipped forms return exactly the same rows, and `scripts/bench.py` times both (docs/PERF.md).",
 }
 
 # (capability, regex that finds it in a statement, why the product needs it)
@@ -44,8 +47,14 @@ CYPHER_FEATURES = [
      r"all\(r IN relationships\(p\) WHERE r\.valid_from",
      "`DEPENDS_ON*0..6` where every hop must be valid at alert time: retired dependencies stop counting, "
      "which is how the legacy-billing decoy is refuted."),
-    ("`shortestPath` in `WITH`", r"WITH shortestPath\(",
-     "Ignores validity to tell a retired dependency apart from no dependency at all."),
+    ("`shortestPath` in `WITH`", r"shortestPath\(",
+     "A cheap lower bound on hops between a suspect and the alerting service, kept only if every edge on it is live "
+     "at alert time; also tells a retired dependency apart from no dependency at all."),
+    ("Per-hop filters on variable-length edges", r"\[e:DEPENDS_ON\*",
+     "`[e:DEPENDS_ON*0..6]` with a `WHERE` on `e.valid_from` / `e.valid_to` is applied inside the traversal at each "
+     "hop, so invalid branches are pruned instead of enumerated and filtered afterwards (docs/PERF.md)."),
+    ("`CALL {}` subqueries", r"\bCALL \{",
+     "Per-candidate shortest paths, and the level-by-level breadth-first closures for blast radius and storms."),
     ("`MERGE` idempotency (+ `ON CREATE SET`)", r"\bMERGE\b",
      "Stable ids make seeding, recall, hypotheses and evidence safe to repeat; no uniqueness constraints needed."),
     ("`FOREACH` conditional writes", r"\bFOREACH\b",
@@ -123,7 +132,7 @@ def render() -> str:
     out += ["", "## Graph features this product depends on", "",
             "| Capability | Where | Why |", "|---|---|---|"]
     for cap, rx, why in CYPHER_FEATURES:
-        hits = [q.name for q in ordered if re.search(rx, q.cypher)]
+        hits = [q.name for q in ordered if re.search(rx, q.cypher) and q.file != "reference.cypher"]
         if hits:
             out.append(f"| {cap} | {', '.join(f'[{n}](#{n})' for n in hits)} | {why} |")
     out += [

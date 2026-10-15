@@ -94,7 +94,7 @@ These scenarios are synthetic and written by the same team as the checks, so rea
 
 What fails: all 16 graph-agent misses are seeds where a random blip landed on decoy *c*'s service after its change, so *c* looks like a real, supported cause (22/38 correct on those seeds). On the 66 seeds with only the planted story it is 66/66; with a silent middle hop 11/13; with a cascade victim 48/51.
 
-The eval has single-alert incidents only; act 3's storm is checked by `make demo` and `test_act3_alert_storm_is_correlated_and_only_then_solved`, five more storms (two independent causes, alerts on one service, a quiet shared cache, memory that explains part of a storm, two changes on one service) by `tests/integration/test_storms.py`, and a cascade victim and a monitoring gap by `tests/integration/test_causality.py`. A whole incident (three agent roles, all reads and writes) takes about 85 ms (median over the eval, p95 126 ms) on the deterministic planner; a single tool's queries take 1-8 ms.
+The eval has single-alert incidents only; act 3's storm is checked by `make demo` and `test_act3_alert_storm_is_correlated_and_only_then_solved`, five more storms (two independent causes, alerts on one service, a quiet shared cache, memory that explains part of a storm, two changes on one service) by `tests/integration/test_storms.py`, and a cascade victim and a monitoring gap by `tests/integration/test_causality.py`. A whole incident (three agent roles, all reads and writes) takes about 85 ms (median over the eval, p95 126 ms) on the deterministic planner; a single tool's queries take 1-8 ms. At scale, the hot traversals avoid enumerating paths (candidates from the time indexes, `shortestPath` checked against edge validity, per-hop-filtered fallbacks, breadth-first closures with `CALL {}`): on a hub-heavy 1,000-service graph, `blast_radius` on the hub went from 2.6 s to 45 ms with identical results ([docs/PERF.md](docs/PERF.md)).
 
 ## Graph data model
 
@@ -206,6 +206,7 @@ docs/            architecture, data model, queries, eval, MCP, deploy, walkthrou
 - [docs/DATA_MODEL.md](docs/DATA_MODEL.md): every label and relationship
 - [docs/QUERIES.md](docs/QUERIES.md): every Cypher query the product runs (generated)
 - [docs/EVAL.md](docs/EVAL.md): graph agent vs baselines on generated incidents
+- [docs/PERF.md](docs/PERF.md): query timings from 25 to 1,000 services, before and after the traversal rewrite
 - [docs/MCP.md](docs/MCP.md): use the same tools from any MCP client
 - [docs/DEPLOY.md](docs/DEPLOY.md): live deployment (FalkorDB Cloud + Render, or any Docker VM)
 - [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md): a 30-minute tour of the code
