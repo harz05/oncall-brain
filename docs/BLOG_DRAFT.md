@@ -37,7 +37,7 @@ The first version scored 200/200, and a round of mock judges said, fairly, that 
 | keyword match: change summary vs alert name | 57/200 |
 | flat change log: newest change in the window | 0/200 |
 
-On seeds with only the planted story the agent still gets 66 of 66. All 16 misses are one pattern: a random blip lands on an innocent changed service right after its change, so that change looks like a real, supported cause and wins on a ranking rule (nearer, earlier, or upstream and red first). The eval lists every miss in the agent's own words from its trace.
+On seeds with only the planted story the agent still gets 66 of 66. 12 of the 14 misses are one pattern: a random blip lands on an innocent changed service right after its change, so that change looks like a real, supported cause and wins on a ranking rule (nearer, earlier, or upstream and red first). The other 2 combine a silent middle hop with a cascade victim. The eval lists every miss in the agent's own words from its trace.
 
 Read those with the caveats. The scenarios are synthetic (one 25-service company), and the same team wrote the generator, the checks and the agent. Worse for a clean comparison: the perturbations and the agent's ranking rules changed in the same round, by people who knew what the perturbations were, so this is not a blind test. The flat log scores 0 by construction: one decoy is always the newest change. The anomaly-aware log is the strongest rule I found without the graph; the retired dependency fools it 55 times (a change plus an anomaly there looks like a real upstream cause unless you know the edge ended days ago), and the noisy innocent change 11 times. The planner is deterministic, with no LLM in the loop. Details in [EVAL.md's limitations](EVAL.md#limitations-read-before-quoting-the-numbers).
 
@@ -185,7 +185,7 @@ redis-server --port 6379 --loadmodule ./falkordb-rhel8-x64.so
 
 ## What I'd do next
 
-- Tell "red because of my change" from "red at the same moment for another reason". That is every one of the eval's 16 misses.
+- Tell "red because of my change" from "red at the same moment for another reason". That is 12 of the eval's 14 misses.
 - A "no change, it's capacity" path. Today the investigator escalates when every change is refuted, but doesn't look for other causes.
 - Runbook confidence that also decays with age. Today a refuted suggestion lowers it, but time doesn't.
 - Real ingest: deploy webhooks, monitoring and paging calling the event tools (`record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`) that already keep the graph current.
