@@ -51,3 +51,27 @@ MATCH (:Service {id: $caller})-[d:DEPENDS_ON]->(:Service {id: $callee})
 WHERE d.valid_to IS NULL AND d.valid_from <= $at
 SET d.valid_to = $at
 RETURN count(d) AS retired
+
+// name: record_doc
+// purpose: Keep knowledge current: record a decision record, design note, postmortem or runbook page as it is written (idempotent on id): its author, the service it DECIDES for, what it MENTIONS, and the older doc it SUPERSEDES, so ask puts the new decision of record first and flags the old one.
+MERGE (d:Doc {id: $id})
+SET d.kind = $kind, d.title = $title, d.text = $text, d.at = $at
+WITH d
+// Re-recording an id corrects the doc: drop its old links first.
+OPTIONAL MATCH (d)-[old:AUTHORED_BY|DECIDES|MENTIONS|SUPERSEDES]->()
+DELETE old
+WITH DISTINCT d
+OPTIONAL MATCH (p:Person {id: $author})
+OPTIONAL MATCH (s:Service {id: $decides})
+OPTIONAL MATCH (prev:Doc {id: $supersedes})
+FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (d)-[:AUTHORED_BY]->(x))
+FOREACH (x IN CASE WHEN s IS NULL THEN [] ELSE [s] END | MERGE (d)-[:DECIDES]->(x) MERGE (d)-[:MENTIONS]->(x))
+FOREACH (x IN CASE WHEN prev IS NULL THEN [] ELSE [prev] END | MERGE (d)-[:SUPERSEDES]->(x))
+WITH d, s, prev
+UNWIND coalesce($mentions, []) AS m
+OPTIONAL MATCH (ms:Service {id: m})
+OPTIONAL MATCH (mc:Change {id: m})
+OPTIONAL MATCH (mi:Incident {id: m})
+WITH d, s, prev, coalesce(ms, mc, mi) AS x
+FOREACH (y IN CASE WHEN x IS NULL THEN [] ELSE [x] END | MERGE (d)-[:MENTIONS]->(y))
+RETURN DISTINCT d.id AS doc, s.id AS decides, prev.id AS supersedes

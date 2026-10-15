@@ -1,6 +1,8 @@
 """Company brain: free-form questions answered from the graph first (entity linking + intent routing), then from docs,
 tickets and chat with their sources."""
 
+import pytest
+
 from oncall_brain.agents.registry import ToolContext, call
 from oncall_brain.datagen import DAY, T1, generate
 from oncall_brain.scenarios import scenario
@@ -169,3 +171,24 @@ def test_fulltext_index_is_idempotent_survives_reset_and_scenarios_still_load(st
     load(repo, data)
     rows = repo.read("knowledge_context", ids=["doc:cost-review-pgw"]).rows
     assert rows and {r["label"] for r in rows} <= {"Service", "Person", "Doc", "Message", "Ticket"}
+
+
+def test_a_new_decision_record_flips_the_ask_answer_and_flags_the_old_one(store, tenant):
+    """Keeping knowledge current: record_doc writes a new decision of record; ask puts it first at once."""
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    before = call("ask", ctx, {"question": "what is the kafka retention"}).data
+    assert before["hits"][0]["id"] == "doc:adr-011"
+    out = call("record_doc", ctx, {"kind": "decision", "id": "doc:adr-015",
+                                   "title": "ADR-015: Kafka retention of 14 days",
+                                   "text": "Decision: raise the kafka retention from 7 days to 14 days so a weekend "
+                                           "consumer outage no longer loses events. Supersedes ADR-011.",
+                                   "decides": "svc:kafka", "mentions": ["svc:kafka"], "supersedes": "doc:adr-011",
+                                   "author": "person:hana-costa"})
+    assert out.data["supersedes"] == "doc:adr-011" and "decision of record for svc:kafka" in out.summary
+    after = call("ask", ctx, {"question": "what is the kafka retention"}).data
+    assert after["hits"][0]["id"] == "doc:adr-015" and "14 days" in after["answer"]
+    assert next(h for h in after["hits"] if h["id"] == "doc:adr-011")["superseded_by"] == "doc:adr-015"
+    assert "It replaces 'ADR-011" in after["answer"]
+    with pytest.raises(ValueError):
+        call("record_doc", ctx, {"kind": "design", "title": "x", "text": "y", "decides": "svc:nope"})

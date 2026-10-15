@@ -36,7 +36,7 @@
        "alert": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 0.99,
+     "ms": 1.11,
      "readonly": false
     }
    ],
@@ -59,7 +59,7 @@
    "seq": 2,
    "role": "triage",
    "tool": "correlate_alerts",
-   "reason": "Two more alerts fired within 15 minutes, so I'm correlating them first to find any upstream service they share.",
+   "reason": "Two other alerts fired within 15 minutes, so I'm correlating them first to find any shared upstream service.",
    "summary": "3 related alerts on 3 services (checkout, refunds, subscriptions); 6 upstream services are shared by all of them, nearest to all first: payments, postgres-orders, fraud-check",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -113,7 +113,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.24,
+     "ms": 1.04,
      "readonly": true
     },
     {
@@ -133,7 +133,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.72,
+     "ms": 0.64,
      "readonly": true
     },
     {
@@ -157,7 +157,7 @@
        "at": 1792468680
       }
      ],
-     "ms": 2.5,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -336,7 +336,7 @@
        "red": true
       }
      ],
-     "ms": 7.18,
+     "ms": 2.42,
      "readonly": true
     },
     {
@@ -399,7 +399,7 @@
        "shared": 6
       }
      ],
-     "ms": 1.83,
+     "ms": 1.05,
      "readonly": false
     }
    ],
@@ -487,8 +487,8 @@
    "seq": 3,
    "role": "triage",
    "tool": "blast_radius",
-   "reason": "Alerts are now correlated, so I'm checking which services are affected downstream of subscriptions.",
-   "summary": "3 services depend on svc:subscriptions (3 tier-1)",
+   "reason": "Alerts are already correlated, so next I'm working out who is affected by the subscriptions latency, then I'll page its on-call.",
+   "summary": "3 services depend on svc:subscriptions (3 tier-1); most critical first: api-gateway, mobile-bff, web-frontend (tier, then PageRank over the dependencies live at that time)",
    "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
@@ -556,7 +556,7 @@
        ]
       }
      ],
-     "ms": 3.55,
+     "ms": 1.56,
      "readonly": true
     },
     {
@@ -576,7 +576,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.49,
+     "ms": 0.83,
      "readonly": true
     },
     {
@@ -595,7 +595,9 @@
        "path": [
         "svc:api-gateway",
         "svc:subscriptions"
-       ]
+       ],
+       "score": 0.054,
+       "rank": 1
       },
       {
        "service": "svc:mobile-bff",
@@ -606,7 +608,9 @@
         "svc:mobile-bff",
         "svc:api-gateway",
         "svc:subscriptions"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 2
       },
       {
        "service": "svc:web-frontend",
@@ -617,10 +621,451 @@
         "svc:web-frontend",
         "svc:api-gateway",
         "svc:subscriptions"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 3
       }
      ],
-     "ms": 2.86,
+     "ms": 2.32,
+     "readonly": true
+    },
+    {
+     "name": "topology_at",
+     "cypher": "// purpose: The dependency graph as it was at $at: every DEPENDS_ON edge live at that time. FalkorDB's algorithms walk every edge of a graph and the tenant graph keeps retired and not-yet-live dependencies as history, so this is what gets projected into a scratch graph for an algorithm to run on.\nMATCH (a:Service)-[r:DEPENDS_ON]->(b:Service)\nWHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\nRETURN a.id AS caller, b.id AS callee\nORDER BY caller, callee",
+     "params": {
+      "at": 1792468800
+     },
+     "rows": [
+      {
+       "caller": "svc:analytics",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:checkout"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:recommendations"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:refunds"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:search"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:subscriptions"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:fraud-check",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:warehouse-sync"
+      },
+      {
+       "caller": "svc:legacy-billing",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:mobile-bff",
+       "callee": "svc:api-gateway"
+      },
+      {
+       "caller": "svc:notifications",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:fraud-check"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:payments-gw"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:payments-gw",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:promotions"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:search",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:notifications"
+      },
+      {
+       "caller": "svc:subscriptions",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:web-frontend",
+       "callee": "svc:api-gateway"
+      }
+     ],
+     "ms": 0.89,
+     "readonly": true
+    },
+    {
+     "name": "project_topology",
+     "cypher": "// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question.\nUNWIND $edges AS e\nMERGE (a:Service {id: e.caller})\nMERGE (b:Service {id: e.callee})\nMERGE (a)-[:DEPENDS_ON]->(b)\nRETURN count(*) AS edges",
+     "params": {
+      "edges": [
+       {
+        "caller": "svc:analytics",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:checkout"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:recommendations"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:refunds"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:search"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:subscriptions"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:fraud-check",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:warehouse-sync"
+       },
+       {
+        "caller": "svc:legacy-billing",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:mobile-bff",
+        "callee": "svc:api-gateway"
+       },
+       {
+        "caller": "svc:notifications",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:fraud-check"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:payments-gw"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:payments-gw",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:promotions"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:search",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:notifications"
+       },
+       {
+        "caller": "svc:subscriptions",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:web-frontend",
+        "callee": "svc:api-gateway"
+       }
+      ]
+     },
+     "rows": [
+      {
+       "edges": 38
+      }
+     ],
+     "ms": 1.19,
+     "readonly": false
+    },
+    {
+     "name": "criticality",
+     "cypher": "// purpose: Criticality of every service: PageRank over the dependency graph (a service is critical when services that many others rely on rely on it). Runs on the scratch projection, so a retired or not-yet-live dependency never adds rank.\nCALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score\nRETURN node.id AS service, score\nORDER BY score DESC, service",
+     "params": {},
+     "rows": [
+      {
+       "service": "svc:redis-cache",
+       "score": 0.114141538739204
+      },
+      {
+       "service": "svc:kafka",
+       "score": 0.109091609716415
+      },
+      {
+       "service": "svc:postgres-orders",
+       "score": 0.0873507186770439
+      },
+      {
+       "service": "svc:payments",
+       "score": 0.0583686642348766
+      },
+      {
+       "service": "svc:api-gateway",
+       "score": 0.0539947003126144
+      },
+      {
+       "service": "svc:analytics",
+       "score": 0.0397829562425613
+      },
+      {
+       "service": "svc:pricing",
+       "score": 0.0377168990671635
+      },
+      {
+       "service": "svc:fraud-check",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:payments-gw",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:promotions",
+       "score": 0.0360287055373192
+      },
+      {
+       "service": "svc:warehouse-sync",
+       "score": 0.0340289734303951
+      },
+      {
+       "service": "svc:inventory",
+       "score": 0.0330117754638195
+      },
+      {
+       "service": "svc:auth",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:cart",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:notifications",
+       "score": 0.0284976568073034
+      },
+      {
+       "service": "svc:checkout",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:recommendations",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:refunds",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:search",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:subscriptions",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:legacy-billing",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:mobile-bff",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:reporting",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:shipping",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:web-frontend",
+       "score": 0.0199986416846514
+      }
+     ],
+     "ms": 0.62,
      "readonly": true
     },
     {
@@ -645,7 +1090,38 @@
       ]
      },
      "rows": [],
-     "ms": 1.0,
+     "ms": 0.69,
+     "readonly": false
+    },
+    {
+     "name": "record_criticality",
+     "cypher": "// purpose: Write the criticality order onto the incident board: IMPACTS.rank (1 = warn first) and IMPACTS.score (PageRank at alert time) on the impacted services.\nUNWIND $rows AS r\nMATCH (:Incident {id: $incident_id})-[x:IMPACTS]->(:Service {id: r.service})\nSET x.rank = r.rank, x.score = r.score\nRETURN count(x) AS ranked",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "rows": [
+       {
+        "service": "svc:api-gateway",
+        "rank": 1,
+        "score": 0.054
+       },
+       {
+        "service": "svc:mobile-bff",
+        "rank": 2,
+        "score": 0.02
+       },
+       {
+        "service": "svc:web-frontend",
+        "rank": 3,
+        "score": 0.02
+       }
+      ]
+     },
+     "rows": [
+      {
+       "ranked": 3
+      }
+     ],
+     "ms": 0.6,
      "readonly": false
     }
    ],
@@ -693,7 +1169,9 @@
      "path": [
       "svc:api-gateway",
       "svc:subscriptions"
-     ]
+     ],
+     "score": 0.054,
+     "rank": 1
     },
     {
      "service": "svc:mobile-bff",
@@ -704,7 +1182,9 @@
       "svc:mobile-bff",
       "svc:api-gateway",
       "svc:subscriptions"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 2
     },
     {
      "service": "svc:web-frontend",
@@ -715,7 +1195,9 @@
       "svc:web-frontend",
       "svc:api-gateway",
       "svc:subscriptions"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 3
     }
    ]
   },
@@ -723,7 +1205,7 @@
    "seq": 4,
    "role": "triage",
    "tool": "page_on_call",
-   "reason": "Correlation and blast radius are done, so I'm paging the on-call engineer for subscriptions.",
+   "reason": "Alerts are correlated and the blast radius is mapped, so next I'm paging whoever is on call for subscriptions.",
    "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:subscriptions",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -797,7 +1279,7 @@
        ]
       }
      ],
-     "ms": 3.3,
+     "ms": 1.06,
      "readonly": true
     },
     {
@@ -817,7 +1299,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.41,
+     "ms": 0.56,
      "readonly": true
     },
     {
@@ -836,7 +1318,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 1.37,
+     "ms": 0.66,
      "readonly": true
     },
     {
@@ -853,7 +1335,7 @@
        "first_for": "svc:subscriptions"
       }
      ],
-     "ms": 1.2,
+     "ms": 0.75,
      "readonly": false
     }
    ],
@@ -888,7 +1370,7 @@
    "seq": 5,
    "role": "triage",
    "tool": "handoff",
-   "reason": "Triage steps are done: the storm is correlated with checkout and refunds, the blast radius is mapped and on-call for subscriptions is paged.",
+   "reason": "Triage is done: alerts are correlated, the blast radius is recorded and the subscriptions on-call is paged.",
    "summary": "triage hands off to investigator",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -967,7 +1449,7 @@
        ]
       }
      ],
-     "ms": 3.11,
+     "ms": 1.89,
      "readonly": true
     }
    ],
@@ -981,7 +1463,7 @@
    "seq": 6,
    "role": "investigator",
    "tool": "recall_similar",
-   "reason": "I'm looking up similar past incidents to see if memory points to a likely cause before I propose suspects.",
+   "reason": "I'm checking past incidents for a similar match before I propose suspects for the subscriptions latency storm.",
    "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1065,7 +1547,7 @@
        ]
       }
      ],
-     "ms": 2.39,
+     "ms": 1.68,
      "readonly": true
     },
     {
@@ -1112,7 +1594,7 @@
        "score": 2
       }
      ],
-     "ms": 3.33,
+     "ms": 3.05,
      "readonly": true
     },
     {
@@ -1160,7 +1642,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.91,
+     "ms": 0.81,
      "readonly": false
     }
    ],
@@ -1220,7 +1702,7 @@
    "seq": 7,
    "role": "investigator",
    "tool": "hypothesize_from_memory",
-   "reason": "A past incident (inc:checkout-latency, payments-gw) matches with score 3, so I'm generating suspects from that runbook memory first.",
+   "reason": "A past incident (inc:checkout-latency, payments-gw) scored 3, so I'm generating hypotheses from the runbooks that fixed past incidents.",
    "summary": "The recalled runbooks' services had no change of their kind in this window",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1319,7 +1801,7 @@
        ]
       }
      ],
-     "ms": 1.21,
+     "ms": 1.52,
      "readonly": true
     },
     {
@@ -1339,7 +1821,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.33,
+     "ms": 0.54,
      "readonly": true
     },
     {
@@ -1351,7 +1833,7 @@
       "min_score": 3
      },
      "rows": [],
-     "ms": 2.96,
+     "ms": 2.01,
      "readonly": true
     }
    ],
@@ -1365,7 +1847,7 @@
    "seq": 8,
    "role": "investigator",
    "tool": "propose_hypotheses",
-   "reason": "hypothesize_from_memory came back with no hypotheses, so I'm running propose_hypotheses to list changes in the window across the shared upstream services.",
+   "reason": "hypothesize_from_memory didn't produce any hypotheses, so I'm running propose_hypotheses to get suspects from changes on the dependency path.",
    "summary": "2 changes on the dependency path, 1 more from the flat change log (newest anywhere: chg:search-430)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1469,7 +1951,7 @@
        ]
       }
      ],
-     "ms": 2.33,
+     "ms": 1.05,
      "readonly": true
     },
     {
@@ -1489,7 +1971,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.6,
+     "ms": 0.69,
      "readonly": true
     },
     {
@@ -1517,7 +1999,7 @@
        "hops": 2
       }
      ],
-     "ms": 4.2,
+     "ms": 1.65,
      "readonly": true
     },
     {
@@ -1550,7 +2032,7 @@
        "summary": "Deploy subscriptions v8.8.0 (billing cycles)"
       }
      ],
-     "ms": 1.25,
+     "ms": 0.73,
      "readonly": true
     },
     {
@@ -1594,7 +2076,7 @@
        "id": "hyp:subscriptions-latency:search-430"
       }
      ],
-     "ms": 2.11,
+     "ms": 1.11,
      "readonly": false
     }
    ],
@@ -1668,249 +2150,7 @@
    "seq": 9,
    "role": "investigator",
    "tool": "check_hypothesis",
-   "reason": "Three suspects are still open, so I'm checking all of them against the dependency graph at the same time.",
-   "summary": "REFUTES chg:search-430: no dependency path from subscriptions to search",
-   "by": "claude-opus-5-5",
-   "writes": true,
-   "queries": [
-    {
-     "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
-     "params": {
-      "incident_id": "inc:subscriptions-latency",
-      "storm_window": 900
-     },
-     "rows": [
-      {
-       "id": "inc:subscriptions-latency",
-       "status": "open",
-       "service": "svc:subscriptions",
-       "alert": "alert:subscriptions-latency",
-       "at": 1792468800,
-       "symptom": "latency",
-       "steps": [
-        {
-         "role": "triage",
-         "target": "alert:subscriptions-latency",
-         "tool": "open_incident"
-        },
-        {
-         "role": "triage",
-         "target": "inc:subscriptions-latency",
-         "tool": "correlate_alerts"
-        },
-        {
-         "role": "triage",
-         "target": "svc:subscriptions",
-         "tool": "blast_radius"
-        },
-        {
-         "role": "triage",
-         "target": "svc:subscriptions",
-         "tool": "page_on_call"
-        },
-        {
-         "role": "triage",
-         "target": "investigator",
-         "tool": "handoff"
-        },
-        {
-         "role": "investigator",
-         "target": "inc:subscriptions-latency",
-         "tool": "recall_similar"
-        },
-        {
-         "role": "investigator",
-         "target": "inc:subscriptions-latency",
-         "tool": "hypothesize_from_memory"
-        },
-        {
-         "role": "investigator",
-         "target": "inc:subscriptions-latency",
-         "tool": "propose_hypotheses"
-        }
-       ],
-       "hypotheses": [
-        {
-         "at": 1792468620,
-         "change_id": "chg:search-430",
-         "explained": null,
-         "gaps": null,
-         "hops": null,
-         "id": "hyp:subscriptions-latency:search-430",
-         "onset": null,
-         "red_before": null,
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792467300,
-         "change_id": "chg:pg-conn-3",
-         "explained": null,
-         "gaps": null,
-         "hops": 2,
-         "id": "hyp:subscriptions-latency:pg-conn-3",
-         "onset": null,
-         "red_before": null,
-         "service": "svc:postgres-orders",
-         "source": "dependency-path",
-         "status": "open"
-        },
-        {
-         "at": 1792467000,
-         "change_id": "chg:subs-88",
-         "explained": null,
-         "gaps": null,
-         "hops": 0,
-         "id": "hyp:subscriptions-latency:subs-88",
-         "onset": null,
-         "red_before": null,
-         "service": "svc:subscriptions",
-         "source": "dependency-path",
-         "status": "open"
-        }
-       ],
-       "recalls": [
-        {
-         "cause_service": "svc:fraud-check",
-         "incident": "inc:1003",
-         "score": 2
-        },
-        {
-         "cause_service": "svc:postgres-orders",
-         "incident": "inc:0877",
-         "score": 2
-        },
-        {
-         "cause_service": "svc:payments-gw",
-         "incident": "inc:checkout-latency",
-         "score": 3
-        }
-       ],
-       "storm": 2,
-       "correlated": [
-        "svc:refunds",
-        "svc:checkout"
-       ],
-       "shared_upstream": [
-        "svc:payments",
-        "svc:postgres-orders",
-        "svc:fraud-check",
-        "svc:payments-gw",
-        "svc:redis-cache",
-        "svc:kafka"
-       ]
-      }
-     ],
-     "ms": 2.34,
-     "readonly": true
-    },
-    {
-     "name": "hypothesis_facts",
-     "cypher": "// purpose: What a check needs about one suspect: changed service, change time, rollback, alerting service and time.\nMATCH (i:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis {id: $hypothesis_id})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nMATCH (i)-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nRETURN i.id AS incident, h.status AS status, c.id AS change, c.summary AS summary, c.at AS change_at,\n       c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at,\n       collect(DISTINCT cs.id) AS storm_services",
-     "params": {
-      "hypothesis_id": "hyp:subscriptions-latency:search-430"
-     },
-     "rows": [
-      {
-       "incident": "inc:subscriptions-latency",
-       "status": "open",
-       "change": "chg:search-430",
-       "summary": "Deploy search v4.3.0",
-       "change_at": 1792468620,
-       "rolled_back_at": null,
-       "service": "svc:search",
-       "origin": "svc:subscriptions",
-       "at": 1792468800,
-       "storm_services": [
-        "svc:refunds",
-        "svc:checkout"
-       ]
-      }
-     ],
-     "ms": 2.39,
-     "readonly": true
-    },
-    {
-     "name": "live_paths",
-     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH (o:Service {id: $origin}), (t:Service {id: $target})\n// No path at all within 6 hops (live or not): done, without walking every path out of the origin.\nWITH o, shortestPath((o)-[:DEPENDS_ON*0..6]->(t)) AS sp\nWHERE sp IS NOT NULL\n// Otherwise list the paths as before: which 20 are kept among equally long ones, and their order, is the order this\n// traversal meets them, so it stays exactly as it was (a per-hop filter on the edges would change that order). The\n// target is matched again, not carried over, so the traversal still runs from the origin.\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
-     "params": {
-      "origin": "svc:subscriptions",
-      "target": "svc:search",
-      "at": 1792468800
-     },
-     "rows": [],
-     "ms": 1.02,
-     "readonly": true
-    },
-    {
-     "name": "any_path",
-     "cypher": "// purpose: shortestPath ignoring validity, to tell a retired (or not yet live) dependency apart from no dependency at all.\nMATCH (o:Service {id: $origin}), (t:Service {id: $target})\nWITH shortestPath((o)-[:DEPENDS_ON*]->(t)) AS p\nWHERE p IS NOT NULL\nRETURN [n IN nodes(p) | n.id] AS path, [r IN relationships(p) | r.valid_to] AS retired_at,\n       [r IN relationships(p) | r.valid_from] AS live_from",
-     "params": {
-      "origin": "svc:subscriptions",
-      "target": "svc:search"
-     },
-     "rows": [],
-     "ms": 0.97,
-     "readonly": true
-    },
-    {
-     "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.tag = $tag, e.path = $path, e.at = $at, e.explained = $explained\nWITH h, e, h.status AS before\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,\n    h.explained = $explained, h.onset = $onset, h.gaps = $gaps, h.red_before = $red_before\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h, before\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence (once).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'open' THEN [rb] ELSE [] END |\n  SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
-     "params": {
-      "hypothesis_id": "hyp:subscriptions-latency:search-430",
-      "evidence_id": "ev:subscriptions-latency:search-430",
-      "verdict": "refutes",
-      "reason": "no dependency path from subscriptions to search",
-      "tag": "no dependency path",
-      "path": [],
-      "at": 1792468800,
-      "explained": [],
-      "onset": null,
-      "gaps": [],
-      "red_before": null
-     },
-     "rows": [
-      {
-       "hypothesis": "hyp:subscriptions-latency:search-430",
-       "status": "refuted"
-      }
-     ],
-     "ms": 1.4,
-     "readonly": false
-    }
-   ],
-   "highlight": {
-    "nodes": [
-     "chg:search-430"
-    ],
-    "edges": [
-     [
-      "chg:search-430",
-      "svc:search",
-      "CHANGED"
-     ]
-    ]
-   },
-   "data": {
-    "change": "chg:search-430",
-    "service": "svc:search",
-    "summary": "Deploy search v4.3.0",
-    "verdict": "refutes",
-    "reason": "no dependency path from subscriptions to search",
-    "tag": "no dependency path",
-    "live_path": [],
-    "retired_path": [],
-    "explained": [],
-    "gaps": []
-   }
-  },
-  {
-   "seq": 10,
-   "role": "investigator",
-   "tool": "check_hypothesis",
-   "reason": "Two hypotheses are still open, so I'm checking both: the postgres-orders connection change and the subscriptions change.",
+   "reason": "Three suspects are still open, so I'm checking each one against the dependency graph, starting with the postgres-orders connection change.",
    "summary": "SUPPORTS chg:pg-conn-3: anomaly propagates postgres-orders -> payments -> subscriptions; explains 3 of 3 alerting services",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1970,26 +2210,21 @@
          "role": "investigator",
          "target": "inc:subscriptions-latency",
          "tool": "propose_hypotheses"
-        },
-        {
-         "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
-         "tool": "check_hypothesis"
         }
        ],
        "hypotheses": [
         {
          "at": 1792468620,
          "change_id": "chg:search-430",
-         "explained": [],
-         "gaps": [],
+         "explained": null,
+         "gaps": null,
          "hops": null,
          "id": "hyp:subscriptions-latency:search-430",
          "onset": null,
          "red_before": null,
          "service": "svc:search",
          "source": "recent-anywhere",
-         "status": "refuted"
+         "status": "open"
         },
         {
          "at": 1792467300,
@@ -2050,7 +2285,7 @@
        ]
       }
      ],
-     "ms": 1.81,
+     "ms": 2.21,
      "readonly": true
     },
     {
@@ -2076,7 +2311,7 @@
        ]
       }
      ],
-     "ms": 2.06,
+     "ms": 1.58,
      "readonly": true
     },
     {
@@ -2096,7 +2331,7 @@
        ]
       }
      ],
-     "ms": 1.23,
+     "ms": 1.0,
      "readonly": true
     },
     {
@@ -2128,7 +2363,7 @@
        "summary": "p99 3.9s on renewals"
       }
      ],
-     "ms": 1.5,
+     "ms": 1.12,
      "readonly": true
     },
     {
@@ -2143,7 +2378,7 @@
       "at": 1792468800
      },
      "rows": [],
-     "ms": 3.54,
+     "ms": 1.27,
      "readonly": true
     },
     {
@@ -2159,7 +2394,7 @@
        "at": null
       }
      ],
-     "ms": 1.19,
+     "ms": 0.52,
      "readonly": true
     },
     {
@@ -2192,7 +2427,7 @@
        "status": "supported"
       }
      ],
-     "ms": 1.05,
+     "ms": 1.14,
      "readonly": false
     }
    ],
@@ -2243,10 +2478,261 @@
    }
   },
   {
+   "seq": 10,
+   "role": "investigator",
+   "tool": "check_hypothesis",
+   "reason": "Two suspects are still open, so I'm checking both: search-430, the flat-log baseline, and subs-88 on subscriptions itself.",
+   "summary": "REFUTES chg:search-430: no dependency path from subscriptions to search",
+   "by": "claude-opus-5-5",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "storm_window": 900
+     },
+     "rows": [
+      {
+       "id": "inc:subscriptions-latency",
+       "status": "open",
+       "service": "svc:subscriptions",
+       "alert": "alert:subscriptions-latency",
+       "at": 1792468800,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:subscriptions-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "inc:subscriptions-latency",
+         "tool": "correlate_alerts"
+        },
+        {
+         "role": "triage",
+         "target": "svc:subscriptions",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:subscriptions",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "propose_hypotheses"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "tool": "check_hypothesis"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792468620,
+         "change_id": "chg:search-430",
+         "explained": null,
+         "gaps": null,
+         "hops": null,
+         "id": "hyp:subscriptions-latency:search-430",
+         "onset": null,
+         "red_before": null,
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792467300,
+         "change_id": "chg:pg-conn-3",
+         "explained": [
+          "svc:checkout",
+          "svc:refunds",
+          "svc:subscriptions"
+         ],
+         "gaps": [],
+         "hops": 2,
+         "id": "hyp:subscriptions-latency:pg-conn-3",
+         "onset": 1792467480,
+         "red_before": null,
+         "service": "svc:postgres-orders",
+         "source": "dependency-path",
+         "status": "supported"
+        },
+        {
+         "at": 1792467000,
+         "change_id": "chg:subs-88",
+         "explained": null,
+         "gaps": null,
+         "hops": 0,
+         "id": "hyp:subscriptions-latency:subs-88",
+         "onset": null,
+         "red_before": null,
+         "service": "svc:subscriptions",
+         "source": "dependency-path",
+         "status": "open"
+        }
+       ],
+       "recalls": [
+        {
+         "cause_service": "svc:fraud-check",
+         "incident": "inc:1003",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:postgres-orders",
+         "incident": "inc:0877",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:payments-gw",
+         "incident": "inc:checkout-latency",
+         "score": 3
+        }
+       ],
+       "storm": 2,
+       "correlated": [
+        "svc:refunds",
+        "svc:checkout"
+       ],
+       "shared_upstream": [
+        "svc:payments",
+        "svc:postgres-orders",
+        "svc:fraud-check",
+        "svc:payments-gw",
+        "svc:redis-cache",
+        "svc:kafka"
+       ]
+      }
+     ],
+     "ms": 1.53,
+     "readonly": true
+    },
+    {
+     "name": "hypothesis_facts",
+     "cypher": "// purpose: What a check needs about one suspect: changed service, change time, rollback, alerting service and time.\nMATCH (i:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis {id: $hypothesis_id})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nMATCH (i)-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nRETURN i.id AS incident, h.status AS status, c.id AS change, c.summary AS summary, c.at AS change_at,\n       c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at,\n       collect(DISTINCT cs.id) AS storm_services",
+     "params": {
+      "hypothesis_id": "hyp:subscriptions-latency:search-430"
+     },
+     "rows": [
+      {
+       "incident": "inc:subscriptions-latency",
+       "status": "open",
+       "change": "chg:search-430",
+       "summary": "Deploy search v4.3.0",
+       "change_at": 1792468620,
+       "rolled_back_at": null,
+       "service": "svc:search",
+       "origin": "svc:subscriptions",
+       "at": 1792468800,
+       "storm_services": [
+        "svc:refunds",
+        "svc:checkout"
+       ]
+      }
+     ],
+     "ms": 0.94,
+     "readonly": true
+    },
+    {
+     "name": "live_paths",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH (o:Service {id: $origin}), (t:Service {id: $target})\n// No path at all within 6 hops (live or not): done, without walking every path out of the origin.\nWITH o, shortestPath((o)-[:DEPENDS_ON*0..6]->(t)) AS sp\nWHERE sp IS NOT NULL\n// Otherwise list the paths as before: which 20 are kept among equally long ones, and their order, is the order this\n// traversal meets them, so it stays exactly as it was (a per-hop filter on the edges would change that order). The\n// target is matched again, not carried over, so the traversal still runs from the origin.\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
+     "params": {
+      "origin": "svc:subscriptions",
+      "target": "svc:search",
+      "at": 1792468800
+     },
+     "rows": [],
+     "ms": 1.01,
+     "readonly": true
+    },
+    {
+     "name": "any_path",
+     "cypher": "// purpose: shortestPath ignoring validity, to tell a retired (or not yet live) dependency apart from no dependency at all.\nMATCH (o:Service {id: $origin}), (t:Service {id: $target})\nWITH shortestPath((o)-[:DEPENDS_ON*]->(t)) AS p\nWHERE p IS NOT NULL\nRETURN [n IN nodes(p) | n.id] AS path, [r IN relationships(p) | r.valid_to] AS retired_at,\n       [r IN relationships(p) | r.valid_from] AS live_from",
+     "params": {
+      "origin": "svc:subscriptions",
+      "target": "svc:search"
+     },
+     "rows": [],
+     "ms": 0.81,
+     "readonly": true
+    },
+    {
+     "name": "record_evidence",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.tag = $tag, e.path = $path, e.at = $at, e.explained = $explained\nWITH h, e, h.status AS before\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,\n    h.explained = $explained, h.onset = $onset, h.gaps = $gaps, h.red_before = $red_before\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h, before\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence (once).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'open' THEN [rb] ELSE [] END |\n  SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
+     "params": {
+      "hypothesis_id": "hyp:subscriptions-latency:search-430",
+      "evidence_id": "ev:subscriptions-latency:search-430",
+      "verdict": "refutes",
+      "reason": "no dependency path from subscriptions to search",
+      "tag": "no dependency path",
+      "path": [],
+      "at": 1792468800,
+      "explained": [],
+      "onset": null,
+      "gaps": [],
+      "red_before": null
+     },
+     "rows": [
+      {
+       "hypothesis": "hyp:subscriptions-latency:search-430",
+       "status": "refuted"
+      }
+     ],
+     "ms": 0.79,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "chg:search-430"
+    ],
+    "edges": [
+     [
+      "chg:search-430",
+      "svc:search",
+      "CHANGED"
+     ]
+    ]
+   },
+   "data": {
+    "change": "chg:search-430",
+    "service": "svc:search",
+    "summary": "Deploy search v4.3.0",
+    "verdict": "refutes",
+    "reason": "no dependency path from subscriptions to search",
+    "tag": "no dependency path",
+    "live_path": [],
+    "retired_path": [],
+    "explained": [],
+    "gaps": []
+   }
+  },
+  {
    "seq": 11,
    "role": "investigator",
    "tool": "check_hypothesis",
-   "reason": "One hypothesis is still open (subs-88 on subscriptions itself), so I'm checking it before we conclude.",
+   "reason": "One hypothesis is still open (subs-88 on subscriptions itself), so I'm checking it before we call a cause.",
    "summary": "SUPPORTS chg:subs-88: anomaly propagates subscriptions; explains 1 of 3 alerting services (not refunds, checkout)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -2309,12 +2795,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         }
        ],
@@ -2395,7 +2881,7 @@
        ]
       }
      ],
-     "ms": 2.25,
+     "ms": 1.52,
      "readonly": true
     },
     {
@@ -2421,7 +2907,7 @@
        ]
       }
      ],
-     "ms": 1.56,
+     "ms": 2.44,
      "readonly": true
     },
     {
@@ -2439,7 +2925,7 @@
        ]
       }
      ],
-     "ms": 0.85,
+     "ms": 1.35,
      "readonly": true
     },
     {
@@ -2459,7 +2945,7 @@
        "summary": "p99 3.9s on renewals"
       }
      ],
-     "ms": 0.99,
+     "ms": 1.07,
      "readonly": true
     },
     {
@@ -2481,7 +2967,7 @@
        "service": "svc:checkout"
       }
      ],
-     "ms": 1.05,
+     "ms": 1.59,
      "readonly": true
     },
     {
@@ -2497,7 +2983,7 @@
        "at": null
       }
      ],
-     "ms": 0.6,
+     "ms": 0.74,
      "readonly": true
     },
     {
@@ -2526,7 +3012,7 @@
        "status": "supported"
       }
      ],
-     "ms": 1.13,
+     "ms": 1.39,
      "readonly": false
     }
    ],
@@ -2564,7 +3050,7 @@
    "seq": 12,
    "role": "investigator",
    "tool": "conclude",
-   "reason": "Two suspects are supported (pg-conn-3 and subs-88), so I'm running conclude to pick the leading cause.",
+   "reason": "Two suspects held up (pg-conn-3 and subs-88), so I'm calling conclude to pick the leading cause and see whether the other is a co-cause.",
    "summary": "Leading cause chg:pg-conn-3; outranked chg:subs-88",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -2627,12 +3113,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -2720,7 +3206,7 @@
        ]
       }
      ],
-     "ms": 3.68,
+     "ms": 4.47,
      "readonly": true
     },
     {
@@ -2740,7 +3226,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 0.9,
+     "ms": 1.1,
      "readonly": true
     },
     {
@@ -2801,12 +3287,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -2894,7 +3380,7 @@
        ]
       }
      ],
-     "ms": 2.63,
+     "ms": 2.24,
      "readonly": true
     },
     {
@@ -2913,7 +3399,7 @@
        "upstream": "svc:postgres-orders"
       }
      ],
-     "ms": 1.82,
+     "ms": 1.97,
      "readonly": true
     },
     {
@@ -2934,7 +3420,7 @@
        "outranked": 1
       }
      ],
-     "ms": 1.16,
+     "ms": 1.18,
      "readonly": false
     }
    ],
@@ -2960,7 +3446,7 @@
    "seq": 13,
    "role": "investigator",
    "tool": "handoff",
-   "reason": "Concluded: chg:pg-conn-3 on svc:postgres-orders explains checkout, refunds and subscriptions; search-430 is refuted and subs-88 is outranked.",
+   "reason": "All hypotheses were checked and the conclusion is recorded: chg:pg-conn-3 on postgres-orders is the cause and explains all three correlated alerts. chg:subs-88 was outranked and chg:search-430 was refuted.",
    "summary": "investigator hands off to comms",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -3023,12 +3509,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -3121,7 +3607,7 @@
        ]
       }
      ],
-     "ms": 1.71,
+     "ms": 2.62,
      "readonly": true
     }
    ],
@@ -3135,7 +3621,7 @@
    "seq": 14,
    "role": "comms",
    "tool": "page_on_call",
-   "reason": "Paging the on-call owner of svc:postgres-orders, since chg:pg-conn-3 there is the leading cause and explains all three alerting services.",
+   "reason": "The culprit is postgres-orders, so I'm paging its owner first.",
    "summary": "Paged Hana Costa (@hana.costa, Platform) for svc:postgres-orders",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -3198,12 +3684,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -3301,7 +3787,7 @@
        ]
       }
      ],
-     "ms": 3.65,
+     "ms": 4.23,
      "readonly": true
     },
     {
@@ -3321,7 +3807,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 0.85,
+     "ms": 1.27,
      "readonly": true
     },
     {
@@ -3340,7 +3826,7 @@
        "team_name": "Platform"
       }
      ],
-     "ms": 0.53,
+     "ms": 1.03,
      "readonly": true
     },
     {
@@ -3357,7 +3843,7 @@
        "first_for": "svc:postgres-orders"
       }
      ],
-     "ms": 0.57,
+     "ms": 0.54,
      "readonly": false
     }
    ],
@@ -3392,7 +3878,7 @@
    "seq": 15,
    "role": "comms",
    "tool": "who_knows",
-   "reason": "Culprit owner for postgres-orders is already paged, so next I'm finding who knows postgres-orders best so responders have an expert to ask.",
+   "reason": "Paged postgres-orders on-call already; now finding who knows postgres-orders best so the update names an expert.",
    "summary": "Omar Tanaka (Platform): 2 changes, 0 incidents, on the owning team",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -3455,12 +3941,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -3563,7 +4049,7 @@
        ]
       }
      ],
-     "ms": 2.9,
+     "ms": 3.54,
      "readonly": true
     },
     {
@@ -3629,7 +4115,7 @@
        "score": 5
       }
      ],
-     "ms": 6.47,
+     "ms": 5.84,
      "readonly": true
     },
     {
@@ -3642,7 +4128,7 @@
       "score": 10
      },
      "rows": [],
-     "ms": 0.9,
+     "ms": 1.03,
      "readonly": false
     }
    ],
@@ -3719,8 +4205,8 @@
    "seq": 16,
    "role": "comms",
    "tool": "blast_radius",
-   "reason": "Next I'm warning the services that depend on postgres-orders, the confirmed culprit, so their owners know the latency could reach them.",
-   "summary": "11 services depend on svc:postgres-orders (5 tier-1)",
+   "reason": "I'm mapping which services depend on postgres-orders, the culprit, so we know which teams to warn.",
+   "summary": "11 services depend on svc:postgres-orders (5 tier-1); most critical first: payments, api-gateway, checkout (tier, then PageRank over the dependencies live at that time)",
    "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
@@ -3782,12 +4268,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -3895,7 +4381,7 @@
        ]
       }
      ],
-     "ms": 1.83,
+     "ms": 1.96,
      "readonly": true
     },
     {
@@ -3915,7 +4401,7 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.88,
+     "ms": 1.62,
      "readonly": true
     },
     {
@@ -3927,26 +4413,6 @@
      },
      "rows": [
       {
-       "service": "svc:inventory",
-       "tier": 2,
-       "hops": 1,
-       "team": "Fulfilment",
-       "path": [
-        "svc:inventory",
-        "svc:postgres-orders"
-       ]
-      },
-      {
-       "service": "svc:legacy-billing",
-       "tier": 2,
-       "hops": 1,
-       "team": "Payments",
-       "path": [
-        "svc:legacy-billing",
-        "svc:postgres-orders"
-       ]
-      },
-      {
        "service": "svc:payments",
        "tier": 1,
        "hops": 1,
@@ -3954,27 +4420,9 @@
        "path": [
         "svc:payments",
         "svc:postgres-orders"
-       ]
-      },
-      {
-       "service": "svc:refunds",
-       "tier": 2,
-       "hops": 1,
-       "team": "Payments",
-       "path": [
-        "svc:refunds",
-        "svc:postgres-orders"
-       ]
-      },
-      {
-       "service": "svc:reporting",
-       "tier": 2,
-       "hops": 1,
-       "team": "Data",
-       "path": [
-        "svc:reporting",
-        "svc:postgres-orders"
-       ]
+       ],
+       "score": 0.0584,
+       "rank": 1
       },
       {
        "service": "svc:api-gateway",
@@ -3985,7 +4433,9 @@
         "svc:api-gateway",
         "svc:refunds",
         "svc:postgres-orders"
-       ]
+       ],
+       "score": 0.054,
+       "rank": 2
       },
       {
        "service": "svc:checkout",
@@ -3996,29 +4446,9 @@
         "svc:checkout",
         "svc:payments",
         "svc:postgres-orders"
-       ]
-      },
-      {
-       "service": "svc:shipping",
-       "tier": 2,
-       "hops": 2,
-       "team": "Fulfilment",
-       "path": [
-        "svc:shipping",
-        "svc:inventory",
-        "svc:postgres-orders"
-       ]
-      },
-      {
-       "service": "svc:subscriptions",
-       "tier": 2,
-       "hops": 2,
-       "team": "Payments",
-       "path": [
-        "svc:subscriptions",
-        "svc:payments",
-        "svc:postgres-orders"
-       ]
+       ],
+       "score": 0.0266,
+       "rank": 3
       },
       {
        "service": "svc:mobile-bff",
@@ -4030,7 +4460,9 @@
         "svc:api-gateway",
         "svc:refunds",
         "svc:postgres-orders"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 4
       },
       {
        "service": "svc:web-frontend",
@@ -4042,10 +4474,525 @@
         "svc:api-gateway",
         "svc:refunds",
         "svc:postgres-orders"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 5
+      },
+      {
+       "service": "svc:inventory",
+       "tier": 2,
+       "hops": 1,
+       "team": "Fulfilment",
+       "path": [
+        "svc:inventory",
+        "svc:postgres-orders"
+       ],
+       "score": 0.033,
+       "rank": 6
+      },
+      {
+       "service": "svc:refunds",
+       "tier": 2,
+       "hops": 1,
+       "team": "Payments",
+       "path": [
+        "svc:refunds",
+        "svc:postgres-orders"
+       ],
+       "score": 0.0266,
+       "rank": 7
+      },
+      {
+       "service": "svc:subscriptions",
+       "tier": 2,
+       "hops": 2,
+       "team": "Payments",
+       "path": [
+        "svc:subscriptions",
+        "svc:payments",
+        "svc:postgres-orders"
+       ],
+       "score": 0.0266,
+       "rank": 8
+      },
+      {
+       "service": "svc:legacy-billing",
+       "tier": 2,
+       "hops": 1,
+       "team": "Payments",
+       "path": [
+        "svc:legacy-billing",
+        "svc:postgres-orders"
+       ],
+       "score": 0.02,
+       "rank": 9
+      },
+      {
+       "service": "svc:reporting",
+       "tier": 2,
+       "hops": 1,
+       "team": "Data",
+       "path": [
+        "svc:reporting",
+        "svc:postgres-orders"
+       ],
+       "score": 0.02,
+       "rank": 10
+      },
+      {
+       "service": "svc:shipping",
+       "tier": 2,
+       "hops": 2,
+       "team": "Fulfilment",
+       "path": [
+        "svc:shipping",
+        "svc:inventory",
+        "svc:postgres-orders"
+       ],
+       "score": 0.02,
+       "rank": 11
       }
      ],
-     "ms": 2.04,
+     "ms": 8.16,
+     "readonly": true
+    },
+    {
+     "name": "topology_at",
+     "cypher": "// purpose: The dependency graph as it was at $at: every DEPENDS_ON edge live at that time. FalkorDB's algorithms walk every edge of a graph and the tenant graph keeps retired and not-yet-live dependencies as history, so this is what gets projected into a scratch graph for an algorithm to run on.\nMATCH (a:Service)-[r:DEPENDS_ON]->(b:Service)\nWHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\nRETURN a.id AS caller, b.id AS callee\nORDER BY caller, callee",
+     "params": {
+      "at": 1792468800
+     },
+     "rows": [
+      {
+       "caller": "svc:analytics",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:checkout"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:recommendations"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:refunds"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:search"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:subscriptions"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:fraud-check",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:warehouse-sync"
+      },
+      {
+       "caller": "svc:legacy-billing",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:mobile-bff",
+       "callee": "svc:api-gateway"
+      },
+      {
+       "caller": "svc:notifications",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:fraud-check"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:payments-gw"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:payments-gw",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:promotions"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:search",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:notifications"
+      },
+      {
+       "caller": "svc:subscriptions",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:web-frontend",
+       "callee": "svc:api-gateway"
+      }
+     ],
+     "ms": 1.5,
+     "readonly": true
+    },
+    {
+     "name": "project_topology",
+     "cypher": "// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question.\nUNWIND $edges AS e\nMERGE (a:Service {id: e.caller})\nMERGE (b:Service {id: e.callee})\nMERGE (a)-[:DEPENDS_ON]->(b)\nRETURN count(*) AS edges",
+     "params": {
+      "edges": [
+       {
+        "caller": "svc:analytics",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:checkout"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:recommendations"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:refunds"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:search"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:subscriptions"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:fraud-check",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:warehouse-sync"
+       },
+       {
+        "caller": "svc:legacy-billing",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:mobile-bff",
+        "callee": "svc:api-gateway"
+       },
+       {
+        "caller": "svc:notifications",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:fraud-check"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:payments-gw"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:payments-gw",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:promotions"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:search",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:notifications"
+       },
+       {
+        "caller": "svc:subscriptions",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:web-frontend",
+        "callee": "svc:api-gateway"
+       }
+      ]
+     },
+     "rows": [
+      {
+       "edges": 38
+      }
+     ],
+     "ms": 2.22,
+     "readonly": false
+    },
+    {
+     "name": "criticality",
+     "cypher": "// purpose: Criticality of every service: PageRank over the dependency graph (a service is critical when services that many others rely on rely on it). Runs on the scratch projection, so a retired or not-yet-live dependency never adds rank.\nCALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score\nRETURN node.id AS service, score\nORDER BY score DESC, service",
+     "params": {},
+     "rows": [
+      {
+       "service": "svc:redis-cache",
+       "score": 0.114141538739204
+      },
+      {
+       "service": "svc:kafka",
+       "score": 0.109091609716415
+      },
+      {
+       "service": "svc:postgres-orders",
+       "score": 0.0873507186770439
+      },
+      {
+       "service": "svc:payments",
+       "score": 0.0583686642348766
+      },
+      {
+       "service": "svc:api-gateway",
+       "score": 0.0539947003126144
+      },
+      {
+       "service": "svc:analytics",
+       "score": 0.0397829562425613
+      },
+      {
+       "service": "svc:pricing",
+       "score": 0.0377168990671635
+      },
+      {
+       "service": "svc:fraud-check",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:payments-gw",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:promotions",
+       "score": 0.0360287055373192
+      },
+      {
+       "service": "svc:warehouse-sync",
+       "score": 0.0340289734303951
+      },
+      {
+       "service": "svc:inventory",
+       "score": 0.0330117754638195
+      },
+      {
+       "service": "svc:auth",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:cart",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:notifications",
+       "score": 0.0284976568073034
+      },
+      {
+       "service": "svc:checkout",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:recommendations",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:refunds",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:search",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:subscriptions",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:legacy-billing",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:mobile-bff",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:reporting",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:shipping",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:web-frontend",
+       "score": 0.0199986416846514
+      }
+     ],
+     "ms": 1.45,
      "readonly": true
     },
     {
@@ -4056,23 +5003,7 @@
       "via": "svc:postgres-orders",
       "rows": [
        {
-        "service": "svc:inventory",
-        "hops": 1
-       },
-       {
-        "service": "svc:legacy-billing",
-        "hops": 1
-       },
-       {
         "service": "svc:payments",
-        "hops": 1
-       },
-       {
-        "service": "svc:refunds",
-        "hops": 1
-       },
-       {
-        "service": "svc:reporting",
         "hops": 1
        },
        {
@@ -4084,66 +5015,133 @@
         "hops": 2
        },
        {
-        "service": "svc:shipping",
-        "hops": 2
-       },
-       {
-        "service": "svc:subscriptions",
-        "hops": 2
-       },
-       {
         "service": "svc:mobile-bff",
         "hops": 3
        },
        {
         "service": "svc:web-frontend",
         "hops": 3
+       },
+       {
+        "service": "svc:inventory",
+        "hops": 1
+       },
+       {
+        "service": "svc:refunds",
+        "hops": 1
+       },
+       {
+        "service": "svc:subscriptions",
+        "hops": 2
+       },
+       {
+        "service": "svc:legacy-billing",
+        "hops": 1
+       },
+       {
+        "service": "svc:reporting",
+        "hops": 1
+       },
+       {
+        "service": "svc:shipping",
+        "hops": 2
        }
       ]
      },
      "rows": [],
-     "ms": 0.8,
+     "ms": 0.91,
+     "readonly": false
+    },
+    {
+     "name": "record_criticality",
+     "cypher": "// purpose: Write the criticality order onto the incident board: IMPACTS.rank (1 = warn first) and IMPACTS.score (PageRank at alert time) on the impacted services.\nUNWIND $rows AS r\nMATCH (:Incident {id: $incident_id})-[x:IMPACTS]->(:Service {id: r.service})\nSET x.rank = r.rank, x.score = r.score\nRETURN count(x) AS ranked",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "rows": [
+       {
+        "service": "svc:payments",
+        "rank": 1,
+        "score": 0.0584
+       },
+       {
+        "service": "svc:api-gateway",
+        "rank": 2,
+        "score": 0.054
+       },
+       {
+        "service": "svc:checkout",
+        "rank": 3,
+        "score": 0.0266
+       },
+       {
+        "service": "svc:mobile-bff",
+        "rank": 4,
+        "score": 0.02
+       },
+       {
+        "service": "svc:web-frontend",
+        "rank": 5,
+        "score": 0.02
+       },
+       {
+        "service": "svc:inventory",
+        "rank": 6,
+        "score": 0.033
+       },
+       {
+        "service": "svc:refunds",
+        "rank": 7,
+        "score": 0.0266
+       },
+       {
+        "service": "svc:subscriptions",
+        "rank": 8,
+        "score": 0.0266
+       },
+       {
+        "service": "svc:legacy-billing",
+        "rank": 9,
+        "score": 0.02
+       },
+       {
+        "service": "svc:reporting",
+        "rank": 10,
+        "score": 0.02
+       },
+       {
+        "service": "svc:shipping",
+        "rank": 11,
+        "score": 0.02
+       }
+      ]
+     },
+     "rows": [
+      {
+       "ranked": 11
+      }
+     ],
+     "ms": 1.66,
      "readonly": false
     }
    ],
    "highlight": {
     "nodes": [
      "svc:postgres-orders",
-     "svc:inventory",
-     "svc:legacy-billing",
      "svc:payments",
-     "svc:refunds",
-     "svc:reporting",
      "svc:api-gateway",
      "svc:checkout",
-     "svc:shipping",
-     "svc:subscriptions",
      "svc:mobile-bff",
-     "svc:web-frontend"
+     "svc:web-frontend",
+     "svc:inventory",
+     "svc:refunds",
+     "svc:subscriptions",
+     "svc:legacy-billing",
+     "svc:reporting",
+     "svc:shipping"
     ],
     "edges": [
      [
-      "svc:inventory",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:legacy-billing",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
       "svc:payments",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:refunds",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:reporting",
       "svc:postgres-orders",
       "DEPENDS_ON"
      ],
@@ -4159,26 +5157,6 @@
      ],
      [
       "svc:checkout",
-      "svc:payments",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:payments",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:shipping",
-      "svc:inventory",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:inventory",
-      "svc:postgres-orders",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:subscriptions",
       "svc:payments",
       "DEPENDS_ON"
      ],
@@ -4216,30 +5194,50 @@
       "svc:refunds",
       "svc:postgres-orders",
       "DEPENDS_ON"
+     ],
+     [
+      "svc:inventory",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:refunds",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:subscriptions",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:legacy-billing",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:reporting",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:shipping",
+      "svc:inventory",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:inventory",
+      "svc:postgres-orders",
+      "DEPENDS_ON"
      ]
     ]
    },
    "data": [
-    {
-     "service": "svc:inventory",
-     "tier": 2,
-     "hops": 1,
-     "team": "Fulfilment",
-     "path": [
-      "svc:inventory",
-      "svc:postgres-orders"
-     ]
-    },
-    {
-     "service": "svc:legacy-billing",
-     "tier": 2,
-     "hops": 1,
-     "team": "Payments",
-     "path": [
-      "svc:legacy-billing",
-      "svc:postgres-orders"
-     ]
-    },
     {
      "service": "svc:payments",
      "tier": 1,
@@ -4248,27 +5246,9 @@
      "path": [
       "svc:payments",
       "svc:postgres-orders"
-     ]
-    },
-    {
-     "service": "svc:refunds",
-     "tier": 2,
-     "hops": 1,
-     "team": "Payments",
-     "path": [
-      "svc:refunds",
-      "svc:postgres-orders"
-     ]
-    },
-    {
-     "service": "svc:reporting",
-     "tier": 2,
-     "hops": 1,
-     "team": "Data",
-     "path": [
-      "svc:reporting",
-      "svc:postgres-orders"
-     ]
+     ],
+     "score": 0.0584,
+     "rank": 1
     },
     {
      "service": "svc:api-gateway",
@@ -4279,7 +5259,9 @@
       "svc:api-gateway",
       "svc:refunds",
       "svc:postgres-orders"
-     ]
+     ],
+     "score": 0.054,
+     "rank": 2
     },
     {
      "service": "svc:checkout",
@@ -4290,29 +5272,9 @@
       "svc:checkout",
       "svc:payments",
       "svc:postgres-orders"
-     ]
-    },
-    {
-     "service": "svc:shipping",
-     "tier": 2,
-     "hops": 2,
-     "team": "Fulfilment",
-     "path": [
-      "svc:shipping",
-      "svc:inventory",
-      "svc:postgres-orders"
-     ]
-    },
-    {
-     "service": "svc:subscriptions",
-     "tier": 2,
-     "hops": 2,
-     "team": "Payments",
-     "path": [
-      "svc:subscriptions",
-      "svc:payments",
-      "svc:postgres-orders"
-     ]
+     ],
+     "score": 0.0266,
+     "rank": 3
     },
     {
      "service": "svc:mobile-bff",
@@ -4324,7 +5286,9 @@
       "svc:api-gateway",
       "svc:refunds",
       "svc:postgres-orders"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 4
     },
     {
      "service": "svc:web-frontend",
@@ -4336,15 +5300,461 @@
       "svc:api-gateway",
       "svc:refunds",
       "svc:postgres-orders"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 5
+    },
+    {
+     "service": "svc:inventory",
+     "tier": 2,
+     "hops": 1,
+     "team": "Fulfilment",
+     "path": [
+      "svc:inventory",
+      "svc:postgres-orders"
+     ],
+     "score": 0.033,
+     "rank": 6
+    },
+    {
+     "service": "svc:refunds",
+     "tier": 2,
+     "hops": 1,
+     "team": "Payments",
+     "path": [
+      "svc:refunds",
+      "svc:postgres-orders"
+     ],
+     "score": 0.0266,
+     "rank": 7
+    },
+    {
+     "service": "svc:subscriptions",
+     "tier": 2,
+     "hops": 2,
+     "team": "Payments",
+     "path": [
+      "svc:subscriptions",
+      "svc:payments",
+      "svc:postgres-orders"
+     ],
+     "score": 0.0266,
+     "rank": 8
+    },
+    {
+     "service": "svc:legacy-billing",
+     "tier": 2,
+     "hops": 1,
+     "team": "Payments",
+     "path": [
+      "svc:legacy-billing",
+      "svc:postgres-orders"
+     ],
+     "score": 0.02,
+     "rank": 9
+    },
+    {
+     "service": "svc:reporting",
+     "tier": 2,
+     "hops": 1,
+     "team": "Data",
+     "path": [
+      "svc:reporting",
+      "svc:postgres-orders"
+     ],
+     "score": 0.02,
+     "rank": 10
+    },
+    {
+     "service": "svc:shipping",
+     "tier": 2,
+     "hops": 2,
+     "team": "Fulfilment",
+     "path": [
+      "svc:shipping",
+      "svc:inventory",
+      "svc:postgres-orders"
+     ],
+     "score": 0.02,
+     "rank": 11
     }
    ]
   },
   {
    "seq": 17,
    "role": "comms",
+   "tool": "warn_owners",
+   "reason": "Postgres-orders' owner is paged, the experts are found and the blast radius is mapped, so next I'm warning the most critical impacted teams.",
+   "summary": "Heads-up to Ravi Moreau (@ravi.moreau, Checkout) for checkout (criticality rank 3, tier 1); Kiri Novak (@kiri.novak, Storefront) for mobile-bff (criticality rank 4, tier 1)",
+   "by": "claude-opus-5-5",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "storm_window": 900
+     },
+     "rows": [
+      {
+       "id": "inc:subscriptions-latency",
+       "status": "open",
+       "service": "svc:subscriptions",
+       "alert": "alert:subscriptions-latency",
+       "at": 1792468800,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:subscriptions-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "inc:subscriptions-latency",
+         "tool": "correlate_alerts"
+        },
+        {
+         "role": "triage",
+         "target": "svc:subscriptions",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:subscriptions",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "propose_hypotheses"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:subscriptions-latency:search-430",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:subscriptions-latency:subs-88",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:subscriptions-latency",
+         "tool": "conclude"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:postgres-orders",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:postgres-orders",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:postgres-orders",
+         "tool": "blast_radius"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792468620,
+         "change_id": "chg:search-430",
+         "explained": [],
+         "gaps": [],
+         "hops": null,
+         "id": "hyp:subscriptions-latency:search-430",
+         "onset": null,
+         "red_before": null,
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792467300,
+         "change_id": "chg:pg-conn-3",
+         "explained": [
+          "svc:checkout",
+          "svc:refunds",
+          "svc:subscriptions"
+         ],
+         "gaps": [],
+         "hops": 2,
+         "id": "hyp:subscriptions-latency:pg-conn-3",
+         "onset": 1792467480,
+         "red_before": null,
+         "service": "svc:postgres-orders",
+         "source": "dependency-path",
+         "status": "supported"
+        },
+        {
+         "at": 1792467000,
+         "change_id": "chg:subs-88",
+         "explained": [
+          "svc:subscriptions"
+         ],
+         "gaps": [],
+         "hops": 0,
+         "id": "hyp:subscriptions-latency:subs-88",
+         "onset": 1792467120,
+         "red_before": null,
+         "service": "svc:subscriptions",
+         "source": "dependency-path",
+         "status": "outranked"
+        }
+       ],
+       "recalls": [
+        {
+         "cause_service": "svc:fraud-check",
+         "incident": "inc:1003",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:postgres-orders",
+         "incident": "inc:0877",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:payments-gw",
+         "incident": "inc:checkout-latency",
+         "score": 3
+        }
+       ],
+       "storm": 2,
+       "correlated": [
+        "svc:refunds",
+        "svc:checkout"
+       ],
+       "shared_upstream": [
+        "svc:payments",
+        "svc:postgres-orders",
+        "svc:fraud-check",
+        "svc:payments-gw",
+        "svc:redis-cache",
+        "svc:kafka"
+       ]
+      }
+     ],
+     "ms": 2.96,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:subscriptions-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:subscriptions-latency",
+       "status": "open",
+       "service": "svc:subscriptions",
+       "alert": "alert:subscriptions-latency",
+       "at": 1792468800,
+       "symptom": "latency",
+       "alert_name": "subscriptions p99 latency above 2s"
+      }
+     ],
+     "ms": 1.0,
+     "readonly": true
+    },
+    {
+     "name": "warn_candidates",
+     "cypher": "// purpose: Who to warn: for every impacted service with a criticality rank, the on-call at $at of the team that owns it, best rank first, skipping teams the incident already paged (they know).\nMATCH (i:Incident {id: $incident_id})\nOPTIONAL MATCH (i)-[:PAGED]->(:Person)-[:MEMBER_OF]->(pt:Team)\nWITH i, collect(DISTINCT pt.id) AS paged_teams\nMATCH (i)-[x:IMPACTS]->(s:Service)<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)\nWHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND oc.start <= $at AND oc.end > $at\nRETURN t.id AS team, t.name AS team_name, p.id AS person, p.name AS name, p.handle AS handle,\n       s.id AS service, s.tier AS tier, x.rank AS rank, x.score AS score\nORDER BY x.rank, s.id",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "at": 1792468800
+     },
+     "rows": [
+      {
+       "team": "team:checkout",
+       "team_name": "Checkout",
+       "person": "person:ravi-moreau",
+       "name": "Ravi Moreau",
+       "handle": "@ravi.moreau",
+       "service": "svc:checkout",
+       "tier": 1,
+       "rank": 3,
+       "score": 0.0266
+      },
+      {
+       "team": "team:storefront",
+       "team_name": "Storefront",
+       "person": "person:kiri-novak",
+       "name": "Kiri Novak",
+       "handle": "@kiri.novak",
+       "service": "svc:mobile-bff",
+       "tier": 1,
+       "rank": 4,
+       "score": 0.02
+      },
+      {
+       "team": "team:storefront",
+       "team_name": "Storefront",
+       "person": "person:kiri-novak",
+       "name": "Kiri Novak",
+       "handle": "@kiri.novak",
+       "service": "svc:web-frontend",
+       "tier": 1,
+       "rank": 5,
+       "score": 0.02
+      },
+      {
+       "team": "team:fulfilment",
+       "team_name": "Fulfilment",
+       "person": "person:goran-nakamura",
+       "name": "Goran Nakamura",
+       "handle": "@goran.nakamura",
+       "service": "svc:inventory",
+       "tier": 2,
+       "rank": 6,
+       "score": 0.033
+      },
+      {
+       "team": "team:data",
+       "team_name": "Data",
+       "person": "person:wren-petrov",
+       "name": "Wren Petrov",
+       "handle": "@wren.petrov",
+       "service": "svc:reporting",
+       "tier": 2,
+       "rank": 10,
+       "score": 0.02
+      },
+      {
+       "team": "team:fulfilment",
+       "team_name": "Fulfilment",
+       "person": "person:goran-nakamura",
+       "name": "Goran Nakamura",
+       "handle": "@goran.nakamura",
+       "service": "svc:shipping",
+       "tier": 2,
+       "rank": 11,
+       "score": 0.02
+      }
+     ],
+     "ms": 2.76,
+     "readonly": true
+    },
+    {
+     "name": "record_warning",
+     "cypher": "// purpose: Record the heads-up sent to an impacted team's on-call (an action taken because of the criticality order), once per person.\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: r.person})\nMERGE (i)-[w:WARNED]->(p)\nON CREATE SET w.at = $at, w.for_service = r.service, w.rank = r.rank\nRETURN count(w) AS warned",
+     "params": {
+      "incident_id": "inc:subscriptions-latency",
+      "at": 1792468800,
+      "rows": [
+       {
+        "person": "person:ravi-moreau",
+        "service": "svc:checkout",
+        "rank": 3
+       },
+       {
+        "person": "person:kiri-novak",
+        "service": "svc:mobile-bff",
+        "rank": 4
+       }
+      ]
+     },
+     "rows": [
+      {
+       "warned": 2
+      }
+     ],
+     "ms": 0.9,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "inc:subscriptions-latency",
+     "person:ravi-moreau",
+     "person:kiri-novak",
+     "svc:checkout",
+     "svc:mobile-bff"
+    ],
+    "edges": [
+     [
+      "inc:subscriptions-latency",
+      "person:ravi-moreau",
+      "WARNED"
+     ],
+     [
+      "inc:subscriptions-latency",
+      "person:kiri-novak",
+      "WARNED"
+     ],
+     [
+      "team:checkout",
+      "svc:checkout",
+      "OWNS"
+     ],
+     [
+      "team:storefront",
+      "svc:mobile-bff",
+      "OWNS"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "team": "team:checkout",
+     "team_name": "Checkout",
+     "person": "person:ravi-moreau",
+     "name": "Ravi Moreau",
+     "handle": "@ravi.moreau",
+     "service": "svc:checkout",
+     "tier": 1,
+     "rank": 3,
+     "score": 0.0266
+    },
+    {
+     "team": "team:storefront",
+     "team_name": "Storefront",
+     "person": "person:kiri-novak",
+     "name": "Kiri Novak",
+     "handle": "@kiri.novak",
+     "service": "svc:mobile-bff",
+     "tier": 1,
+     "rank": 4,
+     "score": 0.02
+    }
+   ]
+  },
+  {
+   "seq": 18,
+   "role": "comms",
    "tool": "post_update",
-   "reason": "Paging, expert lookup and dependent warnings for postgres-orders are done, so I'm posting the status update now.",
+   "reason": "Paging, expert lookup, blast radius and warnings are done, so I'm posting the status update with postgres-orders as the root cause.",
    "summary": "Wrote the status update for #incidents (stored on the incident)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -4407,12 +5817,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -4444,6 +5854,11 @@
          "role": "comms",
          "target": "svc:postgres-orders",
          "tool": "blast_radius"
+        },
+        {
+         "role": "comms",
+         "target": "inc:subscriptions-latency",
+         "tool": "warn_owners"
         }
        ],
        "hypotheses": [
@@ -4525,7 +5940,7 @@
        ]
       }
      ],
-     "ms": 2.89,
+     "ms": 2.08,
      "readonly": true
     },
     {
@@ -4545,12 +5960,12 @@
        "alert_name": "subscriptions p99 latency above 2s"
       }
      ],
-     "ms": 1.33,
+     "ms": 1.43,
      "readonly": true
     },
     {
      "name": "update_facts",
-     "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
+     "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[w:WARNED]->(wp:Person)-[:MEMBER_OF]->(wt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {handle: wp.handle, team: wt.name, service: w.for_service, rank: w.rank}) AS warned\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged, warned,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, warned, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, warned, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, warned, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
      "params": {
       "incident_id": "inc:subscriptions-latency"
      },
@@ -4615,6 +6030,20 @@
          "team": "Payments"
         }
        ],
+       "warned": [
+        {
+         "handle": "@ravi.moreau",
+         "rank": 3,
+         "service": "svc:checkout",
+         "team": "Checkout"
+        },
+        {
+         "handle": "@kiri.novak",
+         "rank": 4,
+         "service": "svc:mobile-bff",
+         "team": "Storefront"
+        }
+       ],
        "experts": [
         {
          "handle": "@omar.tanaka",
@@ -4646,7 +6075,7 @@
        ]
       }
      ],
-     "ms": 5.08,
+     "ms": 5.54,
      "readonly": true
     },
     {
@@ -4675,7 +6104,7 @@
        "verdict": "outranked"
       }
      ],
-     "ms": 2.15,
+     "ms": 1.36,
      "readonly": true
     },
     {
@@ -4685,7 +6114,7 @@
       "incident_id": "inc:subscriptions-latency"
      },
      "rows": [],
-     "ms": 1.6,
+     "ms": 0.7,
      "readonly": true
     },
     {
@@ -4717,7 +6146,7 @@
        "gaps": []
       }
      ],
-     "ms": 2.62,
+     "ms": 1.25,
      "readonly": true
     },
     {
@@ -4745,7 +6174,7 @@
        "weighty": 2
       }
      ],
-     "ms": 10.69,
+     "ms": 8.1,
      "readonly": true
     },
     {
@@ -4754,7 +6183,7 @@
      "params": {
       "incident_id": "inc:subscriptions-latency",
       "message_id": "msg:update:inc:subscriptions-latency",
-      "text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
+      "text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nHeads-up (most relied-on first): @ravi.moreau (Checkout) for checkout, @kiri.novak (Storefront) for mobile-bff\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
       "at": 1792468800,
       "cites": [
        "chg:pg-conn-3",
@@ -4769,7 +6198,7 @@
        "cited": 5
       }
      ],
-     "ms": 2.01,
+     "ms": 1.37,
      "readonly": false
     }
    ],
@@ -4784,7 +6213,7 @@
     "edges": []
    },
    "data": {
-    "text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
+    "text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nHeads-up (most relied-on first): @ravi.moreau (Checkout) for checkout, @kiri.novak (Storefront) for mobile-bff\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
     "cites": [
      "chg:pg-conn-3",
      "ticket:CR-917",
@@ -4803,10 +6232,10 @@
    }
   },
   {
-   "seq": 18,
+   "seq": 19,
    "role": "comms",
    "tool": "handoff",
-   "reason": "Comms work is done: the culprit owner (svc:postgres-orders) was paged, the expert consulted, its dependents warned and the status update posted.",
+   "reason": "Comms is done: postgres-orders on-call paged, expert consulted, blast radius recorded, critical owners warned and status update posted.",
    "summary": "comms hands off to human",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -4869,12 +6298,12 @@
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:search-430",
+         "target": "hyp:subscriptions-latency:pg-conn-3",
          "tool": "check_hypothesis"
         },
         {
          "role": "investigator",
-         "target": "hyp:subscriptions-latency:pg-conn-3",
+         "target": "hyp:subscriptions-latency:search-430",
          "tool": "check_hypothesis"
         },
         {
@@ -4906,6 +6335,11 @@
          "role": "comms",
          "target": "svc:postgres-orders",
          "tool": "blast_radius"
+        },
+        {
+         "role": "comms",
+         "target": "inc:subscriptions-latency",
+         "tool": "warn_owners"
         },
         {
          "role": "comms",
@@ -4992,7 +6426,7 @@
        ]
       }
      ],
-     "ms": 1.62,
+     "ms": 2.45,
      "readonly": true
     }
    ],
@@ -5111,6 +6545,24 @@
     "service": "svc:postgres-orders"
    }
   ],
+  "warned": [
+   {
+    "person": "person:ravi-moreau",
+    "name": "Ravi Moreau",
+    "handle": "@ravi.moreau",
+    "team": "Checkout",
+    "service": "svc:checkout",
+    "rank": 3
+   },
+   {
+    "person": "person:kiri-novak",
+    "name": "Kiri Novak",
+    "handle": "@kiri.novak",
+    "team": "Storefront",
+    "service": "svc:mobile-bff",
+    "rank": 4
+   }
+  ],
   "blast_radius": [
    "svc:api-gateway",
    "svc:checkout",
@@ -5126,7 +6578,7 @@
    "svc:shipping"
   ],
   "co_causes": [],
-  "update_text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
+  "update_text": "[subscriptions p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, refunds, subscriptions, web-frontend\nLikely cause: config change on postgres-orders by Omar Tanaka: \"postgres-orders max_connections 500 -> 150 (memory tuning)\"\nContext: Design note: postgres-orders memory and connection limit (design); ADR-014: PgBouncer in front of postgres-orders (decision)\nRuled out: search-430 (no dependency path)\nSupported but outranked: subs-88 (chg:pg-conn-3 explains every alerting service this change does (1) and 2 more)\nPaged: @hana.costa (Platform), @asha.nakamura (Payments)\nHeads-up (most relied-on first): @ravi.moreau (Checkout) for checkout, @kiri.novak (Storefront) for mobile-bff\nAlso at risk: inventory, legacy-billing, reporting, shipping\nAsk: Omar Tanaka (@omar.tanaka, Platform) knows postgres-orders best\nSources: ticket:CR-917, doc:pg-conn-budget",
   "sources": [
    {
     "id": "chg:pg-conn-3",
@@ -5161,7 +6613,7 @@
   ],
   "investigator_calls": 7,
   "hypotheses_checked": 3,
-  "checks_to_culprit": 2,
+  "checks_to_culprit": 1,
   "runbook": null,
   "expert": {
    "handle": "@omar.tanaka",
@@ -5219,6 +6671,6 @@
    ]
   }
  },
- "llm_tokens": 91253,
+ "llm_tokens": 104550,
  "slack": "off"
 }

@@ -560,6 +560,25 @@ class AlertEvent(BaseModel):
     at: int | None = Field(None, description="Epoch seconds the alert fired; defaults to now")
 
 
+class DocEvent(BaseModel):
+    kind: Literal["decision", "design", "postmortem", "runbook"] = Field(
+        description="decision (an ADR), design (a design note), postmortem, or runbook (a runbook page)")
+    title: str = Field(max_length=200, description="The doc's title, e.g. 'ADR-015: Kafka retention of 14 days'")
+    text: str = Field(max_length=4000, description="The doc's text, or its summary; what ask quotes and searches")
+    decides: str | None = Field(None, pattern=SVC, description="The service this doc is the decision of record for, "
+                                                                "e.g. svc:kafka (decisions and design notes)")
+    mentions: list[str] = Field(default_factory=list, description="Service, change or incident ids the doc talks "
+                                                                   "about, e.g. ['svc:kafka', 'chg:kafka-ret-7']")
+    supersedes: str | None = Field(None, pattern=r"^doc:[\w.-]{1,80}$",
+                                   description="The older doc this one replaces, e.g. doc:adr-011; ask then flags "
+                                               "the old one as superseded")
+    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$",
+                               description="Person id of the author, e.g. person:hana-costa (optional)")
+    at: int | None = Field(None, description="Epoch seconds the doc was written; defaults to now")
+    id: str | None = Field(None, pattern=r"^doc:[\w.-]{1,80}$",
+                           description="Your own id for the doc, e.g. doc:adr-015 (optional; generated if omitted)")
+
+
 class DependencyEvent(BaseModel):
     caller: str = Field(pattern=SVC, description="The service that calls, e.g. svc:checkout")
     callee: str = Field(pattern=SVC, description="The service it calls (depends on), e.g. svc:payments")
@@ -628,3 +647,23 @@ def retire_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
     n = q.rows[0]["retired"] if q.rows else 0
     return ToolOutput(summary=f"Retired {n} live dependency {a.caller} -> {a.callee} at {at}", data={"retired": n},
                       queries=[q], highlight=Highlight(nodes=[a.caller, a.callee]))
+
+
+@tool(writes=True, agent=False)
+def record_doc(ctx: ToolContext, a: DocEvent) -> ToolOutput:
+    """Record a decision record, design note, postmortem or runbook page as it is written (from a wiki or a human),
+    with its author, the service it decides for, what it mentions and the older doc it supersedes. ask answers from
+    it at once: a new decision of record comes first and the one it replaced is flagged as superseded."""
+    at = a.at or int(time.time())
+    did = a.id or f"doc:{a.kind}-{at}"
+    q = ctx.repo.write("record_doc", id=did, kind=a.kind, title=a.title, text=a.text, at=at, author=a.author,
+                       decides=a.decides, mentions=a.mentions, supersedes=a.supersedes)
+    row = q.rows[0] if q.rows else {}
+    if a.decides and not row.get("decides"):
+        raise ValueError(f"unknown service {a.decides!r}")
+    if a.supersedes and not row.get("supersedes"):
+        raise ValueError(f"unknown doc {a.supersedes!r}")
+    what = f"Recorded {a.kind} {did} '{a.title}'" + (f", the decision of record for {a.decides}" if a.decides else "")
+    return ToolOutput(summary=what + (f"; it supersedes {a.supersedes}" if a.supersedes else ""),
+                      data={"doc": did, "at": at, "decides": a.decides, "supersedes": a.supersedes}, queries=[q],
+                      highlight=Highlight(nodes=[a.decides] if a.decides else []))

@@ -36,7 +36,7 @@
        "alert": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.09,
+     "ms": 1.27,
      "readonly": false
     }
    ],
@@ -59,8 +59,8 @@
    "seq": 2,
    "role": "triage",
    "tool": "blast_radius",
-   "reason": "Storm count is 0, so no alerts to correlate; I'm checking which services depend on refunds to see who is affected.",
-   "summary": "3 services depend on svc:refunds (3 tier-1)",
+   "reason": "Storm count is 0, so nothing to correlate. Next I'm mapping who depends on refunds to see who's affected.",
+   "summary": "3 services depend on svc:refunds (3 tier-1); most critical first: api-gateway, mobile-bff, web-frontend (tier, then PageRank over the dependencies live at that time)",
    "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
@@ -113,7 +113,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.98,
+     "ms": 1.25,
      "readonly": true
     },
     {
@@ -133,7 +133,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.27,
+     "ms": 1.6,
      "readonly": true
     },
     {
@@ -152,7 +152,9 @@
        "path": [
         "svc:api-gateway",
         "svc:refunds"
-       ]
+       ],
+       "score": 0.054,
+       "rank": 1
       },
       {
        "service": "svc:mobile-bff",
@@ -163,7 +165,9 @@
         "svc:mobile-bff",
         "svc:api-gateway",
         "svc:refunds"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 2
       },
       {
        "service": "svc:web-frontend",
@@ -174,10 +178,451 @@
         "svc:web-frontend",
         "svc:api-gateway",
         "svc:refunds"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 3
       }
      ],
-     "ms": 1.82,
+     "ms": 7.52,
+     "readonly": true
+    },
+    {
+     "name": "topology_at",
+     "cypher": "// purpose: The dependency graph as it was at $at: every DEPENDS_ON edge live at that time. FalkorDB's algorithms walk every edge of a graph and the tenant graph keeps retired and not-yet-live dependencies as history, so this is what gets projected into a scratch graph for an algorithm to run on.\nMATCH (a:Service)-[r:DEPENDS_ON]->(b:Service)\nWHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\nRETURN a.id AS caller, b.id AS callee\nORDER BY caller, callee",
+     "params": {
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "caller": "svc:analytics",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:checkout"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:recommendations"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:refunds"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:search"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:subscriptions"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:fraud-check",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:warehouse-sync"
+      },
+      {
+       "caller": "svc:legacy-billing",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:mobile-bff",
+       "callee": "svc:api-gateway"
+      },
+      {
+       "caller": "svc:notifications",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:fraud-check"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:payments-gw"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:payments-gw",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:promotions"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:search",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:notifications"
+      },
+      {
+       "caller": "svc:subscriptions",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:web-frontend",
+       "callee": "svc:api-gateway"
+      }
+     ],
+     "ms": 3.08,
+     "readonly": true
+    },
+    {
+     "name": "project_topology",
+     "cypher": "// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question.\nUNWIND $edges AS e\nMERGE (a:Service {id: e.caller})\nMERGE (b:Service {id: e.callee})\nMERGE (a)-[:DEPENDS_ON]->(b)\nRETURN count(*) AS edges",
+     "params": {
+      "edges": [
+       {
+        "caller": "svc:analytics",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:checkout"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:recommendations"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:refunds"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:search"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:subscriptions"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:fraud-check",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:warehouse-sync"
+       },
+       {
+        "caller": "svc:legacy-billing",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:mobile-bff",
+        "callee": "svc:api-gateway"
+       },
+       {
+        "caller": "svc:notifications",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:fraud-check"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:payments-gw"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:payments-gw",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:promotions"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:search",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:notifications"
+       },
+       {
+        "caller": "svc:subscriptions",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:web-frontend",
+        "callee": "svc:api-gateway"
+       }
+      ]
+     },
+     "rows": [
+      {
+       "edges": 38
+      }
+     ],
+     "ms": 2.69,
+     "readonly": false
+    },
+    {
+     "name": "criticality",
+     "cypher": "// purpose: Criticality of every service: PageRank over the dependency graph (a service is critical when services that many others rely on rely on it). Runs on the scratch projection, so a retired or not-yet-live dependency never adds rank.\nCALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score\nRETURN node.id AS service, score\nORDER BY score DESC, service",
+     "params": {},
+     "rows": [
+      {
+       "service": "svc:redis-cache",
+       "score": 0.114141538739204
+      },
+      {
+       "service": "svc:kafka",
+       "score": 0.109091609716415
+      },
+      {
+       "service": "svc:postgres-orders",
+       "score": 0.0873507186770439
+      },
+      {
+       "service": "svc:payments",
+       "score": 0.0583686642348766
+      },
+      {
+       "service": "svc:api-gateway",
+       "score": 0.0539947003126144
+      },
+      {
+       "service": "svc:analytics",
+       "score": 0.0397829562425613
+      },
+      {
+       "service": "svc:pricing",
+       "score": 0.0377168990671635
+      },
+      {
+       "service": "svc:fraud-check",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:payments-gw",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:promotions",
+       "score": 0.0360287055373192
+      },
+      {
+       "service": "svc:warehouse-sync",
+       "score": 0.0340289734303951
+      },
+      {
+       "service": "svc:inventory",
+       "score": 0.0330117754638195
+      },
+      {
+       "service": "svc:auth",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:cart",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:notifications",
+       "score": 0.0284976568073034
+      },
+      {
+       "service": "svc:checkout",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:recommendations",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:refunds",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:search",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:subscriptions",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:legacy-billing",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:mobile-bff",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:reporting",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:shipping",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:web-frontend",
+       "score": 0.0199986416846514
+      }
+     ],
+     "ms": 1.88,
      "readonly": true
     },
     {
@@ -202,7 +647,38 @@
       ]
      },
      "rows": [],
-     "ms": 0.73,
+     "ms": 1.32,
+     "readonly": false
+    },
+    {
+     "name": "record_criticality",
+     "cypher": "// purpose: Write the criticality order onto the incident board: IMPACTS.rank (1 = warn first) and IMPACTS.score (PageRank at alert time) on the impacted services.\nUNWIND $rows AS r\nMATCH (:Incident {id: $incident_id})-[x:IMPACTS]->(:Service {id: r.service})\nSET x.rank = r.rank, x.score = r.score\nRETURN count(x) AS ranked",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "rows": [
+       {
+        "service": "svc:api-gateway",
+        "rank": 1,
+        "score": 0.054
+       },
+       {
+        "service": "svc:mobile-bff",
+        "rank": 2,
+        "score": 0.02
+       },
+       {
+        "service": "svc:web-frontend",
+        "rank": 3,
+        "score": 0.02
+       }
+      ]
+     },
+     "rows": [
+      {
+       "ranked": 3
+      }
+     ],
+     "ms": 1.34,
      "readonly": false
     }
    ],
@@ -250,7 +726,9 @@
      "path": [
       "svc:api-gateway",
       "svc:refunds"
-     ]
+     ],
+     "score": 0.054,
+     "rank": 1
     },
     {
      "service": "svc:mobile-bff",
@@ -261,7 +739,9 @@
       "svc:mobile-bff",
       "svc:api-gateway",
       "svc:refunds"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 2
     },
     {
      "service": "svc:web-frontend",
@@ -272,7 +752,9 @@
       "svc:web-frontend",
       "svc:api-gateway",
       "svc:refunds"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 3
     }
    ]
   },
@@ -280,7 +762,7 @@
    "seq": 3,
    "role": "triage",
    "tool": "page_on_call",
-   "reason": "Blast radius for refunds is mapped, so next I'm paging whoever is on call for svc:refunds.",
+   "reason": "Blast radius for refunds is done and no other alerts are firing, so I'm paging refunds' on-call next.",
    "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -339,7 +821,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.02,
+     "ms": 2.12,
      "readonly": true
     },
     {
@@ -359,7 +841,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.18,
+     "ms": 1.2,
      "readonly": true
     },
     {
@@ -378,7 +860,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 1.15,
+     "ms": 1.28,
      "readonly": true
     },
     {
@@ -395,7 +877,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.8,
+     "ms": 1.06,
      "readonly": false
     }
    ],
@@ -430,7 +912,7 @@
    "seq": 4,
    "role": "triage",
    "tool": "handoff",
-   "reason": "Triage is done: incident opened, blast radius recorded and on-call paged, with no alert storm to correlate.",
+   "reason": "No related alerts fired (storm count 0), the services that depend on refunds are recorded, and the refunds on-call is paged, so triage is complete.",
    "summary": "triage hands off to investigator",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -494,7 +976,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.28,
+     "ms": 1.76,
      "readonly": true
     }
    ],
@@ -508,7 +990,7 @@
    "seq": 5,
    "role": "investigator",
    "tool": "recall_similar",
-   "reason": "Before suggesting suspects, I'm checking memory for past incidents on the refunds dependency path that look like this one.",
+   "reason": "Triage is done, so I'm checking past incidents for one that matches this refunds latency alert.",
    "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -577,7 +1059,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.49,
+     "ms": 2.46,
      "readonly": true
     },
     {
@@ -624,7 +1106,7 @@
        "score": 2
       }
      ],
-     "ms": 8.8,
+     "ms": 5.96,
      "readonly": true
     },
     {
@@ -672,7 +1154,7 @@
       ]
      },
      "rows": [],
-     "ms": 1.05,
+     "ms": 1.58,
      "readonly": false
     }
    ],
@@ -732,7 +1214,7 @@
    "seq": 6,
    "role": "investigator",
    "tool": "hypothesize_from_memory",
-   "reason": "A past incident (payments-gw, score 3) matches, so I'm generating hypotheses from the runbook that fixed it.",
+   "reason": "A past incident (inc:checkout-latency, payments-gw) matches with score 3, so I'm building hypotheses from the runbook memory first.",
    "summary": "Runbook 'Revert the config change on payments-gw' (worked 1/1) points at chg:pgw-pool-2",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -816,7 +1298,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.37,
+     "ms": 2.46,
      "readonly": true
     },
     {
@@ -836,7 +1318,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.69,
+     "ms": 0.82,
      "readonly": true
     },
     {
@@ -863,7 +1345,7 @@
        ]
       }
      ],
-     "ms": 4.17,
+     "ms": 1.79,
      "readonly": true
     },
     {
@@ -887,7 +1369,7 @@
        "id": "hyp:refunds-latency:pgw-pool-2"
       }
      ],
-     "ms": 1.49,
+     "ms": 0.98,
      "readonly": false
     }
    ],
@@ -925,7 +1407,7 @@
    "seq": 7,
    "role": "investigator",
    "tool": "check_hypothesis",
-   "reason": "Memory suggested the payments-gw pool change, so I'm checking that one open hypothesis against the dependency graph now.",
+   "reason": "Memory suggested the payments-gw pool change, so I'm checking it against the live dependency path before deciding anything.",
    "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1014,7 +1496,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.4,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -1037,7 +1519,7 @@
        "storm_services": []
       }
      ],
-     "ms": 1.8,
+     "ms": 3.28,
      "readonly": true
     },
     {
@@ -1057,7 +1539,7 @@
        ]
       }
      ],
-     "ms": 1.3,
+     "ms": 2.72,
      "readonly": true
     },
     {
@@ -1089,7 +1571,7 @@
        "summary": "p99 4.4s on POST /refunds"
       }
      ],
-     "ms": 1.41,
+     "ms": 1.81,
      "readonly": true
     },
     {
@@ -1105,7 +1587,7 @@
        "at": null
       }
      ],
-     "ms": 1.14,
+     "ms": 1.12,
      "readonly": true
     },
     {
@@ -1136,7 +1618,7 @@
        "status": "supported"
       }
      ],
-     "ms": 1.69,
+     "ms": 2.13,
      "readonly": false
     }
    ],
@@ -1188,7 +1670,7 @@
    "seq": 8,
    "role": "investigator",
    "tool": "handoff",
-   "reason": "The only hypothesis, chg:pgw-pool-2 on svc:payments-gw, was checked and supported, no other suspects are open and there was no alert storm, so the cause is payments-gw.",
+   "reason": "The only suspect, chg:pgw-pool-2 on svc:payments-gw, is supported along a live 2-hop path to svc:refunds and no other suspects are open.",
    "summary": "investigator hands off to comms",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1284,7 +1766,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.19,
+     "ms": 2.49,
      "readonly": true
     }
    ],
@@ -1298,7 +1780,7 @@
    "seq": 9,
    "role": "comms",
    "tool": "page_on_call",
-   "reason": "Payments-gw is the supported culprit, so I'm paging its on-call owner first.",
+   "reason": "Culprit is svc:payments-gw (change chg:pgw-pool-2), so I'm paging its on-call owner first.",
    "summary": "Asha Nakamura (@asha.nakamura, Payments) owns svc:payments-gw too; already engaged",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1399,7 +1881,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.09,
+     "ms": 4.17,
      "readonly": true
     },
     {
@@ -1419,7 +1901,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.15,
+     "ms": 0.96,
      "readonly": true
     },
     {
@@ -1438,7 +1920,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.94,
+     "ms": 1.06,
      "readonly": true
     },
     {
@@ -1455,7 +1937,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.92,
+     "ms": 0.77,
      "readonly": false
     }
    ],
@@ -1490,7 +1972,7 @@
    "seq": 10,
    "role": "comms",
    "tool": "who_knows",
-   "reason": "Payments-gw on-call is paged. Next I'm checking who knows payments-gw best so the update names an expert to ask.",
+   "reason": "Payments-gw on-call is already paged, so next I'm finding who knows payments-gw best and adding them to the incident.",
    "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -1596,7 +2078,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.75,
+     "ms": 2.03,
      "readonly": true
     },
     {
@@ -1662,7 +2144,7 @@
        "score": 3
       }
      ],
-     "ms": 8.2,
+     "ms": 6.03,
      "readonly": true
     },
     {
@@ -1675,7 +2157,7 @@
       "score": 12
      },
      "rows": [],
-     "ms": 1.33,
+     "ms": 1.02,
      "readonly": false
     }
    ],
@@ -1752,8 +2234,8 @@
    "seq": 11,
    "role": "comms",
    "tool": "blast_radius",
-   "reason": "Next I'm warning the services that depend on payments-gw, the culprit behind the refunds latency, by recording its blast radius.",
-   "summary": "7 services depend on svc:payments-gw (5 tier-1)",
+   "reason": "Next I'm mapping which services depend on payments-gw, the culprit, so we can give the most critical downstream teams a heads-up.",
+   "summary": "7 services depend on svc:payments-gw (5 tier-1); most critical first: payments, api-gateway, checkout (tier, then PageRank over the dependencies live at that time)",
    "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
@@ -1863,7 +2345,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 3.13,
+     "ms": 2.25,
      "readonly": true
     },
     {
@@ -1883,7 +2365,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.19,
+     "ms": 1.79,
      "readonly": true
     },
     {
@@ -1902,40 +2384,9 @@
        "path": [
         "svc:payments",
         "svc:payments-gw"
-       ]
-      },
-      {
-       "service": "svc:checkout",
-       "tier": 1,
-       "hops": 2,
-       "team": "Checkout",
-       "path": [
-        "svc:checkout",
-        "svc:payments",
-        "svc:payments-gw"
-       ]
-      },
-      {
-       "service": "svc:refunds",
-       "tier": 2,
-       "hops": 2,
-       "team": "Payments",
-       "path": [
-        "svc:refunds",
-        "svc:payments",
-        "svc:payments-gw"
-       ]
-      },
-      {
-       "service": "svc:subscriptions",
-       "tier": 2,
-       "hops": 2,
-       "team": "Payments",
-       "path": [
-        "svc:subscriptions",
-        "svc:payments",
-        "svc:payments-gw"
-       ]
+       ],
+       "score": 0.0584,
+       "rank": 1
       },
       {
        "service": "svc:api-gateway",
@@ -1947,7 +2398,22 @@
         "svc:checkout",
         "svc:payments",
         "svc:payments-gw"
-       ]
+       ],
+       "score": 0.054,
+       "rank": 2
+      },
+      {
+       "service": "svc:checkout",
+       "tier": 1,
+       "hops": 2,
+       "team": "Checkout",
+       "path": [
+        "svc:checkout",
+        "svc:payments",
+        "svc:payments-gw"
+       ],
+       "score": 0.0266,
+       "rank": 3
       },
       {
        "service": "svc:mobile-bff",
@@ -1960,7 +2426,9 @@
         "svc:checkout",
         "svc:payments",
         "svc:payments-gw"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 4
       },
       {
        "service": "svc:web-frontend",
@@ -1973,10 +2441,477 @@
         "svc:checkout",
         "svc:payments",
         "svc:payments-gw"
-       ]
+       ],
+       "score": 0.02,
+       "rank": 5
+      },
+      {
+       "service": "svc:refunds",
+       "tier": 2,
+       "hops": 2,
+       "team": "Payments",
+       "path": [
+        "svc:refunds",
+        "svc:payments",
+        "svc:payments-gw"
+       ],
+       "score": 0.0266,
+       "rank": 6
+      },
+      {
+       "service": "svc:subscriptions",
+       "tier": 2,
+       "hops": 2,
+       "team": "Payments",
+       "path": [
+        "svc:subscriptions",
+        "svc:payments",
+        "svc:payments-gw"
+       ],
+       "score": 0.0266,
+       "rank": 7
       }
      ],
-     "ms": 1.92,
+     "ms": 3.31,
+     "readonly": true
+    },
+    {
+     "name": "topology_at",
+     "cypher": "// purpose: The dependency graph as it was at $at: every DEPENDS_ON edge live at that time. FalkorDB's algorithms walk every edge of a graph and the tenant graph keeps retired and not-yet-live dependencies as history, so this is what gets projected into a scratch graph for an algorithm to run on.\nMATCH (a:Service)-[r:DEPENDS_ON]->(b:Service)\nWHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\nRETURN a.id AS caller, b.id AS callee\nORDER BY caller, callee",
+     "params": {
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "caller": "svc:analytics",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:checkout"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:recommendations"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:refunds"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:search"
+      },
+      {
+       "caller": "svc:api-gateway",
+       "callee": "svc:subscriptions"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:cart",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:auth"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:cart"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:checkout",
+       "callee": "svc:pricing"
+      },
+      {
+       "caller": "svc:fraud-check",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:inventory",
+       "callee": "svc:warehouse-sync"
+      },
+      {
+       "caller": "svc:legacy-billing",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:mobile-bff",
+       "callee": "svc:api-gateway"
+      },
+      {
+       "caller": "svc:notifications",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:fraud-check"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:payments-gw"
+      },
+      {
+       "caller": "svc:payments",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:payments-gw",
+       "callee": "svc:kafka"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:promotions"
+      },
+      {
+       "caller": "svc:pricing",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:recommendations",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:refunds",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:analytics"
+      },
+      {
+       "caller": "svc:reporting",
+       "callee": "svc:postgres-orders"
+      },
+      {
+       "caller": "svc:search",
+       "callee": "svc:redis-cache"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:inventory"
+      },
+      {
+       "caller": "svc:shipping",
+       "callee": "svc:notifications"
+      },
+      {
+       "caller": "svc:subscriptions",
+       "callee": "svc:payments"
+      },
+      {
+       "caller": "svc:web-frontend",
+       "callee": "svc:api-gateway"
+      }
+     ],
+     "ms": 1.93,
+     "readonly": true
+    },
+    {
+     "name": "project_topology",
+     "cypher": "// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question.\nUNWIND $edges AS e\nMERGE (a:Service {id: e.caller})\nMERGE (b:Service {id: e.callee})\nMERGE (a)-[:DEPENDS_ON]->(b)\nRETURN count(*) AS edges",
+     "params": {
+      "edges": [
+       {
+        "caller": "svc:analytics",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:checkout"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:recommendations"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:refunds"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:search"
+       },
+       {
+        "caller": "svc:api-gateway",
+        "callee": "svc:subscriptions"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:cart",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:auth"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:cart"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:checkout",
+        "callee": "svc:pricing"
+       },
+       {
+        "caller": "svc:fraud-check",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:inventory",
+        "callee": "svc:warehouse-sync"
+       },
+       {
+        "caller": "svc:legacy-billing",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:mobile-bff",
+        "callee": "svc:api-gateway"
+       },
+       {
+        "caller": "svc:notifications",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:fraud-check"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:payments-gw"
+       },
+       {
+        "caller": "svc:payments",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:payments-gw",
+        "callee": "svc:kafka"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:promotions"
+       },
+       {
+        "caller": "svc:pricing",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:recommendations",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:refunds",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:analytics"
+       },
+       {
+        "caller": "svc:reporting",
+        "callee": "svc:postgres-orders"
+       },
+       {
+        "caller": "svc:search",
+        "callee": "svc:redis-cache"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:inventory"
+       },
+       {
+        "caller": "svc:shipping",
+        "callee": "svc:notifications"
+       },
+       {
+        "caller": "svc:subscriptions",
+        "callee": "svc:payments"
+       },
+       {
+        "caller": "svc:web-frontend",
+        "callee": "svc:api-gateway"
+       }
+      ]
+     },
+     "rows": [
+      {
+       "edges": 38
+      }
+     ],
+     "ms": 3.22,
+     "readonly": false
+    },
+    {
+     "name": "criticality",
+     "cypher": "// purpose: Criticality of every service: PageRank over the dependency graph (a service is critical when services that many others rely on rely on it). Runs on the scratch projection, so a retired or not-yet-live dependency never adds rank.\nCALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score\nRETURN node.id AS service, score\nORDER BY score DESC, service",
+     "params": {},
+     "rows": [
+      {
+       "service": "svc:redis-cache",
+       "score": 0.114141538739204
+      },
+      {
+       "service": "svc:kafka",
+       "score": 0.109091609716415
+      },
+      {
+       "service": "svc:postgres-orders",
+       "score": 0.0873507186770439
+      },
+      {
+       "service": "svc:payments",
+       "score": 0.0583686642348766
+      },
+      {
+       "service": "svc:api-gateway",
+       "score": 0.0539947003126144
+      },
+      {
+       "service": "svc:analytics",
+       "score": 0.0397829562425613
+      },
+      {
+       "service": "svc:pricing",
+       "score": 0.0377168990671635
+      },
+      {
+       "service": "svc:fraud-check",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:payments-gw",
+       "score": 0.0365380458533764
+      },
+      {
+       "service": "svc:promotions",
+       "score": 0.0360287055373192
+      },
+      {
+       "service": "svc:warehouse-sync",
+       "score": 0.0340289734303951
+      },
+      {
+       "service": "svc:inventory",
+       "score": 0.0330117754638195
+      },
+      {
+       "service": "svc:auth",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:cart",
+       "score": 0.0310696065425873
+      },
+      {
+       "service": "svc:notifications",
+       "score": 0.0284976568073034
+      },
+      {
+       "service": "svc:checkout",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:recommendations",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:refunds",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:search",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:subscriptions",
+       "score": 0.0265554860234261
+      },
+      {
+       "service": "svc:legacy-billing",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:mobile-bff",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:reporting",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:shipping",
+       "score": 0.0199986416846514
+      },
+      {
+       "service": "svc:web-frontend",
+       "score": 0.0199986416846514
+      }
+     ],
+     "ms": 1.43,
      "readonly": true
     },
     {
@@ -1991,20 +2926,12 @@
         "hops": 1
        },
        {
-        "service": "svc:checkout",
-        "hops": 2
-       },
-       {
-        "service": "svc:refunds",
-        "hops": 2
-       },
-       {
-        "service": "svc:subscriptions",
-        "hops": 2
-       },
-       {
         "service": "svc:api-gateway",
         "hops": 3
+       },
+       {
+        "service": "svc:checkout",
+        "hops": 2
        },
        {
         "service": "svc:mobile-bff",
@@ -2013,11 +2940,70 @@
        {
         "service": "svc:web-frontend",
         "hops": 4
+       },
+       {
+        "service": "svc:refunds",
+        "hops": 2
+       },
+       {
+        "service": "svc:subscriptions",
+        "hops": 2
        }
       ]
      },
      "rows": [],
-     "ms": 0.85,
+     "ms": 1.18,
+     "readonly": false
+    },
+    {
+     "name": "record_criticality",
+     "cypher": "// purpose: Write the criticality order onto the incident board: IMPACTS.rank (1 = warn first) and IMPACTS.score (PageRank at alert time) on the impacted services.\nUNWIND $rows AS r\nMATCH (:Incident {id: $incident_id})-[x:IMPACTS]->(:Service {id: r.service})\nSET x.rank = r.rank, x.score = r.score\nRETURN count(x) AS ranked",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "rows": [
+       {
+        "service": "svc:payments",
+        "rank": 1,
+        "score": 0.0584
+       },
+       {
+        "service": "svc:api-gateway",
+        "rank": 2,
+        "score": 0.054
+       },
+       {
+        "service": "svc:checkout",
+        "rank": 3,
+        "score": 0.0266
+       },
+       {
+        "service": "svc:mobile-bff",
+        "rank": 4,
+        "score": 0.02
+       },
+       {
+        "service": "svc:web-frontend",
+        "rank": 5,
+        "score": 0.02
+       },
+       {
+        "service": "svc:refunds",
+        "rank": 6,
+        "score": 0.0266
+       },
+       {
+        "service": "svc:subscriptions",
+        "rank": 7,
+        "score": 0.0266
+       }
+      ]
+     },
+     "rows": [
+      {
+       "ranked": 7
+      }
+     ],
+     "ms": 1.59,
      "readonly": false
     }
    ],
@@ -2025,12 +3011,12 @@
     "nodes": [
      "svc:payments-gw",
      "svc:payments",
-     "svc:checkout",
-     "svc:refunds",
-     "svc:subscriptions",
      "svc:api-gateway",
+     "svc:checkout",
      "svc:mobile-bff",
-     "svc:web-frontend"
+     "svc:web-frontend",
+     "svc:refunds",
+     "svc:subscriptions"
     ],
     "edges": [
      [
@@ -2039,38 +3025,18 @@
       "DEPENDS_ON"
      ],
      [
-      "svc:checkout",
-      "svc:payments",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:payments",
-      "svc:payments-gw",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:refunds",
-      "svc:payments",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:payments",
-      "svc:payments-gw",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:subscriptions",
-      "svc:payments",
-      "DEPENDS_ON"
-     ],
-     [
-      "svc:payments",
-      "svc:payments-gw",
-      "DEPENDS_ON"
-     ],
-     [
       "svc:api-gateway",
       "svc:checkout",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
       "DEPENDS_ON"
      ],
      [
@@ -2115,6 +3081,26 @@
      ],
      [
       "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:refunds",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:subscriptions",
       "svc:payments",
       "DEPENDS_ON"
      ],
@@ -2134,40 +3120,9 @@
      "path": [
       "svc:payments",
       "svc:payments-gw"
-     ]
-    },
-    {
-     "service": "svc:checkout",
-     "tier": 1,
-     "hops": 2,
-     "team": "Checkout",
-     "path": [
-      "svc:checkout",
-      "svc:payments",
-      "svc:payments-gw"
-     ]
-    },
-    {
-     "service": "svc:refunds",
-     "tier": 2,
-     "hops": 2,
-     "team": "Payments",
-     "path": [
-      "svc:refunds",
-      "svc:payments",
-      "svc:payments-gw"
-     ]
-    },
-    {
-     "service": "svc:subscriptions",
-     "tier": 2,
-     "hops": 2,
-     "team": "Payments",
-     "path": [
-      "svc:subscriptions",
-      "svc:payments",
-      "svc:payments-gw"
-     ]
+     ],
+     "score": 0.0584,
+     "rank": 1
     },
     {
      "service": "svc:api-gateway",
@@ -2179,7 +3134,22 @@
       "svc:checkout",
       "svc:payments",
       "svc:payments-gw"
-     ]
+     ],
+     "score": 0.054,
+     "rank": 2
+    },
+    {
+     "service": "svc:checkout",
+     "tier": 1,
+     "hops": 2,
+     "team": "Checkout",
+     "path": [
+      "svc:checkout",
+      "svc:payments",
+      "svc:payments-gw"
+     ],
+     "score": 0.0266,
+     "rank": 3
     },
     {
      "service": "svc:mobile-bff",
@@ -2192,7 +3162,9 @@
       "svc:checkout",
       "svc:payments",
       "svc:payments-gw"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 4
     },
     {
      "service": "svc:web-frontend",
@@ -2205,15 +3177,326 @@
       "svc:checkout",
       "svc:payments",
       "svc:payments-gw"
-     ]
+     ],
+     "score": 0.02,
+     "rank": 5
+    },
+    {
+     "service": "svc:refunds",
+     "tier": 2,
+     "hops": 2,
+     "team": "Payments",
+     "path": [
+      "svc:refunds",
+      "svc:payments",
+      "svc:payments-gw"
+     ],
+     "score": 0.0266,
+     "rank": 6
+    },
+    {
+     "service": "svc:subscriptions",
+     "tier": 2,
+     "hops": 2,
+     "team": "Payments",
+     "path": [
+      "svc:subscriptions",
+      "svc:payments",
+      "svc:payments-gw"
+     ],
+     "score": 0.0266,
+     "rank": 7
     }
    ]
   },
   {
    "seq": 12,
    "role": "comms",
+   "tool": "warn_owners",
+   "reason": "Paging, the expert lookup and the blast radius for payments-gw are done, so next I'm warning the on-call for the most critical impacted teams.",
+   "summary": "Heads-up to Hana Costa (@hana.costa, Platform) for api-gateway (criticality rank 2, tier 1); Ravi Moreau (@ravi.moreau, Checkout) for checkout (criticality rank 3, tier 1)",
+   "by": "claude-opus-5-5",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "storm_window": 900
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "blast_radius"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "explained": [
+          "svc:refunds"
+         ],
+         "gaps": [],
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "onset": 1792294320,
+         "red_before": null,
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "cause_service": "svc:fraud-check",
+         "incident": "inc:1003",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:postgres-orders",
+         "incident": "inc:0877",
+         "score": 2
+        },
+        {
+         "cause_service": "svc:payments-gw",
+         "incident": "inc:checkout-latency",
+         "score": 3
+        }
+       ],
+       "storm": 0,
+       "correlated": [],
+       "shared_upstream": []
+      }
+     ],
+     "ms": 2.64,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 1.95,
+     "readonly": true
+    },
+    {
+     "name": "warn_candidates",
+     "cypher": "// purpose: Who to warn: for every impacted service with a criticality rank, the on-call at $at of the team that owns it, best rank first, skipping teams the incident already paged (they know).\nMATCH (i:Incident {id: $incident_id})\nOPTIONAL MATCH (i)-[:PAGED]->(:Person)-[:MEMBER_OF]->(pt:Team)\nWITH i, collect(DISTINCT pt.id) AS paged_teams\nMATCH (i)-[x:IMPACTS]->(s:Service)<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)\nWHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND oc.start <= $at AND oc.end > $at\nRETURN t.id AS team, t.name AS team_name, p.id AS person, p.name AS name, p.handle AS handle,\n       s.id AS service, s.tier AS tier, x.rank AS rank, x.score AS score\nORDER BY x.rank, s.id",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "team": "team:platform",
+       "team_name": "Platform",
+       "person": "person:hana-costa",
+       "name": "Hana Costa",
+       "handle": "@hana.costa",
+       "service": "svc:api-gateway",
+       "tier": 1,
+       "rank": 2,
+       "score": 0.054
+      },
+      {
+       "team": "team:checkout",
+       "team_name": "Checkout",
+       "person": "person:ravi-moreau",
+       "name": "Ravi Moreau",
+       "handle": "@ravi.moreau",
+       "service": "svc:checkout",
+       "tier": 1,
+       "rank": 3,
+       "score": 0.0266
+      },
+      {
+       "team": "team:storefront",
+       "team_name": "Storefront",
+       "person": "person:kiri-novak",
+       "name": "Kiri Novak",
+       "handle": "@kiri.novak",
+       "service": "svc:mobile-bff",
+       "tier": 1,
+       "rank": 4,
+       "score": 0.02
+      },
+      {
+       "team": "team:storefront",
+       "team_name": "Storefront",
+       "person": "person:kiri-novak",
+       "name": "Kiri Novak",
+       "handle": "@kiri.novak",
+       "service": "svc:web-frontend",
+       "tier": 1,
+       "rank": 5,
+       "score": 0.02
+      }
+     ],
+     "ms": 4.16,
+     "readonly": true
+    },
+    {
+     "name": "record_warning",
+     "cypher": "// purpose: Record the heads-up sent to an impacted team's on-call (an action taken because of the criticality order), once per person.\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: r.person})\nMERGE (i)-[w:WARNED]->(p)\nON CREATE SET w.at = $at, w.for_service = r.service, w.rank = r.rank\nRETURN count(w) AS warned",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "at": 1792296000,
+      "rows": [
+       {
+        "person": "person:hana-costa",
+        "service": "svc:api-gateway",
+        "rank": 2
+       },
+       {
+        "person": "person:ravi-moreau",
+        "service": "svc:checkout",
+        "rank": 3
+       }
+      ]
+     },
+     "rows": [
+      {
+       "warned": 2
+      }
+     ],
+     "ms": 2.31,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "inc:refunds-latency",
+     "person:hana-costa",
+     "person:ravi-moreau",
+     "svc:api-gateway",
+     "svc:checkout"
+    ],
+    "edges": [
+     [
+      "inc:refunds-latency",
+      "person:hana-costa",
+      "WARNED"
+     ],
+     [
+      "inc:refunds-latency",
+      "person:ravi-moreau",
+      "WARNED"
+     ],
+     [
+      "team:platform",
+      "svc:api-gateway",
+      "OWNS"
+     ],
+     [
+      "team:checkout",
+      "svc:checkout",
+      "OWNS"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "team": "team:platform",
+     "team_name": "Platform",
+     "person": "person:hana-costa",
+     "name": "Hana Costa",
+     "handle": "@hana.costa",
+     "service": "svc:api-gateway",
+     "tier": 1,
+     "rank": 2,
+     "score": 0.054
+    },
+    {
+     "team": "team:checkout",
+     "team_name": "Checkout",
+     "person": "person:ravi-moreau",
+     "name": "Ravi Moreau",
+     "handle": "@ravi.moreau",
+     "service": "svc:checkout",
+     "tier": 1,
+     "rank": 3,
+     "score": 0.0266
+    }
+   ]
+  },
+  {
+   "seq": 13,
+   "role": "comms",
    "tool": "post_update",
-   "reason": "Payments-gw's owner has been paged, the expert found and its dependents warned, so I'm posting the status update now.",
+   "reason": "Owners are paged and warned, so I'm posting the status update with impact, the cause (chg:pgw-pool-2 on payments-gw) and the runbook.",
    "summary": "Wrote the status update for #incidents (stored on the incident)",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -2288,6 +3571,11 @@
          "role": "comms",
          "target": "svc:payments-gw",
          "tool": "blast_radius"
+        },
+        {
+         "role": "comms",
+         "target": "inc:refunds-latency",
+         "tool": "warn_owners"
         }
        ],
        "hypotheses": [
@@ -2329,7 +3617,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.55,
+     "ms": 3.53,
      "readonly": true
     },
     {
@@ -2349,12 +3637,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.92,
+     "ms": 0.99,
      "readonly": true
     },
     {
      "name": "update_facts",
-     "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
+     "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[w:WARNED]->(wp:Person)-[:MEMBER_OF]->(wt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {handle: wp.handle, team: wt.name, service: w.for_service, rank: w.rank}) AS warned\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged, warned,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, warned, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, warned, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, warned, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
      "params": {
       "incident_id": "inc:refunds-latency"
      },
@@ -2398,6 +3686,20 @@
          "team": "Payments"
         }
        ],
+       "warned": [
+        {
+         "handle": "@hana.costa",
+         "rank": 2,
+         "service": "svc:api-gateway",
+         "team": "Platform"
+        },
+        {
+         "handle": "@ravi.moreau",
+         "rank": 3,
+         "service": "svc:checkout",
+         "team": "Checkout"
+        }
+       ],
        "experts": [
         {
          "handle": "@sana.brandt",
@@ -2433,7 +3735,7 @@
        ]
       }
      ],
-     "ms": 2.78,
+     "ms": 5.01,
      "readonly": true
     },
     {
@@ -2443,7 +3745,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 1.17,
+     "ms": 1.29,
      "readonly": true
     },
     {
@@ -2453,7 +3755,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.83,
+     "ms": 1.07,
      "readonly": true
     },
     {
@@ -2483,7 +3785,7 @@
        "gaps": []
       }
      ],
-     "ms": 1.48,
+     "ms": 1.33,
      "readonly": true
     },
     {
@@ -2511,7 +3813,7 @@
        "weighty": 0
       }
      ],
-     "ms": 10.51,
+     "ms": 8.65,
      "readonly": true
     },
     {
@@ -2520,7 +3822,7 @@
      "params": {
       "incident_id": "inc:refunds-latency",
       "message_id": "msg:update:inc:refunds-latency",
-      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nHeads-up (most relied-on first): @hana.costa (Platform) for api-gateway, @ravi.moreau (Checkout) for checkout\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
       "at": 1792296000,
       "cites": [
        "chg:pgw-pool-2",
@@ -2536,7 +3838,7 @@
        "cited": 6
       }
      ],
-     "ms": 2.22,
+     "ms": 2.37,
      "readonly": false
     }
    ],
@@ -2552,7 +3854,7 @@
     "edges": []
    },
    "data": {
-    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nHeads-up (most relied-on first): @hana.costa (Platform) for api-gateway, @ravi.moreau (Checkout) for checkout\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
     "cites": [
      "chg:pgw-pool-2",
      "ticket:CR-902",
@@ -2583,10 +3885,10 @@
    }
   },
   {
-   "seq": 13,
+   "seq": 14,
    "role": "comms",
    "tool": "handoff",
-   "reason": "All comms steps are on the board: culprit owner paged, expert consulted, dependents warned, status update posted.",
+   "reason": "Culprit owner paged, expert consulted, dependents warned and status update posted for inc:refunds-latency.",
    "summary": "comms hands off to human",
    "by": "claude-opus-5-5",
    "writes": true,
@@ -2665,6 +3967,11 @@
         {
          "role": "comms",
          "target": "inc:refunds-latency",
+         "tool": "warn_owners"
+        },
+        {
+         "role": "comms",
+         "target": "inc:refunds-latency",
          "tool": "post_update"
         }
        ],
@@ -2707,7 +4014,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.4,
+     "ms": 2.12,
      "readonly": true
     }
    ],
@@ -2808,6 +4115,24 @@
     "service": "svc:refunds"
    }
   ],
+  "warned": [
+   {
+    "person": "person:hana-costa",
+    "name": "Hana Costa",
+    "handle": "@hana.costa",
+    "team": "Platform",
+    "service": "svc:api-gateway",
+    "rank": 2
+   },
+   {
+    "person": "person:ravi-moreau",
+    "name": "Ravi Moreau",
+    "handle": "@ravi.moreau",
+    "team": "Checkout",
+    "service": "svc:checkout",
+    "rank": 3
+   }
+  ],
   "blast_radius": [
    "svc:api-gateway",
    "svc:mobile-bff",
@@ -2819,7 +4144,7 @@
    "svc:subscriptions"
   ],
   "co_causes": [],
-  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nHeads-up (most relied-on first): @hana.costa (Platform) for api-gateway, @ravi.moreau (Checkout) for checkout\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
   "sources": [
    {
     "id": "chg:pgw-pool-2",
@@ -2882,7 +4207,7 @@
   },
   "storm": null
  },
- "llm_tokens": 60419,
+ "llm_tokens": 71078,
  "slack": "off",
  "ablation": {
   "without_memory": {

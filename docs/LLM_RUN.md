@@ -24,6 +24,10 @@ only in the order they checked suspects (act 2 without memory and act 3 found th
 A small local model is not enough: qwen2.5:3b replied without a usable tool call in most turns, so the planner made
 64% of its decisions.
 
+Rerun on 2026-10-16 after the PageRank criticality step (`warn_owners`, 17 agent tools) landed: `make demo` on Opus
+5.5 is DEMO OK, the model calls `warn_owners` in all three acts on its own, no fallbacks. The product UI shows each
+step's decider and the model's own one-line reason (every step now carries `by`).
+
 ## What the first Claude run taught us
 
 The first Opus run, with the original prompt, got act 3 wrong. The prompt said "recall first" and never mentioned
