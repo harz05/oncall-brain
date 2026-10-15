@@ -109,7 +109,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
                        m["change"] == cause["change"] for m in memory[0]))},
         "paged": repo.read("incident_paged", incident_id=incident_id).rows,
         "blast_radius": sorted(direct),
-        "at_risk": sorted({x["service"] for x in impacts} - direct),
+        "at_risk": sorted({x["service"] for x in impacts} - direct - set((cause or {}).get("live_path") or [])),
         "co_causes": repo.read("co_causes", incident_id=incident_id).rows,
         "update_text": update,
         "investigator_calls": len(investigator),

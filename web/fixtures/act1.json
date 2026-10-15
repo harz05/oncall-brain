@@ -35,7 +35,7 @@
        "alert": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 2.46,
+     "ms": 3.33,
      "readonly": false
     }
    ],
@@ -110,7 +110,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.67,
+     "ms": 2.5,
      "readonly": true
     },
     {
@@ -130,7 +130,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 1.04,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -174,7 +174,7 @@
        ]
       }
      ],
-     "ms": 1.38,
+     "ms": 1.51,
      "readonly": true
     },
     {
@@ -199,7 +199,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.77,
+     "ms": 1.07,
      "readonly": false
     }
    ],
@@ -334,7 +334,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.64,
+     "ms": 2.1,
      "readonly": true
     },
     {
@@ -354,7 +354,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.74,
+     "ms": 1.07,
      "readonly": true
     },
     {
@@ -373,7 +373,7 @@
        "team_name": "Checkout"
       }
      ],
-     "ms": 1.12,
+     "ms": 1.09,
      "readonly": true
     },
     {
@@ -390,7 +390,7 @@
        "first_for": "svc:checkout"
       }
      ],
-     "ms": 0.86,
+     "ms": 1.08,
      "readonly": false
     }
    ],
@@ -487,7 +487,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.07,
+     "ms": 1.46,
      "readonly": true
     }
    ],
@@ -568,7 +568,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.33,
+     "ms": 1.24,
      "readonly": true
     },
     {
@@ -639,7 +639,7 @@
        "score": 2
       }
      ],
-     "ms": 1.78,
+     "ms": 1.67,
      "readonly": true
     },
     {
@@ -711,7 +711,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.67,
+     "ms": 1.03,
      "readonly": false
     }
    ],
@@ -914,7 +914,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.3,
+     "ms": 0.62,
      "readonly": true
     },
     {
@@ -926,7 +926,7 @@
       "min_score": 3
      },
      "rows": [],
-     "ms": 1.07,
+     "ms": 1.45,
      "readonly": true
     }
    ],
@@ -1037,7 +1037,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.09,
+     "ms": 0.99,
      "readonly": true
     },
     {
@@ -1057,7 +1057,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.37,
+     "ms": 0.45,
      "readonly": true
     },
     {
@@ -1093,7 +1093,7 @@
        "hops": 2
       }
      ],
-     "ms": 1.0,
+     "ms": 1.26,
      "readonly": true
     },
     {
@@ -1140,7 +1140,7 @@
        "summary": "Deploy pricing v2.14.0"
       }
      ],
-     "ms": 0.51,
+     "ms": 0.69,
      "readonly": true
     },
     {
@@ -1204,7 +1204,7 @@
        "id": "hyp:checkout-latency:legacy-193"
       }
      ],
-     "ms": 0.93,
+     "ms": 0.94,
      "readonly": false
     }
    ],
@@ -1460,7 +1460,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.24,
+     "ms": 1.3,
      "readonly": true
     },
     {
@@ -1483,7 +1483,7 @@
        "storm_services": []
       }
      ],
-     "ms": 0.88,
+     "ms": 1.5,
      "readonly": true
     },
     {
@@ -1502,7 +1502,7 @@
        ]
       }
      ],
-     "ms": 0.59,
+     "ms": 0.81,
      "readonly": true
     },
     {
@@ -1517,7 +1517,7 @@
       "until": 1792036800
      },
      "rows": [],
-     "ms": 0.5,
+     "ms": 0.66,
      "readonly": true
     },
     {
@@ -1546,7 +1546,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.96,
+     "ms": 1.42,
      "readonly": false
     }
    ],
@@ -1748,7 +1748,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.11,
+     "ms": 1.21,
      "readonly": true
     },
     {
@@ -1771,7 +1771,7 @@
        "storm_services": []
       }
      ],
-     "ms": 0.48,
+     "ms": 0.73,
      "readonly": true
     },
     {
@@ -1797,7 +1797,7 @@
        ]
       }
      ],
-     "ms": 0.28,
+     "ms": 0.45,
      "readonly": true
     },
     {
@@ -1819,7 +1819,7 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.67,
+     "ms": 0.33,
      "readonly": true
     },
     {
@@ -1848,7 +1848,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.59,
+     "ms": 0.41,
      "readonly": false
     }
    ],
@@ -2057,7 +2057,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.15,
+     "ms": 1.26,
      "readonly": true
     },
     {
@@ -2080,7 +2080,7 @@
        "storm_services": []
       }
      ],
-     "ms": 0.61,
+     "ms": 0.67,
      "readonly": true
     },
     {
@@ -2100,7 +2100,7 @@
        ]
       }
      ],
-     "ms": 0.29,
+     "ms": 0.35,
      "readonly": true
     },
     {
@@ -2132,7 +2132,7 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.22,
+     "ms": 0.37,
      "readonly": true
     },
     {
@@ -2162,7 +2162,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.44,
+     "ms": 0.64,
      "readonly": false
     }
    ],
@@ -2385,7 +2385,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.32,
+     "ms": 1.39,
      "readonly": true
     },
     {
@@ -2408,7 +2408,7 @@
        "storm_services": []
       }
      ],
-     "ms": 0.67,
+     "ms": 0.72,
      "readonly": true
     },
     {
@@ -2420,7 +2420,7 @@
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.2,
+     "ms": 0.39,
      "readonly": true
     },
     {
@@ -2431,7 +2431,7 @@
       "target": "svc:search"
      },
      "rows": [],
-     "ms": 0.63,
+     "ms": 0.71,
      "readonly": true
     },
     {
@@ -2455,7 +2455,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.55,
+     "ms": 0.65,
      "readonly": false
     }
    ],
@@ -2687,7 +2687,7 @@
        "storm_services": []
       }
      ],
-     "ms": 1.11,
+     "ms": 0.69,
      "readonly": true
     },
     {
@@ -2699,7 +2699,7 @@
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.39,
+     "ms": 0.23,
      "readonly": true
     },
     {
@@ -2720,7 +2720,7 @@
        ]
       }
      ],
-     "ms": 0.25,
+     "ms": 0.48,
      "readonly": true
     },
     {
@@ -2747,7 +2747,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.39,
+     "ms": 0.57,
      "readonly": false
     }
    ],
@@ -2971,7 +2971,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.36,
+     "ms": 1.44,
      "readonly": true
     }
    ],
@@ -3171,7 +3171,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.33,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -3191,7 +3191,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.35,
+     "ms": 0.71,
      "readonly": true
     },
     {
@@ -3210,7 +3210,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.27,
+     "ms": 0.55,
      "readonly": true
     },
     {
@@ -3227,7 +3227,7 @@
        "first_for": "svc:payments-gw"
       }
      ],
-     "ms": 0.27,
+     "ms": 0.34,
      "readonly": false
     }
    ],
@@ -3453,7 +3453,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.53,
+     "ms": 1.57,
      "readonly": true
     },
     {
@@ -3519,7 +3519,7 @@
        "score": 3
       }
      ],
-     "ms": 3.54,
+     "ms": 3.32,
      "readonly": true
     },
     {
@@ -3532,7 +3532,7 @@
       "score": 12
      },
      "rows": [],
-     "ms": 0.67,
+     "ms": 0.73,
      "readonly": false
     }
    ],
@@ -3805,7 +3805,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.74,
+     "ms": 1.38,
      "readonly": true
     },
     {
@@ -3825,7 +3825,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.51,
+     "ms": 0.39,
      "readonly": true
     },
     {
@@ -3918,7 +3918,7 @@
        ]
       }
      ],
-     "ms": 0.75,
+     "ms": 0.66,
      "readonly": true
     },
     {
@@ -3959,7 +3959,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.34,
+     "ms": 0.52,
      "readonly": false
     }
    ],
@@ -4356,7 +4356,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.27,
+     "ms": 1.35,
      "readonly": true
     },
     {
@@ -4376,7 +4376,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.36,
+     "ms": 0.37,
      "readonly": true
     },
     {
@@ -4462,7 +4462,7 @@
        ]
       }
      ],
-     "ms": 2.49,
+     "ms": 2.19,
      "readonly": true
     },
     {
@@ -4509,7 +4509,7 @@
        "verdict": "refuted"
       }
      ],
-     "ms": 0.84,
+     "ms": 1.21,
      "readonly": true
     },
     {
@@ -4519,7 +4519,7 @@
       "incident_id": "inc:checkout-latency"
      },
      "rows": [],
-     "ms": 0.51,
+     "ms": 0.67,
      "readonly": true
     },
     {
@@ -4542,7 +4542,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.81,
+     "ms": 0.86,
      "readonly": true
     },
     {
@@ -4566,7 +4566,7 @@
        "cited": 4
       }
      ],
-     "ms": 1.17,
+     "ms": 1.19,
      "readonly": false
     }
    ],
@@ -4809,7 +4809,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.56,
+     "ms": 1.48,
      "readonly": true
     }
    ],
@@ -4958,7 +4958,6 @@
    "svc:web-frontend"
   ],
   "at_risk": [
-   "svc:payments",
    "svc:refunds",
    "svc:subscriptions"
   ],

@@ -35,7 +35,7 @@
        "alert": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.14,
+     "ms": 1.23,
      "readonly": false
     }
    ],
@@ -110,7 +110,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.07,
+     "ms": 1.03,
      "readonly": true
     },
     {
@@ -130,7 +130,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.38,
+     "ms": 0.47,
      "readonly": true
     },
     {
@@ -174,7 +174,7 @@
        ]
       }
      ],
-     "ms": 0.48,
+     "ms": 0.6,
      "readonly": true
     },
     {
@@ -199,7 +199,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.26,
+     "ms": 0.27,
      "readonly": false
     }
    ],
@@ -334,7 +334,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.96,
+     "ms": 0.91,
      "readonly": true
     },
     {
@@ -354,7 +354,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.36,
+     "ms": 0.32,
      "readonly": true
     },
     {
@@ -373,7 +373,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.35,
+     "ms": 0.24,
      "readonly": true
     },
     {
@@ -390,7 +390,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.23,
+     "ms": 0.15,
      "readonly": false
     }
    ],
@@ -487,7 +487,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.79,
+     "ms": 0.74,
      "readonly": true
     }
    ],
@@ -568,7 +568,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.95,
+     "ms": 1.94,
      "readonly": true
     },
     {
@@ -615,7 +615,7 @@
        "score": 2
       }
      ],
-     "ms": 1.3,
+     "ms": 2.01,
      "readonly": true
     },
     {
@@ -663,7 +663,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.49,
+     "ms": 0.74,
      "readonly": false
     }
    ],
@@ -805,7 +805,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.93,
+     "ms": 1.05,
      "readonly": true
     },
     {
@@ -825,7 +825,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.29,
+     "ms": 0.48,
      "readonly": true
     },
     {
@@ -852,7 +852,7 @@
        ]
       }
      ],
-     "ms": 1.36,
+     "ms": 1.7,
      "readonly": true
     },
     {
@@ -876,7 +876,7 @@
        "id": "hyp:refunds-latency:pgw-pool-2"
       }
      ],
-     "ms": 0.53,
+     "ms": 0.86,
      "readonly": false
     }
    ],
@@ -1001,7 +1001,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.98,
+     "ms": 1.04,
      "readonly": true
     },
     {
@@ -1044,7 +1044,7 @@
        ]
       }
      ],
-     "ms": 0.54,
+     "ms": 0.66,
      "readonly": true
     },
     {
@@ -1076,7 +1076,7 @@
        "summary": "p99 4.4s on POST /refunds"
       }
      ],
-     "ms": 0.54,
+     "ms": 0.52,
      "readonly": true
     },
     {
@@ -1252,7 +1252,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.14,
+     "ms": 0.93,
      "readonly": true
     }
    ],
@@ -1365,7 +1365,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.4,
+     "ms": 1.3,
      "readonly": true
     },
     {
@@ -1385,7 +1385,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.48,
+     "ms": 0.35,
      "readonly": true
     },
     {
@@ -1404,7 +1404,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.52,
+     "ms": 0.7,
      "readonly": true
     },
     {
@@ -1421,7 +1421,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.39,
+     "ms": 0.31,
      "readonly": false
     }
    ],
@@ -1560,7 +1560,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.66,
+     "ms": 2.2,
      "readonly": true
     },
     {
@@ -1626,7 +1626,7 @@
        "score": 3
       }
      ],
-     "ms": 5.09,
+     "ms": 5.51,
      "readonly": true
     },
     {
@@ -1639,7 +1639,7 @@
       "score": 12
      },
      "rows": [],
-     "ms": 0.6,
+     "ms": 0.86,
      "readonly": false
     }
    ],
@@ -1825,7 +1825,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.76,
+     "ms": 2.08,
      "readonly": true
     },
     {
@@ -1845,7 +1845,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.75,
+     "ms": 0.96,
      "readonly": true
     },
     {
@@ -1938,7 +1938,7 @@
        ]
       }
      ],
-     "ms": 0.98,
+     "ms": 1.39,
      "readonly": true
     },
     {
@@ -1979,7 +1979,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.55,
+     "ms": 0.98,
      "readonly": false
     }
    ],
@@ -2289,7 +2289,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.51,
+     "ms": 2.11,
      "readonly": true
     },
     {
@@ -2309,7 +2309,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.47,
+     "ms": 1.26,
      "readonly": true
     },
     {
@@ -2393,7 +2393,7 @@
        ]
       }
      ],
-     "ms": 1.17,
+     "ms": 2.48,
      "readonly": true
     },
     {
@@ -2403,7 +2403,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.32,
+     "ms": 0.82,
      "readonly": true
     },
     {
@@ -2413,7 +2413,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.41,
+     "ms": 1.11,
      "readonly": true
     },
     {
@@ -2436,7 +2436,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.5,
+     "ms": 1.42,
      "readonly": true
     },
     {
@@ -2459,7 +2459,7 @@
        "cited": 4
       }
      ],
-     "ms": 0.62,
+     "ms": 1.95,
      "readonly": false
     }
    ],
@@ -2624,7 +2624,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.11,
+     "ms": 3.23,
      "readonly": true
     }
    ],
@@ -2724,7 +2724,6 @@
   ],
   "at_risk": [
    "svc:checkout",
-   "svc:payments",
    "svc:subscriptions"
   ],
   "co_causes": [],

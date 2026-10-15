@@ -30,7 +30,7 @@
      "alert_name": "checkout p99 latency above 2s"
     }
    ],
-   "ms": 0.6,
+   "ms": 0.78,
    "readonly": true
   },
   {
@@ -48,7 +48,7 @@
      "service_name": "payments-gw"
     }
    ],
-   "ms": 0.57,
+   "ms": 0.64,
    "readonly": true
   },
   {
@@ -83,7 +83,7 @@
      "successes": 1
     }
    ],
-   "ms": 1.92,
+   "ms": 1.97,
    "readonly": false
   },
   {
@@ -194,7 +194,7 @@
      ]
     }
    ],
-   "ms": 1.53,
+   "ms": 1.47,
    "readonly": true
   },
   {
@@ -241,7 +241,7 @@
      "verdict": "refuted"
     }
    ],
-   "ms": 0.76,
+   "ms": 0.92,
    "readonly": true
   },
   {
@@ -251,7 +251,7 @@
     "incident_id": "inc:checkout-latency"
    },
    "rows": [],
-   "ms": 0.45,
+   "ms": 0.52,
    "readonly": true
   },
   {
@@ -274,7 +274,7 @@
      "status": "confirmed"
     }
    ],
-   "ms": 0.6,
+   "ms": 0.8,
    "readonly": true
   },
   {
@@ -299,7 +299,7 @@
      "cited": 5
     }
    ],
-   "ms": 1.06,
+   "ms": 1.21,
    "readonly": false
   }
  ],
