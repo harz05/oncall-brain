@@ -1,25 +1,30 @@
-# Demo video script (about 2 minutes)
+# Demo video script (about 2 minutes 15 seconds)
 
-For Harsh to record. Screen: the web UI at http://localhost:8000 (`make db && make dev`), browser at 1920x1080, zoom 100%.
-Before recording: click **Reset demo** once so the graph is pristine. Have a terminal ready with `make demo` output and, optionally, an MCP client (see docs/MCP.md).
+For Harsh to record. Screen: the web UI at http://localhost:8000 (`make db && make dev`, Anthropic key in `.env`
+so the badges say Claude Opus 5.5), browser at 1920x1080, zoom 100%. Before recording: open the **Simulate an
+incident** menu and press **Reset demo company** so the inbox is empty. Have Claude Code open in a terminal with
+the MCP server added (`claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`)
+for the last segment.
 
-Say plain words on camera. Leave jargon (p99, episodic, procedural) for the README.
+Say plain words on camera. Leave jargon (p99, episodic, procedural, Cypher) for the README.
 
 | Time | Screen | Say |
 |---|---|---|
-| 0:00-0:10 | UI, idle graph of 25 services | "It's 9:30 in the morning. Checkout is slow and customers can't pay. An on-call engineer has three questions: who is hurt, what broke it, and what fixed it last time. On-call Brain answers all three from one graph in FalkorDB." |
-| 0:10-0:22 | Click **Act 1: checkout is slow**. Triage steps animate. | "Triage walks the dependency graph backwards: four services are hurt. Then it looks up who is on call for checkout right now and pages them. Everything an agent does is written back to the graph, so the next agent picks up from there." |
-| 0:22-0:50 | Investigator steps animate; graph lights up suspects. | "The investigator first checks memory: an old checkout incident was caused by inventory, but inventory hasn't changed today, so it moves on. It lists every change in the last two hours on services checkout depends on, plus the newest changes anywhere, which is what a plain change log would blame. Then it tests each one against the graph. Cart: deployed, but healthy. Pricing: rolled back before the alert. Search: the newest change, but checkout doesn't depend on search at all. Legacy billing went red first, so even a change log that watches anomalies blames it; but checkout stopped calling it three days ago, and the graph knows when each dependency was live. Payments-gateway: a config change 40 minutes ago, and the slowdown travels gateway, then payments, then checkout. That's the cause, two hops away." |
-| 0:50-0:56 | Expand **Cypher** on the payments-gw check; point at the planner badge top right. | "Every step shows the exact Cypher it ran. The planner is rules, not a language model: it picks each step from what the graph returns, and the badge says so." |
-| 0:56-1:04 | Comms steps + the **Status update for #incidents** card (Ruled out line, Ask line, sources). | "Comms pages the payments team, names who knows the gateway best, and writes the status update: the likely cause and who made it, what was ruled out and why, and its sources: the ticket, the chat and the design note behind the change." |
-| 1:04-1:09 | Click **Confirm root cause**. Runbook appears. | "A human confirms the fix. The graph now remembers what caused this incident and the runbook that fixed it." |
-| 1:09-1:25 | Click **Act 2: refunds is slow**. Point at the memory card ("Act 2: same incident", "without → with memory": 6 → 3 investigator calls, 4 → 1 hypotheses checked, culprit on check 2 → check 1) and the Next action line. | "Three days later refunds slows down. The agent recalls Thursday's incident, not because the words match, but because the same gateway sits on refunds' dependency path, and tests the new gateway config change first. This card replays the same incident on the graph without that memory: six calls instead of three." |
-| 1:25-1:35 | Optional: click **Act 3: three alerts at once**. Point at the "shared by all 3 alerting services" label. | "Three services alert at once. The agent folds them into one incident and keeps the database config change, which explains all three alerts, over the subscriptions deploy, which explains one." |
-| 1:35-1:43 | Terminal: the accuracy table from `make eval` (or docs/EVAL.md). | "On two hundred generated incidents with decoys, noise, missing telemetry and innocent deploys, the graph agent finds the cause in 184. A change log that watches anomalies finds 134. Every miss is listed with the agent's own reasons." |
-| 1:43-1:55 | **Ask the brain** tab: type "Why was the payments gateway pool lowered?" and press Enter. Point at the first source and the "Related" list. | "The same graph holds the company's docs, tickets and chat. Ask why the pool was lowered: it finds the cost review that decided it, who wrote it, the change it led to, and the postmortem that warned against it, with every source cited." |
-| 1:55-2:02 | UI with the lit path. | "FalkorDB is the context: temporal dependencies, a shared hypothesis board, memory, and the knowledge around it." |
+| 0:00-0:10 | The landing: "What broke, why, who's paged, and the fix." | "It's 3 AM. Checkout is slow and customers can't pay. The on-call engineer has three questions: what broke, why, and what fixed it last time. On-call Brain answers them from one graph in FalkorDB." |
+| 0:10-0:18 | Click **Simulate an incident: checkout is slow**. The incident opens; the three agent cells light up. | "An alert fires. Three agents pick it up: triage finds who is hurt and pages the on-call, the investigator tests every recent change against the dependency graph, comms writes the update." |
+| 0:18-0:45 | Watch the **Suspects** list on the right flip from ? to ✗ while the live line shows Claude's reasons. | "Claude chooses each step, and says why. Five recent changes are suspects. Pricing: rolled back before the alert, out. Search: the newest change anywhere, but checkout doesn't even depend on search, out. Legacy billing went red first, so a change log that watches dashboards blames it; but checkout stopped calling it three days ago, and only the graph knows when each dependency was live. Cart: deployed, but healthy. Payments gateway: a config change 40 minutes ago, and the slowdown travels gateway, payments, checkout. That's the cause, two hops upstream." |
+| 0:45-0:58 | The answer card settles: likely cause, "Very likely, 4 of 5 suspects ruled out", who's paged, sources. Point at **What a change log alone would blame**. | "The answer: the payments gateway pool change, by Sana, forty minutes before the alert. Who's paged, who knows the gateway best, and every source: the ticket, the chat, the design note. Without the graph, both change-log methods blame the wrong thing." |
+| 0:58-1:06 | Click **Show me why**. The incident subgraph with the orange path; expand one step's Cypher. | "Every step is on record: which agent, what it asked the graph, the exact query, and why. This is the proof, not a chat transcript." |
+| 1:06-1:12 | Back to **Answer**. Click **Confirm cause**. The Fix column turns green: saved to memory. | "I confirm. The graph now remembers what caused this and the fix that worked." |
+| 1:12-1:30 | **Simulate an incident → refunds is slow**. The memory banner: "Seen this before… 3 steps instead of 6, 1 suspect instead of 4". | "Three days later refunds slows down. It recalls Thursday's incident, not because the words match, but because the same gateway sits on refunds' dependency path, and tries that fix first. Same incident replayed without the memory: six steps instead of three." |
+| 1:30-1:42 | **Simulate → Three alerts at once**. The storm line under the title; the storm card. | "Three services alert in four minutes. It folds them into one incident and keeps the database change that explains all three over the deploy that explains one." |
+| 1:42-1:55 | **Ask the brain**: "Who owns kafka?" then "Why was legacy-billing retired?". Source chips; the answer subgraph on the right. | "The same graph holds the company's docs, tickets and chat. Who owns kafka, why a service was retired: answered with sources, current as of today." |
+| 1:55-2:10 | Claude Code terminal: *"checkout is slow and alert:checkout-latency just fired on tenant acme, find out why"*; Claude calls `respond_to_alert` and reports the cause. | "And the brain isn't the web page. It's an MCP server: from Claude Code, Claude picks the same tools itself, fourteen out of fourteen in our test, and works the incident without the browser open." |
+| 2:10-2:15 | Back on the answer card. | "FalkorDB is the context: temporal dependencies, a shared incident board, memory, and the knowledge around it. Take it out and nothing answers." |
 
-If time runs long, drop the act 3 row: everything else stands without it. Check the eval numbers against docs/EVAL.md before recording. Do not say the update is posted to Slack: it is stored on the incident.
+If time runs long, drop the three-alerts row. Check `docs/EVAL.md` (186/200) and `docs/MCP_PICK.md` (14/14) before
+recording so the numbers you say match. Do not say the update is posted to Slack unless `SLACK_WEBHOOK_URL` is set.
 
 ## Backup take
-If the UI misbehaves while recording, `make demo` prints the same acts with the same numbers in the terminal.
+If the UI misbehaves while recording, `make demo` prints the same three incidents with the same numbers in the
+terminal, and `?offline=1` replays recorded runs in the UI with no backend.

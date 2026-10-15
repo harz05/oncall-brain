@@ -1,12 +1,17 @@
 # On-call Brain
 
-Incident agents that reason over a FalkorDB graph and remember what fixed things.
+An AI on-call teammate. An alert fires; it tells you what broke, why, who is paged and the fix, with the proof from
+your company's graph, and it remembers what you confirmed.
 
-**In one breath:** an alert fires; three agent roles (triage, investigator, comms) work the incident through one shared FalkorDB graph and find which change broke it, ruling out the decoys a change log would blame; a human confirms the fix, the graph remembers it, and the same incident replayed with that memory takes half the investigator calls.
+**In one breath:** an alert fires; three agent roles (triage, investigator, comms) work the incident through one
+shared FalkorDB graph and find which change broke it, ruling out the other recent changes a change log would blame;
+you confirm the cause, the graph remembers the fix, and the next similar incident is solved in 3 steps instead of 6.
+It is an MCP server first (Claude Code, Claude Desktop, any MCP client), a webhook-in / Slack-out headless flow, and
+a web inbox that is one window onto the same brain.
 
 - **Problem:** when checkout slows down, the newest deploy is rarely the cause. The cause sits somewhere on the dependency path, and whether a dependency was even live at the time matters.
-- **Result:** in the demo, every change-log method blames the wrong change (one blames a service checkout stopped calling three days ago); the graph agent names the payments-gateway config change two hops upstream, with the path and sources.
-- **How:** temporal multi-hop Cypher traversals, a hypothesis board the roles hand off through, and episodic + procedural memory, all in one graph per tenant. By default a deterministic planner chooses each step from what the graph returns (no API key needed); an LLM can take its place.
+- **Result:** in the demo, every change-log method blames the wrong change (one blames a service checkout stopped calling three days ago); the graph agent names the payments-gateway config change two hops upstream, with the path and sources. On 200 randomised incidents it is right 186 times; the best non-graph method, 134.
+- **How:** temporal multi-hop Cypher traversals, a hypothesis board the roles hand off through, and episodic + procedural memory, all in one graph per company. Claude chooses every step when a key is present (60/60 decisions, 0 fallbacks, see [docs/LLM_RUN.md](docs/LLM_RUN.md)); a deterministic planner runs the tests and key-less demos.
 
 **Tracks entered:** 01 Agents That Act on Connected Data, 02 Agent Memory and Coordination, 03 Company Brain.
 Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthetic (seeded generator, fake names).
@@ -14,9 +19,14 @@ Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthet
 <!-- DEMO VIDEO LINK: add after recording -->
 <!-- LIVE REPLAY: https://<user>.github.io/<repo>/ once GitHub Pages is enabled (Settings -> Pages -> GitHub Actions) -->
 
-**Try it without installing anything:** the web UI replays all three acts from recorded runs when no backend is reachable, so the GitHub Pages build of `web/` (`.github/workflows/pages.yml`) is a zero-setup look at the product. The recordings come from the real code (`scripts/gen_fixtures.py`); for live runs use the quick start below.
+**Try it without installing anything:** the web UI replays all three incidents from recorded runs (Claude Opus 5.5
+choosing every step) when no backend is reachable, so the GitHub Pages build of `web/` (`.github/workflows/pages.yml`)
+is a zero-setup look at the product. For live runs, use the quick start below; to use it from Claude Code, see
+[Use it from Claude Code](#use-it-from-claude-code-in-one-minute).
 
-![Act 2: the refunds incident solved from act 1's memory. Same incident without that memory: 6 investigator calls, culprit on check 2; with it: 3 calls, check 1](docs/img/act2.png)
+![The incident answer: likely cause (a payments-gw config change by Sana Brandt, 40 min before the alert) with the confidence label "Very likely, 4 of 5 suspects ruled out", Confirm cause / Wrong cause, what broke, who is paged, the fix, the four suspects ruled out with their reasons, the dependency path and the sources](docs/img/answer.png)
+
+![The second incident: "Seen this before" banner, the same fix tried first, 3 investigator steps instead of 6 and 1 suspect tested instead of 4](docs/img/memory.png)
 
 ## The story the demo tells
 
@@ -59,7 +69,7 @@ Recall finds act 1 by structure, because payments-gw is on refunds' live depende
 - Related alerts need not share one cause: a suspect that explains an alerting service the leader cannot is kept as a co-cause (its team is paged, the update says "Also contributing"), not ruled out (`tests/integration/test_storms.py`).
 - Both change logs are wrong here: the flat one blames a search deploy, the anomaly-aware one blames the subscriptions deploy because it went red first. Without correlation, the same planner blames the subscriptions deploy too (`make demo` prints this ablation).
 
-![Act 3: three alerts folded into one incident; the shared upstream ranked by convergence; the postgres-orders change found on check 1 and the subscriptions deploy outranked](docs/img/act3.png)
+![The alert storm: "3 alerts, 1 incident: refunds, checkout and subscriptions fired within minutes and share payments and postgres-orders"; the postgres-orders config change named as the cause ("Very likely, it explains all 3 alerting services") and the subscriptions deploy listed as "also possible", explaining one](docs/img/storm.png)
 
 ## Why the graph is not decoration
 
@@ -154,16 +164,32 @@ make test      # unit + integration tests (integration tests skip if FalkorDB is
 
 No LLM key is needed: by default one deterministic planner plays all three roles, choosing each step by fixed rules from what the graph returns. To let an LLM choose the tools instead, set `LLM_PROVIDER` (gemini, openai, groq, openrouter, ollama, anthropic) and a key in `.env` (see `.env.example`). If the model picks an unknown tool, invalid arguments or a repeated step, or the API fails, that step falls back to the deterministic planner and the trace says so. With Claude Opus 5.5 or Sonnet 5.5 choosing every step, the full story (acts 1-3, 60 decisions) finds the right cause in all four runs with zero fallbacks: [docs/LLM_RUN.md](docs/LLM_RUN.md). The 200-incident eval numbers come from the deterministic planner.
 
+## Use it from Claude Code in one minute
+
+```bash
+make db && make seed                                   # FalkorDB with the demo company
+claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server
+```
+
+Then, in Claude Code: *"checkout is slow and alert:checkout-latency just fired on tenant acme. Find out why."* Claude
+calls `respond_to_alert`, reads the outcome (likely cause with a confidence label, who was paged, what was ruled out
+and why, the fix, the status update) and, when you say the cause is right, `resolve_incident` so the fix is remembered.
+*"Who owns kafka?"*, *"why was legacy-billing retired?"* go to `ask`. The server also publishes two prompts
+(`work_alert`, `company_question`) that script those two workflows. Given only the tool list, Claude Opus 5.5 picks the
+right tool for 14 of 14 plain requests ([docs/MCP_PICK.md](docs/MCP_PICK.md)). For Claude Desktop / claude.ai use the
+Streamable HTTP transport with `API_TOKEN`; everything is in [docs/MCP.md](docs/MCP.md).
+
 ## Using it
 
-- **Web UI** (`make dev`, then http://localhost:8000): click 0 Reset, 1 Act 1, 2 Confirm root cause, 3 Act 2, 4 Act 3 (three alerts at once). The trace plays step by step; every card shows why the planner chose that tool and the exact Cypher it ran; clicking a card lights up its evidence in the graph. The outcome panel shows "culprit on check N", the next action, who to ask, the status update for #incidents, and what both change logs without the graph would have blamed; in act 2 the memory card compares the same incident without and with memory. The **Ask the brain** tab takes a free-text question (`ask`) and has `who_knows` / `change_story` as quick actions, all live. `?offline=1` (or no reachable API) replays recorded fixtures; the header then says "recorded replay" and the Ask tab only lists example questions.
+- **Web inbox** (`make dev`, then http://localhost:8000): the inbox on the left lists incidents with their state (Investigating, Cause found, Needs a human, Confirmed). **Simulate an incident** (top right) runs one of three scripted alerts, or a custom alert on any service, with the agents working live. The incident leads with the answer: the likely cause with a confidence label and byline, **Confirm cause** / **Wrong cause**, what broke, who is paged, the fix, the suspects ruled out with one-line reasons, the dependency path, the status update as it lands in Slack, and what a change log alone would have blamed. **Show me why** is the proof: the incident subgraph (what the agents touched plus one hop, or the whole company), the steps grouped by agent (1 Triage, 2 Investigator, 3 Comms) with the model's one-line reason and a Claude / Rules badge per step, and the exact Cypher behind every call. The second incident shows the memory moment ("Seen this before: 3 steps instead of 6"). **Ask the brain** is a chat with source chips; **Connect** shows the webhook, MCP, Slack and your-own-data hooks. With no reachable API (`?offline=1`, or the GitHub Pages build) the UI replays recorded runs.
+- **Headless:** `POST /api/tenants/{t}/alerts?respond=true` with `{service, symptom, name}` records an alert, runs the agents, stores the incident and its update in the graph and, with `SLACK_WEBHOOK_URL`, posts the update to Slack. `POST .../alerts/{alert_id}/respond/stream` streams the run step by step (NDJSON); `GET .../incidents/{id}` returns a stored incident with its outcome and steps.
 - **HTTP API:** `GET /api/tools` lists every tool with its JSON schema; `POST /api/tenants/{tenant}/tools/{name}` runs one. Use-case endpoints: `POST /api/tenants/{t}/reset`, `POST /api/tenants/{t}/alerts/{alert_id}/respond` (add `?compare=memory` to also get `ablation.without_memory`: the same alert replayed on a scratch copy of the pristine graph, dropped afterwards), `POST /api/tenants/{t}/incidents/{id}/resolve`.
-- **MCP:** the same 22 registry tools, plus `respond_to_alert` and `reset_tenant` (24 in all), for any MCP client. Agent runs are offered 16 of the registry tools: `resolve_incident` and the five event tools are for humans and outside clients only, so an agent can neither confirm its own fix nor invent graph facts (the agent loop also refuses them if a planner names one). Run `make mcp` for stdio, or `python -m oncall_brain.mcp_server --http --port 8001`. For Claude Code: `claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`. Details in [docs/MCP.md](docs/MCP.md).
+- **MCP:** the same 22 registry tools, plus `respond_to_alert` and `reset_tenant` (24 in all), every argument described, two prompts, for any MCP client. Agent runs are offered 16 of the registry tools: `resolve_incident` and the five event tools are for humans and outside clients only, so an agent can neither confirm its own fix nor invent graph facts (the agent loop also refuses them if a planner names one). Run `make mcp` for stdio, or `python -m oncall_brain.mcp_server --http --port 8001` (bearer token when `API_TOKEN` is set). Details in [docs/MCP.md](docs/MCP.md).
 - **Company brain** questions, as tools: `ask` (a free-form question answered from docs, tickets and chat: full-text search, then the graph around the hits, then an answer assembled from those facts with every source cited; no LLM), `who_knows` (who knows a service, ranked by ownership, changes they authored, incidents they were paged for and, capped at 3, docs, tickets and chat they wrote about it) and `change_story` (trace a change to its ticket, chat, docs, author and the incidents it caused). For example, `ask` "Why was the payments gateway pool lowered?" leads with the Q4 cost review design note by Sana Brandt ("Decision: lower the pool max_connections from 200 to 20, which cuts the gateway bill by about 40%"), links `chg:pgw-pool-1`, and lists the peak load test postmortem that warned against it among its sources.
 - **Live events**, as tools: `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`. Push a change and an anomaly, raise an alert, then respond to it: the agents use the new facts at once.
 - **Exposure:** the API checks the `Host` header (`ALLOWED_HOSTS`) and refuses cross-origin POSTs. `API_TOKEN` optionally requires a bearer token on `/api/*` (not `/api/health`; the bundled UI does not send it). There is no per-user auth: anyone who can reach the API can address any tenant. Keep it on localhost unless you set these.
 
-![The Ask the brain tab answering "Why was the payments gateway pool lowered?": the Q4 cost review design note by Sana Brandt first, quoted, then the chat proposing the change and act 1's status update as sources. Taken after acts 1 to 3 had run, so that status update exists; on a fresh graph the other sources are the load-test postmortem and two tickets](docs/img/ask.png)
+![Ask the brain answering "Who owns kafka?": the Platform team and who is on call, then source chips (the Kafka retention decision record, the consumer-lag runbook, a ticket, a chat, and the superseded older decision flagged), with the answer's subgraph (Platform team, its people, kafka and its callers) on the right](docs/img/ask.png)
 
 ## Docker
 
