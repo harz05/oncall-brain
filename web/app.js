@@ -419,6 +419,8 @@ function renderAnswer(cur) {
     h('span', { class: 'avatar' }, (p.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2)),
     h('span', {}, h('b', {}, p.name), h('span', { class: 'muted'}, ` · ${p.team_name || p.team} · on-call${p.service ? ` for ${short(p.service)}` : ''}`)))))
     : live ? skel('70%') : h('p', { class: 'muted' }, 'Nobody paged.'),
+    o?.warned?.length ? h('p', { class: 'small' }, h('span', { class: 'k' }, 'Heads-up'),
+      o.warned.map((w, i) => [i ? ', ' : ' ', h('b', {}, w.name), ` (${w.team}) for ${short(w.service)}`])) : null,
     f.expert ? h('p', { class: 'small' }, `Knows ${short(f.expert.service || rc?.service || cur.home)} best: `, h('b', {}, f.expert.name), ` (${f.expert.handle})`) : null);
   const rb = f.runbook;
   const fix = col('Fix', learned || (rb ? [h('p', {}, h('b', {}, rb.title)),
@@ -524,6 +526,7 @@ const TOOL_TITLE = {
   check_hypothesis: (s) => `Test suspect: ${short(s.data?.change || '')}`,
   conclude: () => 'Which suspect explains the most?',
   who_knows: (s) => `Who knows ${short(idIn(s.summary, 'svc') || '')} best?`,
+  warn_owners: () => 'Who should get a heads-up?',
   post_update: () => 'Draft the status update',
 };
 const stepTitle = (s) => (TOOL_TITLE[s.tool] ? TOOL_TITLE[s.tool](s) : s.tool.replace(/_/g, ' '));

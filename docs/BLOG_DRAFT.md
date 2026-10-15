@@ -169,6 +169,29 @@ The same graph holds the company's paperwork: a small synthetic corpus of 34 doc
 
 Ask "Why was the payments gateway pool lowered?" and it leads with the Q4 cost review design note by Sana Brandt, quoting "Decision: lower the pool max_connections from 200 to 20, which cuts the gateway bill by about 40%", links the change `chg:pgw-pool-1`, and lists the peak load test postmortem that warned against going below 150 among its sources. Ask "who designed the checkout retries" and it names the v2 design and says it replaces an older v1 by someone else, because `SUPERSEDES` says which doc is current. Full-text search finds the words; the edges say whose change it was, who owns the service now and whether the doc still holds. There is no LLM in it: the answer is assembled from graph facts and quoted sentences, so it can't summarise, but every claim points at a node.
 
+## From demo rig to product: the brain is an MCP server
+
+Halfway through day two the thing worked and looked like a debugger: act buttons, a 25-service graph and eighteen
+tool-call cards. Nobody at 3 am wants that. So the second day went into two questions: *where does an on-call
+engineer already work*, and *what do they need to read first*.
+
+Where they work: Claude Code, Claude Desktop, Slack, and whatever pages them. So the brain became an MCP server
+first. The 24 graph tools the agents use are published as-is (names, descriptions, argument schemas, a read-only hint),
+with two prompts (`work_alert`, `company_question`) that script the two workflows, and a bearer token for the remote
+transport. To check that an outside model can drive it from the schema alone, a script gives Claude only the tool
+list and fourteen plain requests ("who owns kafka?", "we just deployed cart v3.2.0, record that", "inc:checkout-latency
+is confirmed, chg:pgw-pool-1 caused it"). Fourteen out of fourteen picked the right tool. A webhook
+(`POST /alerts?respond=true`) and a Slack post close the loop with nothing open: alert in, three agents on the graph,
+status update out.
+
+What they read first: the answer. The web inbox now leads with the likely cause, who made the change and how long
+before the alert, a confidence label with its reason ("Very likely · 4 of 5 suspects ruled out"), who is paged, the
+fix, and two buttons: Confirm cause, Wrong cause. "Show me why" is one click away: the incident subgraph, the three
+agents' steps with the model's own one-line reason for each, and the exact Cypher behind every call. Claude Opus 5.5
+chooses every step when a key is present (sixty decisions, zero fallbacks in the recorded runs); the deterministic
+planner runs the tests. The one screen that mattered most turned out to be the second incident: "Seen this before.
+3 steps instead of 6, 1 suspect instead of 4." That is memory you can see.
+
 ## How it was built
 
 With a lot of AI help, and I want to be upfront about it. I wrote the brief: the five-idea shortlist, the scoring rubric, the engineering rules (Cypher in named files, one tool registry for the agent loop, HTTP and MCP, a planner that works without keys) and the machine constraints. Claude Code (Opus 5.5) picked the idea through an LLM council of five advisor personas (On-call Brain 8.22, runner-up 6.36), then wrote most of the code, tests and docs. A second Claude session on another machine acted as a cloud reviewer, running snapshots independently and sending patches. Late in the build, three simulated judges scored the tracks and listed overclaims; the realistic eval, the cascade rule, the same-incident memory comparison and the company-brain corpus came out of that round. Full disclosure in [AI_USAGE.md](AI_USAGE.md).
@@ -194,10 +217,13 @@ redis-server --port 6379 --loadmodule ./falkordb-rhel8-x64.so
 
 ```bash
 make setup db seed demo   # deps, FalkorDB on :6379, synthetic company, all three acts in the terminal
-make dev                  # API + web UI on http://localhost:8000
-make mcp                  # the same tools for any MCP client (stdio)
+make dev                  # API + web inbox on http://localhost:8000
+make headless             # alert in through the webhook, agents, status update out, nothing open
+claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server
 ```
 
-No LLM key is needed, and `make demo` exits non-zero if the story breaks.
+Then, in Claude Code: *"checkout is slow and alert:checkout-latency just fired on tenant acme. Find out why."*
+No LLM key is needed for the demo (rules choose each step); with an Anthropic key in `.env`, Claude chooses them.
+`make demo` exits non-zero if the story breaks.
 
 > TODO(Harsh): a closing line in your own voice, the repo URL, the demo video, and thanks to WeMakeDevs and FalkorDB.
