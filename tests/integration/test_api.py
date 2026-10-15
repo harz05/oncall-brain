@@ -1,5 +1,6 @@
 """The HTTP contract the web UI relies on, end to end against a real FalkorDB (skipped if none is reachable)."""
 
+import json
 import os
 
 import pytest
@@ -9,7 +10,7 @@ from redis.exceptions import ResponseError
 from oncall_brain.api import app as app_module
 from oncall_brain.api.app import app
 from oncall_brain.config import get_settings
-from oncall_brain.datagen import ACTS
+from oncall_brain.datagen import ACTS, T1
 
 pytestmark = pytest.mark.integration
 
@@ -143,3 +144,41 @@ def test_cross_origin_writes_and_unknown_hosts_are_refused(api):
     assert c.get("/api/tools", headers={"Origin": "https://evil.example"}).status_code == 200  # reads stay open
     assert c.get("/api/tools", headers={"Host": "evil.example"}).status_code == 400  # DNS rebinding
 
+
+
+def test_inbox_stream_webhook_and_stored_incident(api):
+    """The product surfaces: inbox rows with state, the step stream, a stored incident, the alert webhook."""
+    c, base = api
+    c.post(f"{base}/reset")
+    rows = {a["id"]: a for a in c.get(f"{base}/alerts").json()}
+    assert rows[ACTS[1]]["incident"] is None and rows[ACTS[1]]["has_cause"] is False
+
+    with c.stream("POST", f"{base}/alerts/{ACTS[1]}/respond/stream") as r:
+        lines = [json.loads(line) for line in r.iter_lines() if line]
+    steps = [x["step"] for x in lines if "step" in x]
+    result = [x["result"] for x in lines if "result" in x][0]
+    assert lines[-1] is result or "result" in lines[-1]
+    assert len(steps) == len(result["steps"]) and steps[0]["tool"] == "open_incident" and steps[0]["by"] == "rules"
+    assert result["outcome"]["confidence"]["level"] == "high" and result["outcome"]["sources"]
+    assert result["slack"] == "off" and result["llm_tokens"] == 0  # the rule planner spends nothing
+
+    rows = {a["id"]: a for a in c.get(f"{base}/alerts").json()}
+    row = rows[ACTS[1]]
+    assert row["incident"] == result["incident_id"] and row["has_cause"] and row["has_update"]
+    inc = c.get(f"{base}/incidents/{result['incident_id']}").json()
+    assert inc["status"] == "open" and inc["outcome"]["root_cause"]["change"] == "chg:pgw-pool-1"
+    assert inc["outcome"]["root_cause"]["author"] == "Sana Brandt" and inc["outcome"]["confidence"]["level"] == "high"
+    assert len(inc["steps"]) == len(steps) and {s["by"] for s in inc["steps"]} == {"rules"}
+
+    # The webhook: a quiet week earlier, so nothing on the story's paths is a suspect.
+    quiet = T1 - 7 * 24 * 3600
+    cart = {"service": "svc:cart", "symptom": "errors", "name": "cart 5xx above 1%", "at": quiet}
+    r = c.post(f"{base}/alerts", json=cart)
+    assert r.status_code == 200 and r.json()["alert"].startswith("alert:cart-errors-")
+    assert {a["id"]: a for a in c.get(f"{base}/alerts").json()}[r.json()["alert"]]["incident"] is None
+    run = c.post(f"{base}/alerts", params={"respond": "true"},
+                 json={"service": "svc:refunds", "symptom": "latency", "name": "refunds slow", "at": quiet + 60}).json()
+    assert run["incident_id"].startswith("inc:refunds-latency-") and run["outcome"]["update_text"]
+    stored = c.get(f"{base}/incidents/{run['incident_id']}").json()
+    assert stored["outcome"]["confidence"]["level"] in ("none", "high", "medium")
+    assert c.post(f"{base}/alerts", json={"service": "svc:nope", "symptom": "errors", "name": "x"}).status_code == 404

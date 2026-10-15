@@ -30,7 +30,7 @@
      "alert_name": "checkout p99 latency above 2s"
     }
    ],
-   "ms": 0.83,
+   "ms": 0.98,
    "readonly": true
   },
   {
@@ -48,7 +48,7 @@
      "service_name": "payments-gw"
     }
    ],
-   "ms": 0.81,
+   "ms": 1.13,
    "readonly": true
   },
   {
@@ -83,7 +83,7 @@
      "successes": 1
     }
    ],
-   "ms": 3.19,
+   "ms": 2.74,
    "readonly": false
   },
   {
@@ -103,12 +103,12 @@
      "alert_name": "checkout p99 latency above 2s"
     }
    ],
-   "ms": 0.9,
+   "ms": 0.7,
    "readonly": true
   },
   {
    "name": "update_facts",
-   "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
+   "cypher": "// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[w:WARNED]->(wp:Person)-[:MEMBER_OF]->(wt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {handle: wp.handle, team: wt.name, service: w.for_service, rank: w.rank}) AS warned\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged, warned,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, warned, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\n// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook\n// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nOPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)\nWITH a, impacts, paged, warned, experts, h, c, s, author, src, coalesce(rb, fx) AS rb\nRETURN a.name AS alert, impacts, paged, warned, experts, c.id AS change, c.summary AS change_summary,\n       c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
    "params": {
     "incident_id": "inc:checkout-latency"
    },
@@ -157,6 +157,20 @@
        "team": "Checkout"
       }
      ],
+     "warned": [
+      {
+       "handle": "@hana.costa",
+       "rank": 2,
+       "service": "svc:api-gateway",
+       "team": "Platform"
+      },
+      {
+       "handle": "@kiri.novak",
+       "rank": 4,
+       "service": "svc:mobile-bff",
+       "team": "Storefront"
+      }
+     ],
      "experts": [
       {
        "handle": "@sana.brandt",
@@ -194,7 +208,7 @@
      ]
     }
    ],
-   "ms": 2.73,
+   "ms": 2.95,
    "readonly": true
   },
   {
@@ -241,7 +255,7 @@
      "verdict": "refuted"
     }
    ],
-   "ms": 1.09,
+   "ms": 0.89,
    "readonly": true
   },
   {
@@ -251,7 +265,7 @@
     "incident_id": "inc:checkout-latency"
    },
    "rows": [],
-   "ms": 0.6,
+   "ms": 0.68,
    "readonly": true
   },
   {
@@ -281,7 +295,7 @@
      "gaps": []
     }
    ],
-   "ms": 1.29,
+   "ms": 1.15,
    "readonly": true
   },
   {
@@ -309,7 +323,7 @@
      "weighty": 1
     }
    ],
-   "ms": 9.06,
+   "ms": 10.32,
    "readonly": true
   },
   {
@@ -318,7 +332,7 @@
    "params": {
     "incident_id": "inc:checkout-latency",
     "message_id": "msg:update:inc:checkout-latency",
-    "text": "[checkout p99 latency above 2s] status: resolved, cause confirmed\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nCause (confirmed): config change on payments-gw by Sana Brandt: \"Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)\"\nContext: Q4 cost review: payments gateway idle connections (design); Postmortem: payments gateway pool exhausted in the peak load test (postmortem)\nRuled out: legacy-193 (dependency retired), search-420 (no dependency path), pricing-2140 (rolled back), cart-310 (no anomaly after it)\nPaged: @asha.nakamura (Payments), @ravi.moreau (Checkout)\nAlso at risk: refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: doc:cost-review-pgw, ticket:CR-881, msg:pay-deploys-1",
+    "text": "[checkout p99 latency above 2s] status: resolved, cause confirmed\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nCause (confirmed): config change on payments-gw by Sana Brandt: \"Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)\"\nContext: Q4 cost review: payments gateway idle connections (design); Postmortem: payments gateway pool exhausted in the peak load test (postmortem)\nRuled out: legacy-193 (dependency retired), search-420 (no dependency path), pricing-2140 (rolled back), cart-310 (no anomaly after it)\nPaged: @asha.nakamura (Payments), @ravi.moreau (Checkout)\nHeads-up (most relied-on first): @hana.costa (Platform) for api-gateway, @kiri.novak (Storefront) for mobile-bff\nAlso at risk: refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: doc:cost-review-pgw, ticket:CR-881, msg:pay-deploys-1",
     "at": 1792036800,
     "cites": [
      "chg:pgw-pool-1",
@@ -335,7 +349,7 @@
      "cited": 7
     }
    ],
-   "ms": 1.14,
+   "ms": 1.43,
    "readonly": false
   }
  ],
@@ -358,6 +372,6 @@
    ]
   ]
  },
- "update_text": "[checkout p99 latency above 2s] status: resolved, cause confirmed\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nCause (confirmed): config change on payments-gw by Sana Brandt: \"Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)\"\nContext: Q4 cost review: payments gateway idle connections (design); Postmortem: payments gateway pool exhausted in the peak load test (postmortem)\nRuled out: legacy-193 (dependency retired), search-420 (no dependency path), pricing-2140 (rolled back), cart-310 (no anomaly after it)\nPaged: @asha.nakamura (Payments), @ravi.moreau (Checkout)\nAlso at risk: refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: doc:cost-review-pgw, ticket:CR-881, msg:pay-deploys-1",
+ "update_text": "[checkout p99 latency above 2s] status: resolved, cause confirmed\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nCause (confirmed): config change on payments-gw by Sana Brandt: \"Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)\"\nContext: Q4 cost review: payments gateway idle connections (design); Postmortem: payments gateway pool exhausted in the peak load test (postmortem)\nRuled out: legacy-193 (dependency retired), search-420 (no dependency path), pricing-2140 (rolled back), cart-310 (no anomaly after it)\nPaged: @asha.nakamura (Payments), @ravi.moreau (Checkout)\nHeads-up (most relied-on first): @hana.costa (Platform) for api-gateway, @kiri.novak (Storefront) for mobile-bff\nAlso at risk: refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: doc:cost-review-pgw, ticket:CR-881, msg:pay-deploys-1",
  "slack": "off"
 }
