@@ -27,7 +27,8 @@ def show(title: str, run: dict, cypher: bool) -> None:
               f"{sum(x.ms for x in q):.1f} ms]{R}")
         if cypher:
             for x in q:
-                print(f"   {DIM}{x.name} ({'RO' if x.readonly else 'W'}) params={_short(x.params)}{R}")
+                print(f"   {DIM}-- {x.name} ({'RO' if x.readonly else 'W'}) params={_short(x.params)}{R}")
+                print("\n".join(f"   {DIM}   {ln}{R}" for ln in x.cypher.splitlines() if not ln.startswith("//")))
     o = run["outcome"]
     rc = o["root_cause"]
     print(f"{G}root cause:{R} {rc['change']} on {rc['service']}: {rc['reason']}" if rc else "no root cause found")
@@ -37,8 +38,8 @@ def show(title: str, run: dict, cypher: bool) -> None:
     if bp:
         print(f"flat change-log baseline would blame: {bp['change']} on {bp['service']} "
               f"-> {'correct' if o['baseline_correct'] else 'WRONG'}")
-    print(f"investigator tool calls: {o['investigator_calls']}, "
-          f"hypotheses checked: {o['hypotheses_checked']}, solved by memory: {o['memory']['solved_by_memory']}")
+    print(f"investigator tool calls: {o['investigator_calls']}, hypotheses checked: {o['hypotheses_checked']} "
+          f"(culprit on check {o['checks_to_culprit']}), solved by memory: {o['memory']['solved_by_memory']}")
     if o["update_text"]:
         print(f"{DIM}--- status update ---{R}\n{o['update_text']}")
 
@@ -71,16 +72,16 @@ def main() -> int:
     cold = respond(repo, ACTS[2], llm)
     o2, oc = act2["outcome"], cold["outcome"]
     print(f"\n{B}=== memory ablation: act 2 with vs without act 1 in the graph ==={R}")
-    print(f"  with memory:    {o2['investigator_calls']} investigator calls, "
-          f"{o2['hypotheses_checked']} hypotheses checked")
-    print(f"  without memory: {oc['investigator_calls']} investigator calls, "
-          f"{oc['hypotheses_checked']} hypotheses checked")
+    for label, o in (("with memory:   ", o2), ("without memory:", oc)):
+        print(f"  {label} {o['investigator_calls']} investigator calls, {o['hypotheses_checked']} hypotheses "
+              f"checked, culprit on check {o['checks_to_culprit']}")
     reset(store, a.tenant)  # leave the tenant pristine for the next run / the UI
 
     ok = (cause["change"] == "chg:pgw-pool-1" and not act1["outcome"]["baseline_correct"]
           and o2["memory"]["solved_by_memory"] and o2["root_cause"]["change"] == "chg:pgw-pool-2"
           and oc["root_cause"] and oc["investigator_calls"] > o2["investigator_calls"]
-          and oc["hypotheses_checked"] > o2["hypotheses_checked"])
+          and oc["hypotheses_checked"] > o2["hypotheses_checked"]
+          and oc["checks_to_culprit"] > o2["checks_to_culprit"])
     print(f"\n{G + 'DEMO OK' if ok else 'DEMO FAILED'}{R}")
     return 0 if ok else 1
 

@@ -75,7 +75,7 @@ MATCH (s:Service {id: r.service})
 MERGE (rb)-[:FOR_SERVICE]->(s)
 
 // name: ingest_incidents
-// purpose: Upsert past, resolved incidents (episodic memory) with their cause and the runbook that fixed them.
+// purpose: Upsert past, resolved incidents (episodic memory) with their cause, the runbook that fixed them and who was paged for the culprit service.
 UNWIND $rows AS r
 MERGE (i:Incident {id: r.id})
 SET i.title = r.title, i.symptom = r.symptom, i.status = r.status, i.opened_at = r.opened_at,
@@ -85,6 +85,11 @@ MATCH (s:Service {id: r.service}), (c:Change {id: r.cause}), (rb:Runbook {id: r.
 MERGE (i)-[:IMPACTS {hops: 0}]->(s)
 MERGE (i)-[:CAUSED_BY]->(c)
 MERGE (i)-[:FIXED_WITH]->(rb)
+WITH i, r
+OPTIONAL MATCH (p:Person {id: r.paged})
+FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+  MERGE (i)-[pg:PAGED]->(x)
+  ON CREATE SET pg.at = r.opened_at, pg.for_service = r.paged_for)
 
 // name: ingest_tickets
 // purpose: Upsert change-request tickets (a source a status update can cite).
@@ -105,3 +110,13 @@ WITH m, r
 MATCH (c:Change {id: r.change}), (p:Person {id: r.author})
 MERGE (m)-[:MENTIONS]->(c)
 MERGE (m)-[:AUTHORED_BY]->(p)
+
+// name: ingest_meta
+// purpose: Stamp the graph with a fingerprint of the generated data, so a stale pristine copy (built by an older generator) is detected and rebuilt.
+MERGE (m:Meta {id: 'meta'})
+SET m.version = $version, m.seed = $seed
+
+// name: data_version
+// purpose: Read the data fingerprint a graph was seeded with.
+MATCH (m:Meta {id: 'meta'})
+RETURN m.version AS version

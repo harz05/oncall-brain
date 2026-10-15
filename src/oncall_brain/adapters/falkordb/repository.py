@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from falkordb import FalkorDB
+from redis.exceptions import ResponseError
 
 from oncall_brain.adapters.falkordb import queries
 from oncall_brain.domain.models import QueryRun
@@ -19,7 +20,7 @@ TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window fil
 
 
 def _check_tenant(tenant: str) -> str:
-    if not _TENANT.match(tenant):
+    if not _TENANT.fullmatch(tenant):
         raise ValueError("tenant must match [a-z0-9_]{1,40}")
     return tenant
 
@@ -27,7 +28,14 @@ def _check_tenant(tenant: str) -> str:
 class FalkorRepository:
     def __init__(self, db: FalkorDB, tenant: str):
         self.tenant = _check_tenant(tenant)
+        self._db = db
         self._graph = db.select_graph(PREFIX + tenant)
+
+    def lock(self):
+        """One writer per tenant across processes (API, MCP, scripts): a Redis lock next to the graph.
+        FalkorDB commits each write query atomically, but two agents MERGE-ing the same edge at the same
+        moment can both miss it and both create it, so whole agent runs on a tenant are serialised."""
+        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=120, blocking_timeout=120)
 
     def _run(self, name: str, params: dict[str, Any], readonly: bool) -> QueryRun:
         q = queries.get(name)
@@ -72,19 +80,38 @@ class FalkorGraphStore:
     def tenants(self) -> list[str]:
         return sorted(g[len(PREFIX):] for g in self._names() if g.startswith(PREFIX))
 
+    def _copy(self, src: str, dst: str) -> None:
+        """GRAPH.COPY forks like BGSAVE, and Redis allows one fork at a time, so a copy that overlaps a
+        background save fails with 'could not fork'. That is transient: retry with backoff."""
+        for attempt in range(7):
+            try:
+                self.db.select_graph(src).copy(dst)
+                return
+            except ResponseError as e:
+                if "fork" not in str(e) or attempt == 6:
+                    raise
+                time.sleep(0.05 * 2**attempt)
+
     def snapshot(self, tenant: str) -> None:
         """Keep a pristine copy (GRAPH.COPY) so the demo can be replayed from the same state."""
         if PRISTINE + tenant in self._names():
             self.db.select_graph(PRISTINE + tenant).delete()
-        self.db.select_graph(PREFIX + _check_tenant(tenant)).copy(PRISTINE + tenant)
+        self._copy(PREFIX + _check_tenant(tenant), PRISTINE + tenant)
 
     def restore(self, tenant: str) -> bool:
+        """Replace the tenant graph with its pristine copy. False if there is no usable copy."""
         if PRISTINE + _check_tenant(tenant) not in self._names():
             return False
         if self.exists(tenant):
             self.db.select_graph(PREFIX + tenant).delete()
-        self.db.select_graph(PRISTINE + tenant).copy(PREFIX + tenant)
+        try:
+            self._copy(PRISTINE + tenant, PREFIX + tenant)
+        except ResponseError:
+            return False  # caller re-seeds from scratch
         return True
+
+    def lock(self, tenant: str):
+        return self.tenant(tenant).lock()
 
     def drop(self, tenant: str) -> None:
         for name in (PREFIX + _check_tenant(tenant), PRISTINE + tenant):

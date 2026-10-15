@@ -1,5 +1,6 @@
 """Ports: the interfaces the core depends on. Adapters implement them; tests use in-memory doubles."""
 
+from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from oncall_brain.domain.models import Decision, QueryRun
@@ -22,6 +23,10 @@ class GraphRepository(Protocol):
         """Create the indexes the queries rely on (idempotent)."""
         ...
 
+    def lock(self) -> AbstractContextManager:
+        """Exclusive lock on this tenant for a whole agent run (see the adapter for why)."""
+        ...
+
 
 class GraphStore(Protocol):
     """Many isolated graphs in one FalkorDB: one per tenant, plus a pristine copy for demo resets."""
@@ -32,6 +37,7 @@ class GraphStore(Protocol):
     def restore(self, tenant: str) -> bool: ...
     def drop(self, tenant: str) -> None: ...
     def tenants(self) -> list[str]: ...
+    def lock(self, tenant: str) -> AbstractContextManager: ...
 
 
 class LLMProvider(Protocol):

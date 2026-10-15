@@ -133,24 +133,33 @@ def recall_similar(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     return ToolOutput(summary=summary, data=q.rows, queries=qs, highlight=hl)
 
 
-def _add(ctx: ToolContext, incident_id: str, rows: list[dict], source: str, at: int):
+def _add(ctx: ToolContext, incident_id: str, rows: list[dict], at: int):
+    """Put suspects on the board; each row carries its source (and, for memory, the runbook behind it)."""
     hyp = [{"id": f"hyp:{incident_id.removeprefix('inc:')}:{r['change'].removeprefix('chg:')}",
-            "change": r["change"], "source": source, "hops": r.get("hops")} for r in rows]
+            "change": r["change"], "source": r["source"], "hops": r.get("hops"), "runbook": r.get("runbook")}
+           for r in rows]
     return ctx.repo.write("add_hypotheses", incident_id=incident_id, rows=hyp, at=at)
+
+
+def _window(at: int) -> dict[str, int]:
+    return {"since": at - WINDOW, "until": at}
 
 
 @tool(writes=True)
 def hypothesize_from_memory(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Procedural memory: suspect recent changes on the services that caused the recalled incidents."""
+    """Procedural memory: the runbooks that fixed the recalled incidents name a service and a change kind;
+    suspect in-window changes of that kind there, most trusted runbook first."""
     head, qs = _head(ctx, a.incident_id)
     q = ctx.repo.read("memory_suspects", incident_id=a.incident_id, window=WINDOW, min_score=RECALL_MIN_SCORE)
     qs.append(q)
-    if q.rows:
-        qs.append(_add(ctx, a.incident_id, q.rows, "memory", head["at"]))
-    hl = Highlight(nodes=[r["change"] for r in q.rows] + [r["service"] for r in q.rows],
-                   edges=[(r["change"], r["service"], "CHANGED") for r in q.rows])
-    summary = (f"Memory points at {', '.join(r['change'] for r in q.rows)}" if q.rows
-               else "Memory's culprit services had no change in this window")
+    rows = [dict(r, source="memory") for r in q.rows]
+    if rows:
+        qs.append(_add(ctx, a.incident_id, rows, head["at"]))
+    hl = Highlight(nodes=[r["change"] for r in rows] + [r["service"] for r in rows],
+                   edges=[(r["change"], r["service"], "CHANGED") for r in rows])
+    summary = ("Runbook " + "; ".join(f"'{r['runbook_title']}' (worked {r['successes']}/{r['uses']}) points at "
+                                      f"{r['change']}" for r in rows) if rows
+               else "The recalled runbooks' services had no change of their kind in this window")
     return ToolOutput(summary=summary, data=q.rows, queries=qs, highlight=hl)
 
 
@@ -160,15 +169,14 @@ def propose_hypotheses(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     plus the newest changes anywhere (the flat-log baseline) so the graph can refute them."""
     head, qs = _head(ctx, a.incident_id)
     on_path = ctx.repo.read("path_suspects", incident_id=a.incident_id, window=WINDOW)
-    flat = ctx.repo.read("recent_changes", incident_id=a.incident_id, window=WINDOW)
+    flat = ctx.repo.read("recent_changes", **_window(head["at"]))
     seen = {r["change"] for r in on_path.rows}
     baseline = [r for r in flat.rows if r["change"] not in seen]
     rows = [dict(r, source="dependency-path") for r in on_path.rows] + [dict(r, source="recent-anywhere", hops=None)
                                                                        for r in baseline]
     qs += [on_path, flat]
-    added = [_add(ctx, a.incident_id, [r for r in rows if r["source"] == s], s, head["at"])
-             for s in ("dependency-path", "recent-anywhere") if any(r["source"] == s for r in rows)]
-    qs += added
+    if rows:
+        qs.append(_add(ctx, a.incident_id, rows, head["at"]))
     hl = Highlight(nodes=[r["change"] for r in rows] + [r["service"] for r in rows],
                    edges=[(r["change"], r["service"], "CHANGED") for r in rows])
     return ToolOutput(summary=f"{len(on_path.rows)} changes on the dependency path, {len(baseline)} more from the "
@@ -195,7 +203,7 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         qs.append(anyq)
         any_path = anyq.rows[0]["path"] if anyq.rows else []
     anomalous: set[str] = set()
-    if paths or any_path:
+    if paths:  # anomalies only matter when a live path exists; otherwise the verdict is already a refutation
         on_paths = sorted({s for p in paths for s in p}) or [f["service"]]
         an = ctx.repo.read("anomalies_between", services=on_paths, since=f["change_at"], until=f["at"])
         qs.append(an)
@@ -229,10 +237,15 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     qs += [facts_q, ref_q]
     facts = facts_q.rows[0]
     text = update.status_update(facts, ref_q.rows, head["service"])
-    cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in facts["runbooks"])] if c]
+    experts = [x for x in facts["experts"] if x.get("id")]
+    runbooks = [r for r in facts["runbooks"] if r.get("id")]
+    cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in runbooks),
+                         *(x["id"] for x in experts)] if c]
     qs.append(ctx.repo.write("post_update", incident_id=a.incident_id, message_id=f"msg:update:{a.incident_id}",
                              text=text, at=head["at"], cites=cites))
-    return ToolOutput(summary="Posted status update to #incidents", data={"text": text, "cites": cites},
+    return ToolOutput(summary="Posted status update to #incidents",
+                      data={"text": text, "cites": cites, "runbook": runbooks[0] if runbooks else None,
+                            "expert": experts[0] if experts else None},
                       queries=qs, highlight=Highlight(nodes=cites))
 
 
@@ -264,8 +277,8 @@ def resolve_incident(ctx: ToolContext, a: ResolveArgs) -> ToolOutput:
 def dependency_path(ctx: ToolContext, a: PathArgs) -> ToolOutput:
     """Shortest dependency path between two services using only edges valid at time `at`."""
     at = a.at or int(time.time())
-    q = ctx.repo.read("live_path", origin=a.from_service, target=a.to_service, at=at)
-    path = q.rows[0]["path"] if q.rows else []
+    q = ctx.repo.read("live_paths", origin=a.from_service, target=a.to_service, at=at)
+    path = q.rows[0]["path"] if q.rows else []  # shortest first
     return ToolOutput(summary=" -> ".join(path) if path else f"no live path {a.from_service} -> {a.to_service}",
                       data=path, queries=[q], highlight=Highlight(nodes=path, edges=_path_edges(path)))
 
@@ -284,20 +297,26 @@ class ChangeArgs(BaseModel):
     change_id: str = Field(description="Change id, e.g. chg:pgw-pool-1")
 
 
-class ServiceIdArgs(BaseModel):
+class ExpertArgs(BaseModel):
     service: str = Field(description="Service id, e.g. svc:payments-gw")
+    incident_id: str | None = Field(None, description="If set: record the top expert as CONSULTED on the incident")
 
 
 @tool()
-def who_knows(ctx: ToolContext, a: ServiceIdArgs) -> ToolOutput:
+def who_knows(ctx: ToolContext, a: ExpertArgs) -> ToolOutput:
     """Company brain: who knows this service, ranked by evidence in the graph (owning team, changes they
-    authored, incidents they were paged for), with the evidence counts as the explanation."""
+    authored, incidents they were paged for), with the evidence counts as the explanation. With an incident,
+    the top person is recorded as CONSULTED so the status update can say who to ask."""
     q = ctx.repo.read("who_knows", service=a.service)
+    qs = [q]
     hl = Highlight(nodes=[a.service] + [r["person"] for r in q.rows])
     top = q.rows[0] if q.rows else None
+    if top and a.incident_id:
+        qs.append(ctx.repo.write("record_consult", incident_id=a.incident_id, person=top["person"],
+                                 service=a.service, score=top["score"]))
     summary = (f"{top['name']} ({top['team']}): {top['changes']} changes, {top['incidents']} incidents"
                + (", on the owning team" if top["on_owning_team"] else "")) if top else "nobody on record"
-    return ToolOutput(summary=summary, data=q.rows, queries=[q], highlight=hl)
+    return ToolOutput(summary=summary, data=q.rows, queries=qs, highlight=hl)
 
 
 @tool()

@@ -1,21 +1,28 @@
 """HTTP API: one of the three surfaces of the tool registry (with the agent loop and MCP).
 
 Handlers stay thin: they pick the tenant's graph and call services / the registry. Errors map to
-{"detail": str}: unknown things (ValueError from the services) -> 404, bad input -> 422, FalkorDB down -> 503.
+{"detail": str}: unknown things (ValueError from the services) -> 404, bad input -> 422, FalkorDB down or
+erroring -> 503, misconfigured planner -> 503, tenant cap reached -> 429.
+Guards in front of every route: Host allow-list (DNS rebinding), same-origin writes (CSRF), optional API_TOKEN.
 Run: uvicorn oncall_brain.api.app:app --port 8000
 """
 
 import os
+import secrets
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from pathlib import Path as FsPath
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.agents import registry
@@ -47,7 +54,10 @@ def store() -> FalkorGraphStore:
 def llm() -> LLMProvider:
     from oncall_brain.wiring import make_llm
 
-    return make_llm()
+    try:
+        return make_llm()
+    except ValueError as e:  # a bad LLM_PROVIDER is a server misconfiguration, not an unknown thing (404)
+        raise HTTPException(503, f"planner misconfigured: {e}") from e
 
 
 def _detail(errors: list[dict[str, Any]]) -> str:
@@ -65,9 +75,39 @@ async def _unknown(_: Request, e: ValueError) -> JSONResponse:
     return JSONResponse({"detail": str(e)}, status_code=404)
 
 
-@app.exception_handler(RedisConnectionError)
-async def _db_down(_: Request, e: RedisConnectionError) -> JSONResponse:
-    return JSONResponse({"detail": f"FalkorDB unavailable: {e}"}, status_code=503)
+@app.exception_handler(RedisError)
+async def _db_error(_: Request, e: RedisError) -> JSONResponse:
+    if isinstance(e, RedisConnectionError):  # also covers auth failures
+        return JSONResponse({"detail": f"FalkorDB unavailable: {e}"}, status_code=503)
+    # Timeouts and ResponseError (e.g. "GRAPH.COPY failed, could not fork"). First line only, capped: FalkorDB
+    # error texts can quote the whole query.
+    msg = (str(e).splitlines() or [""])[0][:160]
+    return JSONResponse({"detail": f"FalkorDB error ({type(e).__name__}): {msg}"}, status_code=503)
+
+
+@app.middleware("http")
+async def _guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    path = request.url.path
+    # CSRF: any web page can fire a body-less POST at localhost, but the browser then sends its own Origin. host:port
+    # only (no scheme), so a TLS-terminating proxy in front still matches.
+    origin = request.headers.get("origin")
+    cross = origin is not None and urlsplit(origin).netloc.lower() != request.headers.get("host", "").lower()
+    if cross and request.method not in ("GET", "HEAD", "OPTIONS"):
+        return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+    token = get_settings().api_token
+    if token and path.startswith("/api/") and path != "/api/health":
+        sent = request.headers.get("authorization", "").encode("latin-1")  # Starlette decodes headers as latin-1
+        if not secrets.compare_digest(sent, f"Bearer {token}".encode()):
+            return JSONResponse({"detail": "missing or wrong API token"}, status_code=401,
+                                headers={"WWW-Authenticate": "Bearer"})
+    # FalkorDB refuses string parameters containing NUL; that is bad input (422), not a server error.
+    if "\x00" in path or b"\\u0000" in await request.body():
+        return JSONResponse({"detail": "NUL characters are not allowed"}, status_code=422)
+    return await call_next(request)
+
+
+# Added last so it runs first. DNS rebinding: a hostile name resolving to 127.0.0.1 still sends its own Host header.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=get_settings().hosts())
 
 
 def tenant_repo(tenant: Tenant) -> GraphRepository:
@@ -93,7 +133,11 @@ def health() -> dict[str, Any]:
         up = bool(store().db.connection.ping())
     except Exception:  # any failure here just means "not reachable"; health itself must answer
         up = False
-    return {"ok": True, "falkordb": up, "planner": llm().name, "default_tenant": get_settings().default_tenant}
+    try:
+        planner, ok = llm().name, True
+    except HTTPException as e:
+        planner, ok = f"<error: {e.detail}>", False
+    return {"ok": ok, "falkordb": up, "planner": planner, "default_tenant": get_settings().default_tenant}
 
 
 @app.get("/api/tenants")
@@ -103,6 +147,11 @@ def tenants() -> dict[str, Any]:
 
 @app.post("/api/tenants/{tenant}/reset")
 def reset_tenant(tenant: Tenant) -> dict[str, str]:
+    # Every new tenant seeds two graphs (~5 MB); cap them. Resetting an existing tenant is always allowed.
+    # ponytail: check-then-seed race, so concurrent resets can overshoot by a few; fine for a soft cap.
+    known, cap = store().tenants(), get_settings().max_tenants
+    if tenant not in known and len(known) >= cap:
+        raise HTTPException(429, f"tenant limit reached ({cap}); reset an existing tenant or raise MAX_TENANTS")
     return {"tenant": tenant, "status": reset(store(), tenant)}
 
 
@@ -113,10 +162,7 @@ def alerts(repo: Repo) -> list[dict[str, Any]]:
 
 @app.post("/api/tenants/{tenant}/alerts/{alert_id}/respond")
 def respond(repo: Repo, alert_id: str) -> dict[str, Any]:
-    run = respond_svc.respond(repo, alert_id, llm())
-    run["steps"] = [s.model_dump(mode="json") for s in run["steps"]]
-    run["outcome"]["highlight"] = run["outcome"]["highlight"].model_dump(mode="json")
-    return run
+    return respond_svc.respond(repo, alert_id, llm())  # FastAPI serialises the TraceStep models inside
 
 
 class ResolveBody(BaseModel):

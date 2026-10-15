@@ -1,7 +1,7 @@
 """The eval's generator plants what it claims to plant (checked independently of its own BFS helpers)."""
 
 from oncall_brain.domain.planner import WINDOW
-from oncall_brain.scenarios import keyword_pick, scenario
+from oncall_brain.scenarios import anomaly_pick, keyword_pick, scenario
 
 SEEDS = range(1, 31)
 
@@ -57,3 +57,26 @@ def test_keyword_baseline_prefers_word_overlap_then_recency():
                {"id": "outside", "at": 1, "summary": "checkout latency p99 above"}]
     assert keyword_pick(changes, alert)["id"] == "old-match"
     assert keyword_pick(changes[1:], alert)["id"] == "new"
+
+
+def test_anomaly_baseline_blames_the_service_that_went_red_first_from_plain_rows():
+    # Plain dicts, no store: the baseline never touches the graph.
+    alert = {"at": 10_000}
+    ch = [{"id": "cause", "service": "s1", "at": 9_000, "rolled_back_at": None},
+          {"id": "newest", "service": "s2", "at": 9_900, "rolled_back_at": None},
+          {"id": "rolled", "service": "s3", "at": 8_000, "rolled_back_at": 8_500},
+          {"id": "quiet", "service": "s4", "at": 8_000, "rolled_back_at": None}]
+    an = [{"service": "s1", "at": 9_100}, {"service": "s2", "at": 9_950}, {"service": "s3", "at": 8_100},
+          {"service": "s4", "at": 7_000}]
+    assert anomaly_pick(ch, an, alert)["id"] == "cause"
+    assert anomaly_pick(ch[1:], an, alert)["id"] == "newest"
+    assert anomaly_pick(ch[2:], an, alert) is None
+
+
+def test_anomaly_baseline_is_deterministic_and_only_the_retired_edge_decoy_fools_it():
+    for seed in SEEDS:
+        sc, again = scenario(seed), scenario(seed)["data"]
+        d = sc["data"]
+        pick = anomaly_pick(d["changes"], d["anomalies"], d["alerts"][0])
+        assert pick == anomaly_pick(again["changes"], again["anomalies"], again["alerts"][0])
+        assert pick["id"] in {sc["truth_change"], sc["decoys"].get("d")}, seed

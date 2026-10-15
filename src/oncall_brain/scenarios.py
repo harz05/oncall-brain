@@ -8,6 +8,7 @@ Decoys each fool a method without the graph, and each is refuted by a different 
   c  a change on a dependency off the propagation path, with no anomaly
   d  (about half the seeds) change + anomaly on a service the alert USED to depend on (retired edge)
   e  (about half the seeds) a resolved past incident, same symptom, cause on the path, nothing changed there now
+Only d can fool the anomaly-aware baseline (anomaly_pick): a goes red after the truth, b is rolled back, c is quiet.
 Background changes and anomalies land outside the window. The agent only ever sees the graph.
 """
 
@@ -56,6 +57,21 @@ def keyword_pick(changes: list[dict], alert: dict) -> dict | None:
     ties -> newest. Stands in for search over the change log without the dependency graph."""
     window = [c for c in changes if alert["at"] - WINDOW <= c["at"] <= alert["at"]]
     return max(window, key=lambda c: (len(_words(c["summary"]) & _words(alert["name"])), c["at"]), default=None)
+
+
+def anomaly_pick(changes: list[dict], anomalies: list[dict], alert: dict) -> dict | None:
+    """Anomaly-aware change log, no graph: of the in-window changes not rolled back whose own service shows an
+    anomaly between the change and the alert, the one whose service went red first (a cause starts the
+    cascade, so it goes red before what it breaks), ties -> newest. The strongest simple non-graph rule we found:
+    "newest such change" instead is always fooled by decoy a, which has its own anomaly."""
+    def first_red(c: dict) -> int | None:
+        return min((x["at"] for x in anomalies if x["service"] == c["service"] and c["at"] <= x["at"] <= alert["at"]),
+                   default=None)
+
+    live = [c for c in changes if alert["at"] - WINDOW <= c["at"] <= alert["at"]
+            and not (c["rolled_back_at"] and c["rolled_back_at"] <= alert["at"])]
+    red = [(t, c) for c in live if (t := first_red(c)) is not None]
+    return min(red, key=lambda tc: (tc[0], -tc[1]["at"]), default=(None, None))[1]
 
 
 def scenario(seed: int) -> dict[str, Any]:

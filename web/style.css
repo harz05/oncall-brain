@@ -17,12 +17,14 @@
   --runbook: #34d399;
   --alert: #f87171;
   --accent: #7dd3fc;
+  --brain: #2dd4bf;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: dark;
   scrollbar-color: #2b3954 transparent;
   scrollbar-width: thin;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* .trace etc. set display, which would beat the attribute */
 html, body { height: 100%; margin: 0; }
 body {
   display: grid;
@@ -142,6 +144,8 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .baseline .pill { background: var(--alert); color: #2a0b0b; }
 .baseline .sub { display: block; color: var(--muted); font-size: 12.5px; }
 .baseline.ok .pill { background: var(--line); color: var(--text); }
+.next { display: grid; gap: 4px; padding: 6px 8px; border: 1px solid #1f5f4a; border-radius: 6px; background: #0f2a24; }
+.next .sub, .ctc { display: block; color: var(--muted); font-size: 12.5px; }
 .ruled ul { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
 .reason { color: var(--muted); }
 .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
@@ -168,8 +172,15 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 /* ---------- trace ---------- */
 .trace-panel { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: #0d1526; }
 .trace-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.trace-head h2 { font-size: 15px; }
+.tabs { display: flex; gap: 14px; }
+.tab {
+  padding: 2px 0; border: 0; border-bottom: 2px solid transparent; background: none; cursor: pointer;
+  font-size: 15px; font-weight: 700; color: var(--muted); white-space: nowrap;
+}
+.tab:hover, .tab[aria-selected="true"] { color: var(--text); }
+.tab[aria-selected="true"] { border-bottom-color: var(--accent); }
 .trace-head .ghost { margin-left: auto; }
+#trace-count { white-space: nowrap; }
 .trace { list-style: none; margin: 0; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .trace li { animation: in 0.25s ease-out; }
 @keyframes in { from { opacity: 0; transform: translateY(6px); } }
@@ -217,12 +228,31 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .q pre.params { color: var(--muted); max-height: 90px; }
 .rows summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 
+/* ---------- ask the brain ---------- */
+.ask { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.ask .card { display: grid; gap: 6px; }
+.ask-form label { color: var(--muted); font-size: 12.5px; }
+.ask-row { display: flex; gap: 8px; }
+.ask-row select {
+  flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); color: var(--text); font: inherit; font-size: 13px;
+}
+.ask-row .ghost:disabled { opacity: 0.45; cursor: default; }
+.card.brain, .role.brain { --role: var(--brain); }
+.card.brain { border-left: 4px solid var(--brain); }
+.people { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.who { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
+.score { font: 600 12px var(--mono); color: var(--brain); white-space: nowrap; }
+.sources { margin: 0; padding-left: 16px; display: grid; gap: 4px; font-size: 13px; }
+.ask .error { color: var(--alert); }
+
 @media (max-height: 820px) {
   .top { padding: 6px 18px; }
   .controls { padding: 6px 18px; }
   .stage { grid-template-rows: minmax(0, 1fr) 210px; }
   .outcome > .card { padding: 8px 10px; }
   .num .big { font-size: 28px; }
+  .nums { grid-template-columns: 1fr 1fr; } /* side by side, so the culprit line and memory pill fit 768px */
 }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr) 340px; }

@@ -22,9 +22,15 @@ def status_update(facts: dict[str, Any], refuted: list[dict[str, Any]], origin: 
         lines.append("Paged: " + ", ".join(f"{p['handle']} ({p['team']})" for p in paged))
     if at_risk:
         lines.append("Also at risk: " + ", ".join(_short(s) for s in at_risk))
+    experts = [x for x in facts.get("experts", []) if x.get("id")]
+    if experts:
+        x = experts[0]
+        lines.append(f"Ask: {x['name']} ({x['handle']}, {x['team']}) knows {_short(x['service'])} best")
     rbs = [r for r in facts["runbooks"] if r.get("id")]
     if rbs:
-        lines.append("Runbook: " + "; ".join(f"{r['title']} (worked {r['successes']}x)" for r in rbs))
+        r = rbs[0]
+        lines.append(f"Next action: {r['steps'][0]} (runbook '{r['title']}', worked {r['successes']} of "
+                     f"{r['uses']} times)")
     srcs = [s for s in facts["sources"] if s]
     if srcs:
         lines.append("Sources: " + ", ".join(srcs))

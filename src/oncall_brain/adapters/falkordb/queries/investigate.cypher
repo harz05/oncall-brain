@@ -21,16 +21,18 @@ MERGE (i)-[x:RECALLS]->(past)
 ON CREATE SET x.score = r.score, x.cause_service = r.cause_service
 
 // name: memory_suspects
-// purpose: Procedural shortcut: changes in the alert window on services that caused the recalled incidents.
+// purpose: Procedural memory decides: for each recalled incident, the runbook that fixed it names a service and a change kind; suspect in-window changes of that kind on that service, most trusted runbook first.
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
-MATCH (i)-[x:RECALLS]->(past:Incident)-[:CAUSED_BY]->(:Change)-[:CHANGED]->(cs:Service)
+MATCH (i)-[x:RECALLS]->(past:Incident)-[:FIXED_WITH]->(rb:Runbook)-[:FOR_SERVICE]->(cs:Service)
 WHERE x.score >= $min_score
-MATCH (c:Change)-[:CHANGED]->(cs)
+MATCH (c:Change {kind: rb.kind})-[:CHANGED]->(cs)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 MATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)
 WHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))
 RETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,
+       rb.id AS runbook, rb.title AS runbook_title, rb.successes AS successes, rb.uses AS uses,
        collect(DISTINCT past.id) AS recalled
+ORDER BY toFloat(successes) / uses DESC, at DESC
 
 // name: path_suspects
 // purpose: Multi-hop suspects: every change in the alert window on a service the alerting service depends on at alert time, nearest first.
@@ -42,12 +44,12 @@ MATCH (c:Change)-[:CHANGED]->(s)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops
 ORDER BY hops, at DESC
+LIMIT 10
 
 // name: recent_changes
-// purpose: The flat baseline: newest changes anywhere before the alert, no traversal. This is what a change log alone would blame.
-MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
+// purpose: The flat baseline: newest changes anywhere before the alert, no traversal. This is what a change log alone would blame. ($since/$until are literal bounds so the Change.at range index is used.)
 MATCH (c:Change)-[:CHANGED]->(s:Service)
-WHERE c.at >= a.at - $window AND c.at <= a.at
+WHERE c.at >= $since AND c.at <= $until
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary
 ORDER BY at DESC
 LIMIT 3
@@ -57,7 +59,7 @@ LIMIT 3
 UNWIND $rows AS r
 MATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})
 MERGE (h:Hypothesis {id: r.id})
-ON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at
+ON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at, h.runbook = r.runbook
 MERGE (i)-[:HAS_HYPOTHESIS]->(h)
 MERGE (h)-[:SUSPECTS]->(c)
 RETURN h.id AS id
@@ -68,15 +70,6 @@ MATCH (i:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis {id: $hypothesis_id})-[:SUSP
 MATCH (i)-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
 RETURN i.id AS incident, h.status AS status, c.id AS change, c.summary AS summary, c.at AS change_at,
        c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at
-
-// name: live_path
-// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.
-MATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})
-WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
-WITH p
-ORDER BY length(p)
-LIMIT 1
-RETURN [n IN nodes(p) | n.id] AS path
 
 // name: live_paths
 // purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.
@@ -106,7 +99,13 @@ RETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary
 MATCH (h:Hypothesis {id: $hypothesis_id})
 MERGE (e:Evidence {id: $evidence_id})
 SET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at
-SET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END
+// A human-confirmed cause stays confirmed whatever a later re-check says.
+SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
+                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
+WITH h
+// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.
+OPTIONAL MATCH (rb:Runbook {id: h.runbook})
+FOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)
 RETURN h.id AS hypothesis, h.status AS status

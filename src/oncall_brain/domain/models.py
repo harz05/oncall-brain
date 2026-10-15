@@ -26,12 +26,6 @@ class Highlight(BaseModel):
     nodes: list[str] = Field(default_factory=list)
     edges: list[tuple[str, str, str]] = Field(default_factory=list)  # (source id, target id, rel type)
 
-    def merge(self, other: "Highlight") -> "Highlight":
-        return Highlight(
-            nodes=list(dict.fromkeys(self.nodes + other.nodes)),
-            edges=list(dict.fromkeys(self.edges + other.edges)),
-        )
-
 
 class ToolOutput(BaseModel):
     summary: str

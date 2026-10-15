@@ -35,7 +35,7 @@
        "alert": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.71,
+     "ms": 1.55,
      "readonly": false
     }
    ],
@@ -103,7 +103,7 @@
        ]
       }
      ],
-     "ms": 0.94,
+     "ms": 1.5,
      "readonly": true
     },
     {
@@ -123,7 +123,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.36,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -167,7 +167,7 @@
        ]
       }
      ],
-     "ms": 0.47,
+     "ms": 1.23,
      "readonly": true
     },
     {
@@ -192,7 +192,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.36,
+     "ms": 0.9,
      "readonly": false
     }
    ],
@@ -271,7 +271,7 @@
    "role": "triage",
    "tool": "page_on_call",
    "reason": "Find and page whoever is on call for svc:refunds right now.",
-   "summary": "Paged Bram Nakamura (@bram, Payments) for svc:refunds",
+   "summary": "Paged Bram Nakamura (@bram.nakamura, Payments) for svc:refunds",
    "writes": true,
    "queries": [
     {
@@ -320,7 +320,7 @@
        ]
       }
      ],
-     "ms": 0.7,
+     "ms": 1.35,
      "readonly": true
     },
     {
@@ -340,7 +340,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.3,
+     "ms": 0.7,
      "readonly": true
     },
     {
@@ -354,12 +354,12 @@
       {
        "person": "person:bram-nakamura",
        "name": "Bram Nakamura",
-       "handle": "@bram",
+       "handle": "@bram.nakamura",
        "team": "team:payments",
        "team_name": "Payments"
       }
      ],
-     "ms": 0.21,
+     "ms": 1.06,
      "readonly": true
     },
     {
@@ -376,7 +376,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.15,
+     "ms": 0.8,
      "readonly": false
     }
    ],
@@ -402,7 +402,7 @@
    "data": {
     "person": "person:bram-nakamura",
     "name": "Bram Nakamura",
-    "handle": "@bram",
+    "handle": "@bram.nakamura",
     "team": "team:payments",
     "team_name": "Payments"
    }
@@ -466,7 +466,7 @@
        ]
       }
      ],
-     "ms": 1.04,
+     "ms": 1.95,
      "readonly": true
     }
    ],
@@ -540,7 +540,7 @@
        ]
       }
      ],
-     "ms": 1.16,
+     "ms": 1.39,
      "readonly": true
     },
     {
@@ -564,14 +564,14 @@
       },
       {
        "incident": "inc:1003",
-       "title": "redis-cache degraded",
+       "title": "fraud-check degraded",
        "symptom": "errors",
-       "cause_service": "svc:redis-cache",
+       "cause_service": "svc:fraud-check",
        "cause_kind": "deploy",
        "cause_change": "chg:hist-3",
-       "hops": 3,
+       "hops": 2,
        "runbook": "rb:hist-3",
-       "runbook_title": "Recover redis-cache",
+       "runbook_title": "Recover fraud-check",
        "score": 2
       },
       {
@@ -585,21 +585,9 @@
        "runbook": "rb:pg-disk",
        "runbook_title": "Expand postgres-orders volume",
        "score": 2
-      },
-      {
-       "incident": "inc:1000",
-       "title": "kafka degraded",
-       "symptom": "errors",
-       "cause_service": "svc:kafka",
-       "cause_kind": "config",
-       "cause_change": "chg:hist-0",
-       "hops": 3,
-       "runbook": "rb:hist-0",
-       "runbook_title": "Recover kafka",
-       "score": 2
       }
      ],
-     "ms": 0.97,
+     "ms": 2.1,
      "readonly": true
     },
     {
@@ -622,14 +610,14 @@
        },
        {
         "incident": "inc:1003",
-        "title": "redis-cache degraded",
+        "title": "fraud-check degraded",
         "symptom": "errors",
-        "cause_service": "svc:redis-cache",
+        "cause_service": "svc:fraud-check",
         "cause_kind": "deploy",
         "cause_change": "chg:hist-3",
-        "hops": 3,
+        "hops": 2,
         "runbook": "rb:hist-3",
-        "runbook_title": "Recover redis-cache",
+        "runbook_title": "Recover fraud-check",
         "score": 2
        },
        {
@@ -643,23 +631,11 @@
         "runbook": "rb:pg-disk",
         "runbook_title": "Expand postgres-orders volume",
         "score": 2
-       },
-       {
-        "incident": "inc:1000",
-        "title": "kafka degraded",
-        "symptom": "errors",
-        "cause_service": "svc:kafka",
-        "cause_kind": "config",
-        "cause_change": "chg:hist-0",
-        "hops": 3,
-        "runbook": "rb:hist-0",
-        "runbook_title": "Recover kafka",
-        "score": 2
        }
       ]
      },
      "rows": [],
-     "ms": 0.49,
+     "ms": 1.05,
      "readonly": false
     }
    ],
@@ -691,14 +667,14 @@
     },
     {
      "incident": "inc:1003",
-     "title": "redis-cache degraded",
+     "title": "fraud-check degraded",
      "symptom": "errors",
-     "cause_service": "svc:redis-cache",
+     "cause_service": "svc:fraud-check",
      "cause_kind": "deploy",
      "cause_change": "chg:hist-3",
-     "hops": 3,
+     "hops": 2,
      "runbook": "rb:hist-3",
-     "runbook_title": "Recover redis-cache",
+     "runbook_title": "Recover fraud-check",
      "score": 2
     },
     {
@@ -712,18 +688,6 @@
      "runbook": "rb:pg-disk",
      "runbook_title": "Expand postgres-orders volume",
      "score": 2
-    },
-    {
-     "incident": "inc:1000",
-     "title": "kafka degraded",
-     "symptom": "errors",
-     "cause_service": "svc:kafka",
-     "cause_kind": "config",
-     "cause_change": "chg:hist-0",
-     "hops": 3,
-     "runbook": "rb:hist-0",
-     "runbook_title": "Recover kafka",
-     "score": 2
     }
    ]
   },
@@ -732,7 +696,7 @@
    "role": "investigator",
    "tool": "hypothesize_from_memory",
    "reason": "A past incident matches structurally; test its root cause pattern first.",
-   "summary": "Memory points at chg:pgw-pool-2",
+   "summary": "Runbook 'Revert the config change on payments-gw' (worked 1/1) points at chg:pgw-pool-2",
    "writes": true,
    "queries": [
     {
@@ -791,12 +755,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -811,7 +770,7 @@
        ]
       }
      ],
-     "ms": 0.93,
+     "ms": 1.59,
      "readonly": true
     },
     {
@@ -831,12 +790,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.36,
+     "ms": 1.0,
      "readonly": true
     },
     {
      "name": "memory_suspects",
-     "cypher": "// purpose: Procedural shortcut: changes in the alert window on services that caused the recalled incidents.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:CAUSED_BY]->(:Change)-[:CHANGED]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change)-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       collect(DISTINCT past.id) AS recalled",
+     "cypher": "// purpose: Procedural memory decides: for each recalled incident, the runbook that fixed it names a service and a change kind; suspect in-window changes of that kind on that service, most trusted runbook first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:FIXED_WITH]->(rb:Runbook)-[:FOR_SERVICE]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change {kind: rb.kind})-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       rb.id AS runbook, rb.title AS runbook_title, rb.successes AS successes, rb.uses AS uses,\n       collect(DISTINCT past.id) AS recalled\nORDER BY toFloat(successes) / uses DESC, at DESC",
      "params": {
       "incident_id": "inc:refunds-latency",
       "window": 7200,
@@ -849,17 +808,21 @@
        "kind": "config",
        "at": 1792294200,
        "hops": 2,
+       "runbook": "rb:payments-gw:config",
+       "runbook_title": "Revert the config change on payments-gw",
+       "successes": 1,
+       "uses": 1,
        "recalled": [
         "inc:checkout-latency"
        ]
       }
      ],
-     "ms": 0.64,
+     "ms": 1.7,
      "readonly": true
     },
     {
      "name": "add_hypotheses",
-     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
+     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at, h.runbook = r.runbook\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
      "params": {
       "incident_id": "inc:refunds-latency",
       "rows": [
@@ -867,7 +830,8 @@
         "id": "hyp:refunds-latency:pgw-pool-2",
         "change": "chg:pgw-pool-2",
         "source": "memory",
-        "hops": 2
+        "hops": 2,
+        "runbook": "rb:payments-gw:config"
        }
       ],
       "at": 1792296000
@@ -877,7 +841,7 @@
        "id": "hyp:refunds-latency:pgw-pool-2"
       }
      ],
-     "ms": 0.42,
+     "ms": 0.86,
      "readonly": false
     }
    ],
@@ -901,6 +865,10 @@
      "kind": "config",
      "at": 1792294200,
      "hops": 2,
+     "runbook": "rb:payments-gw:config",
+     "runbook_title": "Revert the config change on payments-gw",
+     "successes": 1,
+     "uses": 1,
      "recalled": [
       "inc:checkout-latency"
      ]
@@ -976,12 +944,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -996,7 +959,7 @@
        ]
       }
      ],
-     "ms": 0.76,
+     "ms": 1.56,
      "readonly": true
     },
     {
@@ -1018,7 +981,7 @@
        "at": 1792296000
       }
      ],
-     "ms": 0.45,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -1038,7 +1001,7 @@
        ]
       }
      ],
-     "ms": 0.27,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -1070,12 +1033,12 @@
        "summary": "p99 4.4s on POST /refunds"
       }
      ],
-     "ms": 0.29,
+     "ms": 1.03,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:refunds-latency:pgw-pool-2",
       "evidence_id": "ev:refunds-latency:pgw-pool-2",
@@ -1094,7 +1057,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.29,
+     "ms": 1.12,
      "readonly": false
     }
    ],
@@ -1211,12 +1174,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -1231,7 +1189,7 @@
        ]
       }
      ],
-     "ms": 0.82,
+     "ms": 2.01,
      "readonly": true
     }
    ],
@@ -1246,7 +1204,7 @@
    "role": "comms",
    "tool": "page_on_call",
    "reason": "The culprit lives in svc:payments-gw; page its owning team too.",
-   "summary": "Bram Nakamura (@bram, Payments) owns svc:payments-gw too; already engaged",
+   "summary": "Bram Nakamura (@bram.nakamura, Payments) owns svc:payments-gw too; already engaged",
    "writes": true,
    "queries": [
     {
@@ -1320,12 +1278,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -1340,7 +1293,7 @@
        ]
       }
      ],
-     "ms": 0.87,
+     "ms": 1.2,
      "readonly": true
     },
     {
@@ -1360,7 +1313,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.47,
+     "ms": 0.79,
      "readonly": true
     },
     {
@@ -1374,12 +1327,12 @@
       {
        "person": "person:bram-nakamura",
        "name": "Bram Nakamura",
-       "handle": "@bram",
+       "handle": "@bram.nakamura",
        "team": "team:payments",
        "team_name": "Payments"
       }
      ],
-     "ms": 0.57,
+     "ms": 0.75,
      "readonly": true
     },
     {
@@ -1396,7 +1349,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.38,
+     "ms": 0.64,
      "readonly": false
     }
    ],
@@ -1422,7 +1375,7 @@
    "data": {
     "person": "person:bram-nakamura",
     "name": "Bram Nakamura",
-    "handle": "@bram",
+    "handle": "@bram.nakamura",
     "team": "team:payments",
     "team_name": "Payments"
    }
@@ -1430,10 +1383,10 @@
   {
    "seq": 10,
    "role": "comms",
-   "tool": "blast_radius",
-   "reason": "Who else depends on svc:payments-gw? Warn them before they page us.",
-   "summary": "7 services depend on svc:payments-gw (5 tier-1)",
-   "writes": true,
+   "tool": "who_knows",
+   "reason": "Who knows svc:payments-gw best? Name them in the update.",
+   "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team",
+   "writes": false,
    "queries": [
     {
      "name": "incident_board",
@@ -1511,12 +1464,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -1531,7 +1479,232 @@
        ]
       }
      ],
-     "ms": 0.76,
+     "ms": 1.09,
+     "readonly": true
+    },
+    {
+     "name": "who_knows",
+     "cypher": "// purpose: Who knows a service, ranked by graph evidence: on the owning team (3), authored changes to it (2 each), was paged for it in an incident (1 each).\nMATCH (s:Service {id: $service})\nMATCH (p:Person)-[:MEMBER_OF]->(t:Team)\nWITH s, p, t,\n     size([(s)<-[:OWNS]-(t) | 1]) AS owns,\n     size(list.dedup([(s)<-[:CHANGED]-(c:Change)-[:AUTHORED_BY]->(p) | c.id])) AS changes,\n     size(list.dedup([(i:Incident)-[pg:PAGED]->(p) WHERE pg.for_service = s.id | i.id])) AS incidents\nWHERE owns + changes + incidents > 0\nRETURN p.id AS person, p.name AS name, p.handle AS handle, t.name AS team, owns > 0 AS on_owning_team,\n       changes, incidents, 3 * owns + 2 * changes + incidents AS score\nORDER BY score DESC, name\nLIMIT 5",
+     "params": {
+      "service": "svc:payments-gw"
+     },
+     "rows": [
+      {
+       "person": "person:sana-brandt",
+       "name": "Sana Brandt",
+       "handle": "@sana.brandt",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 3,
+       "incidents": 0,
+       "score": 9
+      },
+      {
+       "person": "person:bram-nakamura",
+       "name": "Bram Nakamura",
+       "handle": "@bram.nakamura",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 2,
+       "incidents": 1,
+       "score": 8
+      },
+      {
+       "person": "person:quinn-tanaka",
+       "name": "Quinn Tanaka",
+       "handle": "@quinn.tanaka",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 1,
+       "incidents": 0,
+       "score": 5
+      },
+      {
+       "person": "person:lena-costa",
+       "name": "Lena Costa",
+       "handle": "@lena.costa",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 0,
+       "incidents": 0,
+       "score": 3
+      }
+     ],
+     "ms": 2.85,
+     "readonly": true
+    },
+    {
+     "name": "record_consult",
+     "cypher": "// purpose: Comms records who it will ask about the culprit service (an action the who_knows ranking drives).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[x:CONSULTED]->(p)\nON CREATE SET x.for_service = $service, x.score = $score",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "person": "person:sana-brandt",
+      "service": "svc:payments-gw",
+      "score": 9
+     },
+     "rows": [],
+     "ms": 0.62,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:payments-gw",
+     "person:sana-brandt",
+     "person:bram-nakamura",
+     "person:quinn-tanaka",
+     "person:lena-costa"
+    ],
+    "edges": []
+   },
+   "data": [
+    {
+     "person": "person:sana-brandt",
+     "name": "Sana Brandt",
+     "handle": "@sana.brandt",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 3,
+     "incidents": 0,
+     "score": 9
+    },
+    {
+     "person": "person:bram-nakamura",
+     "name": "Bram Nakamura",
+     "handle": "@bram.nakamura",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 2,
+     "incidents": 1,
+     "score": 8
+    },
+    {
+     "person": "person:quinn-tanaka",
+     "name": "Quinn Tanaka",
+     "handle": "@quinn.tanaka",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 1,
+     "incidents": 0,
+     "score": 5
+    },
+    {
+     "person": "person:lena-costa",
+     "name": "Lena Costa",
+     "handle": "@lena.costa",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 0,
+     "incidents": 0,
+     "score": 3
+    }
+   ]
+  },
+  {
+   "seq": 11,
+   "role": "comms",
+   "tool": "blast_radius",
+   "reason": "Who else depends on svc:payments-gw? Warn them before they page us.",
+   "summary": "7 services depend on svc:payments-gw (5 tier-1)",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "who_knows"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:fraud-check"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.31,
      "readonly": true
     },
     {
@@ -1551,7 +1724,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.25,
+     "ms": 0.91,
      "readonly": true
     },
     {
@@ -1644,7 +1817,7 @@
        ]
       }
      ],
-     "ms": 0.72,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -1685,7 +1858,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.5,
+     "ms": 0.7,
      "readonly": false
     }
    ],
@@ -1878,7 +2051,7 @@
    ]
   },
   {
-   "seq": 11,
+   "seq": 12,
    "role": "comms",
    "tool": "post_update",
    "reason": "Write the status update with owners, cause and sources.",
@@ -1948,6 +2121,11 @@
         {
          "role": "comms",
          "target": "svc:payments-gw",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
          "tool": "blast_radius"
         }
        ],
@@ -1966,12 +2144,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -1986,7 +2159,7 @@
        ]
       }
      ],
-     "ms": 1.34,
+     "ms": 1.53,
      "readonly": true
     },
     {
@@ -2006,12 +2179,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.44,
+     "ms": 0.67,
      "readonly": true
     },
     {
      "name": "update_facts",
-     "cypher": "// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis {status: 'supported'})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\nOPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)\nWHERE rb.kind = c.kind\nRETURN a.name AS alert, impacts, paged, c.id AS change, c.summary AS change_summary, s.id AS cause_service,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, successes: rb.successes}) AS runbooks",
+     "cypher": "// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\nOPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)\nWHERE rb.kind = c.kind\nRETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,\n       s.id AS cause_service,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
      "params": {
       "incident_id": "inc:refunds-latency"
      },
@@ -2050,8 +2223,17 @@
        ],
        "paged": [
         {
-         "handle": "@bram",
+         "handle": "@bram.nakamura",
          "name": "Bram Nakamura",
+         "team": "Payments"
+        }
+       ],
+       "experts": [
+        {
+         "handle": "@sana.brandt",
+         "id": "person:sana-brandt",
+         "name": "Sana Brandt",
+         "service": "svc:payments-gw",
          "team": "Payments"
         }
        ],
@@ -2065,13 +2247,19 @@
        "runbooks": [
         {
          "id": "rb:payments-gw:config",
+         "steps": [
+          "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+          "Watch checkout p99 recover within 10 minutes",
+          "Add a guard: alert on payments-gw saturation before callers time out"
+         ],
          "successes": 1,
-         "title": "Revert the config change on payments-gw"
+         "title": "Revert the config change on payments-gw",
+         "uses": 1
         }
        ]
       }
      ],
-     "ms": 0.83,
+     "ms": 1.64,
      "readonly": true
     },
     {
@@ -2081,29 +2269,30 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.64,
+     "ms": 0.87,
      "readonly": true
     },
     {
      "name": "post_update",
-     "cypher": "// purpose: Post the status update on the incident and link it to every node it cites.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nUNWIND $cites AS cid\nMATCH (n {id: cid})\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
+     "cypher": "// purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nOPTIONAL MATCH (m)-[old:CITES]->()\nDELETE old\nWITH DISTINCT m\nUNWIND $cites AS cid\nOPTIONAL MATCH (c:Change {id: cid})\nOPTIONAL MATCH (t:Ticket {id: cid})\nOPTIONAL MATCH (msg:Message {id: cid})\nOPTIONAL MATCH (rb:Runbook {id: cid})\nOPTIONAL MATCH (p:Person {id: cid})\nWITH m, coalesce(c, t, msg, rb, p) AS n\nWHERE n IS NOT NULL\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
      "params": {
       "incident_id": "inc:refunds-latency",
       "message_id": "msg:update:inc:refunds-latency",
-      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram.nakamura (Payments)\nAlso at risk: checkout, payments, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)) (runbook 'Revert the config change on payments-gw', worked 1 of 1 times)\nSources: ticket:CR-902",
       "at": 1792296000,
       "cites": [
        "chg:pgw-pool-2",
        "ticket:CR-902",
-       "rb:payments-gw:config"
+       "rb:payments-gw:config",
+       "person:sana-brandt"
       ]
      },
      "rows": [
       {
-       "cited": 3
+       "cited": 4
       }
      ],
-     "ms": 0.75,
+     "ms": 0.96,
      "readonly": false
     }
    ],
@@ -2111,21 +2300,41 @@
     "nodes": [
      "chg:pgw-pool-2",
      "ticket:CR-902",
-     "rb:payments-gw:config"
+     "rb:payments-gw:config",
+     "person:sana-brandt"
     ],
     "edges": []
    },
    "data": {
-    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram.nakamura (Payments)\nAlso at risk: checkout, payments, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)) (runbook 'Revert the config change on payments-gw', worked 1 of 1 times)\nSources: ticket:CR-902",
     "cites": [
      "chg:pgw-pool-2",
      "ticket:CR-902",
-     "rb:payments-gw:config"
-    ]
+     "rb:payments-gw:config",
+     "person:sana-brandt"
+    ],
+    "runbook": {
+     "id": "rb:payments-gw:config",
+     "steps": [
+      "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+      "Watch checkout p99 recover within 10 minutes",
+      "Add a guard: alert on payments-gw saturation before callers time out"
+     ],
+     "successes": 1,
+     "title": "Revert the config change on payments-gw",
+     "uses": 1
+    },
+    "expert": {
+     "handle": "@sana.brandt",
+     "id": "person:sana-brandt",
+     "name": "Sana Brandt",
+     "service": "svc:payments-gw",
+     "team": "Payments"
+    }
    }
   },
   {
-   "seq": 12,
+   "seq": 13,
    "role": "comms",
    "tool": "handoff",
    "reason": "Update posted; waiting for a human to confirm the fix.",
@@ -2195,6 +2404,11 @@
         {
          "role": "comms",
          "target": "svc:payments-gw",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
          "tool": "blast_radius"
         },
         {
@@ -2218,12 +2432,7 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
-        },
-        {
-         "incident": "inc:1000",
-         "score": 2,
-         "cause_service": "svc:kafka"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:0877",
@@ -2238,7 +2447,7 @@
        ]
       }
      ],
-     "ms": 0.91,
+     "ms": 1.53,
      "readonly": true
     }
    ],
@@ -2294,6 +2503,10 @@
      "kind": "config",
      "at": 1792294200,
      "hops": 2,
+     "runbook": "rb:payments-gw:config",
+     "runbook_title": "Revert the config change on payments-gw",
+     "successes": 1,
+     "uses": 1,
      "recalled": [
       "inc:checkout-latency"
      ]
@@ -2305,7 +2518,7 @@
    {
     "person": "person:bram-nakamura",
     "name": "Bram Nakamura",
-    "handle": "@bram",
+    "handle": "@bram.nakamura",
     "team": "team:payments",
     "team_name": "Payments"
    }
@@ -2320,33 +2533,27 @@
    "svc:payments",
    "svc:subscriptions"
   ],
-  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram.nakamura (Payments)\nAlso at risk: checkout, payments, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)) (runbook 'Revert the config change on payments-gw', worked 1 of 1 times)\nSources: ticket:CR-902",
   "investigator_calls": 3,
   "hypotheses_checked": 1,
-  "highlight": {
-   "nodes": [
-    "svc:refunds",
-    "svc:payments",
-    "svc:payments-gw",
-    "chg:pgw-pool-2"
+  "checks_to_culprit": 1,
+  "runbook": {
+   "id": "rb:payments-gw:config",
+   "steps": [
+    "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+    "Watch checkout p99 recover within 10 minutes",
+    "Add a guard: alert on payments-gw saturation before callers time out"
    ],
-   "edges": [
-    [
-     "svc:refunds",
-     "svc:payments",
-     "DEPENDS_ON"
-    ],
-    [
-     "svc:payments",
-     "svc:payments-gw",
-     "DEPENDS_ON"
-    ],
-    [
-     "chg:pgw-pool-2",
-     "svc:payments-gw",
-     "CHANGED"
-    ]
-   ]
+   "successes": 1,
+   "title": "Revert the config change on payments-gw",
+   "uses": 1
+  },
+  "expert": {
+   "handle": "@sana.brandt",
+   "id": "person:sana-brandt",
+   "name": "Sana Brandt",
+   "service": "svc:payments-gw",
+   "team": "Payments"
   }
  }
 }

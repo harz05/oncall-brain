@@ -18,6 +18,6 @@ def load_board(repo: GraphRepository, incident_id: str) -> tuple[dict[str, Any],
         "steps": [s for s in r["steps"] if s["tool"]],
         "hypotheses": hyps,
         "recalls": [x for x in r["recalls"] if x["incident"]],
-        "cause_service": next((h["service"] for h in hyps if h["status"] == "supported"), None),
+        "cause_service": next((h["service"] for h in hyps if h["status"] in ("confirmed", "supported")), None),
     }
     return board, q

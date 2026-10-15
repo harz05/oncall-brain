@@ -54,10 +54,13 @@ def test_memory_refuted_falls_back_to_traversal_then_gives_up():
     assert d.action == "done" and "non-change" in d.reason
 
 
-def test_comms_pages_culprit_owner_warns_dependents_then_posts():
+def test_comms_pages_culprit_owner_names_an_expert_warns_dependents_then_posts():
     b = board(cause="svc:payments-gw")
     assert next_decision("comms", b).args == {"service": "svc:payments-gw"}
     b["steps"].append({"tool": "page_on_call", "target": "svc:payments-gw", "role": "comms"})
+    assert next_decision("comms", b).args == {"service": "svc:payments-gw"}
+    assert next_decision("comms", b).tool == "who_knows"
+    b["steps"].append({"tool": "who_knows", "target": "svc:payments-gw", "role": "comms"})
     assert next_decision("comms", b).tool == "blast_radius"
     b["steps"].append({"tool": "blast_radius", "target": "svc:payments-gw", "role": "comms"})
     assert next_decision("comms", b).tool == "post_update"

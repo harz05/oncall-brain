@@ -5,14 +5,22 @@ OPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)
 WITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts
 OPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)
 WITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged
-OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis {status: 'supported'})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+OPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)
+WITH i, a, impacts, paged,
+     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts
+OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
+WHERE h.status IN ['confirmed', 'supported']
+WITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status
+LIMIT 1
 OPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)
 OPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)
 OPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)
 WHERE rb.kind = c.kind
-RETURN a.name AS alert, impacts, paged, c.id AS change, c.summary AS change_summary, s.id AS cause_service,
+RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,
+       s.id AS cause_service,
        author.name AS author, collect(DISTINCT src.id) AS sources,
-       collect(DISTINCT {id: rb.id, title: rb.title, successes: rb.successes}) AS runbooks
+       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,
+                         uses: rb.uses}) AS runbooks
 
 // name: refuted_hypotheses
 // purpose: Suspects the agents ruled out, with the reason recorded on their Evidence.
@@ -21,14 +29,23 @@ MATCH (e:Evidence)-[:REFUTES]->(h)
 RETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, h.source AS source
 
 // name: post_update
-// purpose: Post the status update on the incident and link it to every node it cites.
+// purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.
 MATCH (i:Incident {id: $incident_id})
 MERGE (m:Message {id: $message_id})
 SET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at
 MERGE (i)-[:HAS_UPDATE]->(m)
 WITH m
+OPTIONAL MATCH (m)-[old:CITES]->()
+DELETE old
+WITH DISTINCT m
 UNWIND $cites AS cid
-MATCH (n {id: cid})
+OPTIONAL MATCH (c:Change {id: cid})
+OPTIONAL MATCH (t:Ticket {id: cid})
+OPTIONAL MATCH (msg:Message {id: cid})
+OPTIONAL MATCH (rb:Runbook {id: cid})
+OPTIONAL MATCH (p:Person {id: cid})
+WITH m, coalesce(c, t, msg, rb, p) AS n
+WHERE n IS NOT NULL
 MERGE (m)-[:CITES]->(n)
 RETURN count(n) AS cited
 

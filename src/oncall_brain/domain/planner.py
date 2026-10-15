@@ -67,6 +67,8 @@ def comms(board: dict[str, Any]) -> Decision:
     cause = board.get("cause_service")
     if cause and not _ran(board, "page_on_call", cause):
         return _call("page_on_call", f"The culprit lives in {cause}; page its owning team too.", service=cause)
+    if cause and not _ran(board, "who_knows", cause):
+        return _call("who_knows", f"Who knows {cause} best? Name them in the update.", service=cause)
     if cause and not _ran(board, "blast_radius", cause):
         return _call("blast_radius", f"Who else depends on {cause}? Warn them before they page us.",
                      service=cause)

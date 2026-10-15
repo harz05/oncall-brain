@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # The vendor's own key variable(s), honoured when LLM_API_KEY is empty and that provider is selected.
 VENDOR_KEYS = {"openai": ["openai_api_key"], "gemini": ["gemini_api_key", "google_api_key"],
                "groq": ["groq_api_key"], "openrouter": ["openrouter_api_key"], "anthropic": ["anthropic_api_key"]}
+# Host names always accepted by the HTTP servers: loopback, FastAPI's TestClient and the docker-compose service name.
+LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver", "app", "0.0.0.0"]
 
 
 def _secret() -> str:
@@ -35,6 +37,14 @@ class Settings(BaseSettings):
     groq_api_key: str = _secret()
     openrouter_api_key: str = _secret()
     anthropic_api_key: str = _secret()
+
+    # HTTP hardening (api/app.py, MCP over HTTP); see .env.example.
+    allowed_hosts: str = ""  # extra Host names, comma-separated, on top of LOCAL_HOSTS; "*" accepts any
+    api_token: str = _secret()  # when set, /api/* except /api/health needs "Authorization: Bearer <token>"
+    max_tenants: int = 20  # most tenant graphs a reset may create (~5 MB each)
+
+    def hosts(self) -> list[str]:
+        return LOCAL_HOSTS + [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
     def api_key(self) -> str:
         """LLM_API_KEY, else the selected vendor's usual variable (so an existing GEMINI_API_KEY just works)."""

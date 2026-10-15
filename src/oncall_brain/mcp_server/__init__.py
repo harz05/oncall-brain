@@ -15,6 +15,7 @@ from pydantic_core import to_json
 from oncall_brain import wiring
 from oncall_brain.agents import registry
 from oncall_brain.agents.registry import ToolContext
+from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, GraphStore
 from oncall_brain.services import respond, seeding
 from oncall_brain.services.tools import AlertArgs
@@ -49,12 +50,15 @@ def _registry_handler(name: str) -> Handler:
 def _respond(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
     run = respond.respond(_repo(store, tenant), AlertArgs.model_validate(args).alert_id, _llm())
     return {"incident_id": run["incident_id"], "planner": run["planner"],
-            "outcome": {k: v for k, v in run["outcome"].items() if k != "highlight"},
+            "outcome": run["outcome"],
             "steps": [{"seq": s.seq, "role": s.role, "tool": s.tool, "summary": s.summary, "reason": s.reason}
                       for s in run["steps"]]}
 
 
 def _reset(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
+    known, cap = store.tenants(), get_settings().max_tenants  # same soft cap as the HTTP API
+    if tenant not in known and len(known) >= cap:
+        raise ValueError(f"tenant limit reached ({cap}); reset an existing tenant or raise MAX_TENANTS")
     return {"tenant": tenant, "graph": seeding.reset(store, tenant)}
 
 

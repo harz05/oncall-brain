@@ -35,7 +35,7 @@
        "alert": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 1.9,
+     "ms": 3.19,
      "readonly": false
     }
    ],
@@ -103,7 +103,7 @@
        ]
       }
      ],
-     "ms": 3.74,
+     "ms": 2.26,
      "readonly": true
     },
     {
@@ -123,7 +123,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 1.3,
+     "ms": 0.96,
      "readonly": true
     },
     {
@@ -167,7 +167,7 @@
        ]
       }
      ],
-     "ms": 1.76,
+     "ms": 1.22,
      "readonly": true
     },
     {
@@ -192,7 +192,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.95,
+     "ms": 0.6,
      "readonly": false
     }
    ],
@@ -271,7 +271,7 @@
    "role": "triage",
    "tool": "page_on_call",
    "reason": "Find and page whoever is on call for svc:checkout right now.",
-   "summary": "Paged Ravi Moreau (@ravi, Checkout) for svc:checkout",
+   "summary": "Paged Ravi Moreau (@ravi.moreau, Checkout) for svc:checkout",
    "writes": true,
    "queries": [
     {
@@ -320,7 +320,7 @@
        ]
       }
      ],
-     "ms": 0.98,
+     "ms": 0.74,
      "readonly": true
     },
     {
@@ -340,7 +340,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.78,
+     "ms": 0.5,
      "readonly": true
     },
     {
@@ -354,12 +354,12 @@
       {
        "person": "person:ravi-moreau",
        "name": "Ravi Moreau",
-       "handle": "@ravi",
+       "handle": "@ravi.moreau",
        "team": "team:checkout",
        "team_name": "Checkout"
       }
      ],
-     "ms": 0.95,
+     "ms": 0.98,
      "readonly": true
     },
     {
@@ -376,7 +376,7 @@
        "first_for": "svc:checkout"
       }
      ],
-     "ms": 0.59,
+     "ms": 0.74,
      "readonly": false
     }
    ],
@@ -402,7 +402,7 @@
    "data": {
     "person": "person:ravi-moreau",
     "name": "Ravi Moreau",
-    "handle": "@ravi",
+    "handle": "@ravi.moreau",
     "team": "team:checkout",
     "team_name": "Checkout"
    }
@@ -466,7 +466,7 @@
        ]
       }
      ],
-     "ms": 0.81,
+     "ms": 1.36,
      "readonly": true
     }
    ],
@@ -540,7 +540,7 @@
        ]
       }
      ],
-     "ms": 0.86,
+     "ms": 1.94,
      "readonly": true
     },
     {
@@ -563,27 +563,27 @@
        "score": 3
       },
       {
-       "incident": "inc:1001",
-       "title": "promotions degraded",
-       "symptom": "errors",
-       "cause_service": "svc:promotions",
-       "cause_kind": "config",
-       "cause_change": "chg:hist-1",
-       "hops": 2,
-       "runbook": "rb:hist-1",
-       "runbook_title": "Recover promotions",
-       "score": 2
+       "incident": "inc:1000",
+       "title": "auth degraded",
+       "symptom": "latency",
+       "cause_service": "svc:auth",
+       "cause_kind": "deploy",
+       "cause_change": "chg:hist-0",
+       "hops": 1,
+       "runbook": "rb:hist-0",
+       "runbook_title": "Recover auth",
+       "score": 3
       },
       {
        "incident": "inc:1003",
-       "title": "redis-cache degraded",
+       "title": "fraud-check degraded",
        "symptom": "errors",
-       "cause_service": "svc:redis-cache",
+       "cause_service": "svc:fraud-check",
        "cause_kind": "deploy",
        "cause_change": "chg:hist-3",
        "hops": 2,
        "runbook": "rb:hist-3",
-       "runbook_title": "Recover redis-cache",
+       "runbook_title": "Recover fraud-check",
        "score": 2
       },
       {
@@ -600,18 +600,18 @@
       },
       {
        "incident": "inc:1002",
-       "title": "checkout degraded",
+       "title": "auth degraded",
        "symptom": "errors",
-       "cause_service": "svc:checkout",
-       "cause_kind": "config",
+       "cause_service": "svc:auth",
+       "cause_kind": "deploy",
        "cause_change": "chg:hist-2",
-       "hops": 0,
+       "hops": 1,
        "runbook": "rb:hist-2",
-       "runbook_title": "Recover checkout",
+       "runbook_title": "Recover auth",
        "score": 2
       }
      ],
-     "ms": 2.39,
+     "ms": 3.01,
      "readonly": true
     },
     {
@@ -633,27 +633,27 @@
         "score": 3
        },
        {
-        "incident": "inc:1001",
-        "title": "promotions degraded",
-        "symptom": "errors",
-        "cause_service": "svc:promotions",
-        "cause_kind": "config",
-        "cause_change": "chg:hist-1",
-        "hops": 2,
-        "runbook": "rb:hist-1",
-        "runbook_title": "Recover promotions",
-        "score": 2
+        "incident": "inc:1000",
+        "title": "auth degraded",
+        "symptom": "latency",
+        "cause_service": "svc:auth",
+        "cause_kind": "deploy",
+        "cause_change": "chg:hist-0",
+        "hops": 1,
+        "runbook": "rb:hist-0",
+        "runbook_title": "Recover auth",
+        "score": 3
        },
        {
         "incident": "inc:1003",
-        "title": "redis-cache degraded",
+        "title": "fraud-check degraded",
         "symptom": "errors",
-        "cause_service": "svc:redis-cache",
+        "cause_service": "svc:fraud-check",
         "cause_kind": "deploy",
         "cause_change": "chg:hist-3",
         "hops": 2,
         "runbook": "rb:hist-3",
-        "runbook_title": "Recover redis-cache",
+        "runbook_title": "Recover fraud-check",
         "score": 2
        },
        {
@@ -670,32 +670,39 @@
        },
        {
         "incident": "inc:1002",
-        "title": "checkout degraded",
+        "title": "auth degraded",
         "symptom": "errors",
-        "cause_service": "svc:checkout",
-        "cause_kind": "config",
+        "cause_service": "svc:auth",
+        "cause_kind": "deploy",
         "cause_change": "chg:hist-2",
-        "hops": 0,
+        "hops": 1,
         "runbook": "rb:hist-2",
-        "runbook_title": "Recover checkout",
+        "runbook_title": "Recover auth",
         "score": 2
        }
       ]
      },
      "rows": [],
-     "ms": 0.74,
+     "ms": 1.71,
      "readonly": false
     }
    ],
    "highlight": {
     "nodes": [
      "inc:0911",
-     "svc:inventory"
+     "inc:1000",
+     "svc:inventory",
+     "svc:auth"
     ],
     "edges": [
      [
       "inc:checkout-latency",
       "inc:0911",
+      "RECALLS"
+     ],
+     [
+      "inc:checkout-latency",
+      "inc:1000",
       "RECALLS"
      ]
     ]
@@ -714,27 +721,27 @@
      "score": 3
     },
     {
-     "incident": "inc:1001",
-     "title": "promotions degraded",
-     "symptom": "errors",
-     "cause_service": "svc:promotions",
-     "cause_kind": "config",
-     "cause_change": "chg:hist-1",
-     "hops": 2,
-     "runbook": "rb:hist-1",
-     "runbook_title": "Recover promotions",
-     "score": 2
+     "incident": "inc:1000",
+     "title": "auth degraded",
+     "symptom": "latency",
+     "cause_service": "svc:auth",
+     "cause_kind": "deploy",
+     "cause_change": "chg:hist-0",
+     "hops": 1,
+     "runbook": "rb:hist-0",
+     "runbook_title": "Recover auth",
+     "score": 3
     },
     {
      "incident": "inc:1003",
-     "title": "redis-cache degraded",
+     "title": "fraud-check degraded",
      "symptom": "errors",
-     "cause_service": "svc:redis-cache",
+     "cause_service": "svc:fraud-check",
      "cause_kind": "deploy",
      "cause_change": "chg:hist-3",
      "hops": 2,
      "runbook": "rb:hist-3",
-     "runbook_title": "Recover redis-cache",
+     "runbook_title": "Recover fraud-check",
      "score": 2
     },
     {
@@ -751,14 +758,14 @@
     },
     {
      "incident": "inc:1002",
-     "title": "checkout degraded",
+     "title": "auth degraded",
      "symptom": "errors",
-     "cause_service": "svc:checkout",
-     "cause_kind": "config",
+     "cause_service": "svc:auth",
+     "cause_kind": "deploy",
      "cause_change": "chg:hist-2",
-     "hops": 0,
+     "hops": 1,
      "runbook": "rb:hist-2",
-     "runbook_title": "Recover checkout",
+     "runbook_title": "Recover auth",
      "score": 2
     }
    ]
@@ -768,7 +775,7 @@
    "role": "investigator",
    "tool": "hypothesize_from_memory",
    "reason": "A past incident matches structurally; test its root cause pattern first.",
-   "summary": "Memory's culprit services had no change in this window",
+   "summary": "The recalled runbooks' services had no change of their kind in this window",
    "writes": true,
    "queries": [
     {
@@ -827,17 +834,17 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -852,7 +859,7 @@
        ]
       }
      ],
-     "ms": 1.25,
+     "ms": 2.33,
      "readonly": true
     },
     {
@@ -872,19 +879,19 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.55,
+     "ms": 1.2,
      "readonly": true
     },
     {
      "name": "memory_suspects",
-     "cypher": "// purpose: Procedural shortcut: changes in the alert window on services that caused the recalled incidents.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:CAUSED_BY]->(:Change)-[:CHANGED]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change)-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       collect(DISTINCT past.id) AS recalled",
+     "cypher": "// purpose: Procedural memory decides: for each recalled incident, the runbook that fixed it names a service and a change kind; suspect in-window changes of that kind on that service, most trusted runbook first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:FIXED_WITH]->(rb:Runbook)-[:FOR_SERVICE]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change {kind: rb.kind})-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       rb.id AS runbook, rb.title AS runbook_title, rb.successes AS successes, rb.uses AS uses,\n       collect(DISTINCT past.id) AS recalled\nORDER BY toFloat(successes) / uses DESC, at DESC",
      "params": {
       "incident_id": "inc:checkout-latency",
       "window": 7200,
       "min_score": 3
      },
      "rows": [],
-     "ms": 1.1,
+     "ms": 2.97,
      "readonly": true
     }
    ],
@@ -963,17 +970,17 @@
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -988,7 +995,7 @@
        ]
       }
      ],
-     "ms": 0.86,
+     "ms": 2.08,
      "readonly": true
     },
     {
@@ -1008,12 +1015,12 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.27,
+     "ms": 1.23,
      "readonly": true
     },
     {
      "name": "path_suspects",
-     "cypher": "// purpose: Multi-hop suspects: every change in the alert window on a service the alerting service depends on at alert time, nearest first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(s:Service)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nWITH a, s, min(length(p)) AS hops\nMATCH (c:Change)-[:CHANGED]->(s)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nRETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops\nORDER BY hops, at DESC",
+     "cypher": "// purpose: Multi-hop suspects: every change in the alert window on a service the alerting service depends on at alert time, nearest first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(s:Service)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nWITH a, s, min(length(p)) AS hops\nMATCH (c:Change)-[:CHANGED]->(s)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nRETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops\nORDER BY hops, at DESC\nLIMIT 10",
      "params": {
       "incident_id": "inc:checkout-latency",
       "window": 7200
@@ -1044,15 +1051,15 @@
        "hops": 2
       }
      ],
-     "ms": 1.06,
+     "ms": 2.52,
      "readonly": true
     },
     {
      "name": "recent_changes",
-     "cypher": "// purpose: The flat baseline: newest changes anywhere before the alert, no traversal. This is what a change log alone would blame.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nMATCH (c:Change)-[:CHANGED]->(s:Service)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nRETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary\nORDER BY at DESC\nLIMIT 3",
+     "cypher": "// purpose: The flat baseline: newest changes anywhere before the alert, no traversal. This is what a change log alone would blame. ($since/$until are literal bounds so the Change.at range index is used.)\nMATCH (c:Change)-[:CHANGED]->(s:Service)\nWHERE c.at >= $since AND c.at <= $until\nRETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary\nORDER BY at DESC\nLIMIT 3",
      "params": {
-      "incident_id": "inc:checkout-latency",
-      "window": 7200
+      "since": 1792029600,
+      "until": 1792036800
      },
      "rows": [
       {
@@ -1077,12 +1084,12 @@
        "summary": "Deploy cart v3.1.0 (UI copy changes)"
       }
      ],
-     "ms": 3.11,
+     "ms": 1.61,
      "readonly": true
     },
     {
      "name": "add_hypotheses",
-     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
+     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at, h.runbook = r.runbook\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
      "params": {
       "incident_id": "inc:checkout-latency",
       "rows": [
@@ -1090,19 +1097,36 @@
         "id": "hyp:checkout-latency:cart-310",
         "change": "chg:cart-310",
         "source": "dependency-path",
-        "hops": 1
+        "hops": 1,
+        "runbook": null
        },
        {
         "id": "hyp:checkout-latency:pricing-2140",
         "change": "chg:pricing-2140",
         "source": "dependency-path",
-        "hops": 1
+        "hops": 1,
+        "runbook": null
        },
        {
         "id": "hyp:checkout-latency:pgw-pool-1",
         "change": "chg:pgw-pool-1",
         "source": "dependency-path",
-        "hops": 2
+        "hops": 2,
+        "runbook": null
+       },
+       {
+        "id": "hyp:checkout-latency:search-420",
+        "change": "chg:search-420",
+        "source": "recent-anywhere",
+        "hops": null,
+        "runbook": null
+       },
+       {
+        "id": "hyp:checkout-latency:legacy-193",
+        "change": "chg:legacy-193",
+        "source": "recent-anywhere",
+        "hops": null,
+        "runbook": null
        }
       ],
       "at": 1792036800
@@ -1116,33 +1140,7 @@
       },
       {
        "id": "hyp:checkout-latency:pgw-pool-1"
-      }
-     ],
-     "ms": 0.7,
-     "readonly": false
-    },
-    {
-     "name": "add_hypotheses",
-     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
-     "params": {
-      "incident_id": "inc:checkout-latency",
-      "rows": [
-       {
-        "id": "hyp:checkout-latency:search-420",
-        "change": "chg:search-420",
-        "source": "recent-anywhere",
-        "hops": null
-       },
-       {
-        "id": "hyp:checkout-latency:legacy-193",
-        "change": "chg:legacy-193",
-        "source": "recent-anywhere",
-        "hops": null
-       }
-      ],
-      "at": 1792036800
-     },
-     "rows": [
+      },
       {
        "id": "hyp:checkout-latency:search-420"
       },
@@ -1150,7 +1148,7 @@
        "id": "hyp:checkout-latency:legacy-193"
       }
      ],
-     "ms": 0.51,
+     "ms": 2.55,
      "readonly": false
     }
    ],
@@ -1313,6 +1311,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -1338,41 +1354,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "open"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "open"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -1387,7 +1385,7 @@
        ]
       }
      ],
-     "ms": 0.9,
+     "ms": 3.28,
      "readonly": true
     },
     {
@@ -1409,7 +1407,7 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.66,
+     "ms": 1.67,
      "readonly": true
     },
     {
@@ -1428,7 +1426,7 @@
        ]
       }
      ],
-     "ms": 0.81,
+     "ms": 1.85,
      "readonly": true
     },
     {
@@ -1443,12 +1441,12 @@
       "until": 1792036800
      },
      "rows": [],
-     "ms": 0.54,
+     "ms": 1.22,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:checkout-latency:cart-310",
       "evidence_id": "ev:checkout-latency:cart-310",
@@ -1466,7 +1464,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.71,
+     "ms": 3.15,
      "readonly": false
     }
    ],
@@ -1568,6 +1566,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -1593,41 +1609,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "open"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -1642,7 +1640,7 @@
        ]
       }
      ],
-     "ms": 1.54,
+     "ms": 2.98,
      "readonly": true
     },
     {
@@ -1664,7 +1662,7 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.53,
+     "ms": 1.59,
      "readonly": true
     },
     {
@@ -1690,7 +1688,7 @@
        ]
       }
      ],
-     "ms": 0.59,
+     "ms": 1.21,
      "readonly": true
     },
     {
@@ -1712,12 +1710,12 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.39,
+     "ms": 1.14,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:checkout-latency:pricing-2140",
       "evidence_id": "ev:checkout-latency:pricing-2140",
@@ -1735,7 +1733,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.38,
+     "ms": 1.37,
      "readonly": false
     }
    ],
@@ -1842,6 +1840,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -1867,41 +1883,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "open"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -1916,7 +1914,7 @@
        ]
       }
      ],
-     "ms": 0.94,
+     "ms": 2.84,
      "readonly": true
     },
     {
@@ -1938,7 +1936,7 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.56,
+     "ms": 1.64,
      "readonly": true
     },
     {
@@ -1958,7 +1956,7 @@
        ]
       }
      ],
-     "ms": 0.31,
+     "ms": 0.95,
      "readonly": true
     },
     {
@@ -1990,12 +1988,12 @@
        "summary": "p99 5.1s on POST /checkout"
       }
      ],
-     "ms": 0.29,
+     "ms": 1.09,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:checkout-latency:pgw-pool-1",
       "evidence_id": "ev:checkout-latency:pgw-pool-1",
@@ -2014,7 +2012,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.37,
+     "ms": 1.58,
      "readonly": false
     }
    ],
@@ -2133,6 +2131,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -2158,41 +2174,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "open"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -2207,7 +2205,7 @@
        ]
       }
      ],
-     "ms": 1.71,
+     "ms": 3.03,
      "readonly": true
     },
     {
@@ -2229,7 +2227,7 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.65,
+     "ms": 1.7,
      "readonly": true
     },
     {
@@ -2241,7 +2239,7 @@
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.28,
+     "ms": 0.85,
      "readonly": true
     },
     {
@@ -2252,12 +2250,12 @@
       "target": "svc:search"
      },
      "rows": [],
-     "ms": 0.89,
+     "ms": 1.56,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:checkout-latency:search-420",
       "evidence_id": "ev:checkout-latency:search-420",
@@ -2272,7 +2270,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.74,
+     "ms": 1.49,
      "readonly": false
     }
    ],
@@ -2379,6 +2377,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "open"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -2404,41 +2420,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "open"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -2453,7 +2451,7 @@
        ]
       }
      ],
-     "ms": 1.78,
+     "ms": 2.26,
      "readonly": true
     },
     {
@@ -2475,7 +2473,7 @@
        "at": 1792036800
       }
      ],
-     "ms": 0.62,
+     "ms": 1.31,
      "readonly": true
     },
     {
@@ -2487,7 +2485,7 @@
       "at": 1792036800
      },
      "rows": [],
-     "ms": 0.3,
+     "ms": 0.88,
      "readonly": true
     },
     {
@@ -2508,32 +2506,12 @@
        ]
       }
      ],
-     "ms": 0.25,
-     "readonly": true
-    },
-    {
-     "name": "anomalies_between",
-     "cypher": "// purpose: Which of the given services showed an anomaly between the change and the alert.\nUNWIND $services AS sid\nMATCH (x:Anomaly)-[:ON]->(s:Service {id: sid})\nWHERE x.at >= $since AND x.at <= $until\nRETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary",
-     "params": {
-      "services": [
-       "svc:legacy-billing"
-      ],
-      "since": 1792035900,
-      "until": 1792036800
-     },
-     "rows": [
-      {
-       "service": "svc:legacy-billing",
-       "first_at": 1792036080,
-       "summary": "5xx on /invoice"
-      }
-     ],
-     "ms": 0.33,
+     "ms": 0.77,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence.\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' THEN [rb] ELSE [] END | SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:checkout-latency:legacy-193",
       "evidence_id": "ev:checkout-latency:legacy-193",
@@ -2551,7 +2529,7 @@
        "status": "refuted"
       }
      ],
-     "ms": 0.63,
+     "ms": 0.94,
      "readonly": false
     }
    ],
@@ -2673,6 +2651,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -2698,41 +2694,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "refuted"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -2747,7 +2725,7 @@
        ]
       }
      ],
-     "ms": 1.11,
+     "ms": 2.5,
      "readonly": true
     }
    ],
@@ -2762,7 +2740,7 @@
    "role": "comms",
    "tool": "page_on_call",
    "reason": "The culprit lives in svc:payments-gw; page its owning team too.",
-   "summary": "Paged Bram Nakamura (@bram, Payments) for svc:payments-gw",
+   "summary": "Paged Bram Nakamura (@bram.nakamura, Payments) for svc:payments-gw",
    "writes": true,
    "queries": [
     {
@@ -2848,6 +2826,24 @@
        ],
        "hypotheses": [
         {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
          "hops": 2,
@@ -2873,41 +2869,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "refuted"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -2922,7 +2900,7 @@
        ]
       }
      ],
-     "ms": 1.69,
+     "ms": 3.28,
      "readonly": true
     },
     {
@@ -2942,7 +2920,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.93,
+     "ms": 1.2,
      "readonly": true
     },
     {
@@ -2956,12 +2934,12 @@
       {
        "person": "person:bram-nakamura",
        "name": "Bram Nakamura",
-       "handle": "@bram",
+       "handle": "@bram.nakamura",
        "team": "team:payments",
        "team_name": "Payments"
       }
      ],
-     "ms": 0.65,
+     "ms": 1.11,
      "readonly": true
     },
     {
@@ -2978,7 +2956,7 @@
        "first_for": "svc:payments-gw"
       }
      ],
-     "ms": 0.28,
+     "ms": 1.0,
      "readonly": false
     }
    ],
@@ -3004,13 +2982,304 @@
    "data": {
     "person": "person:bram-nakamura",
     "name": "Bram Nakamura",
-    "handle": "@bram",
+    "handle": "@bram.nakamura",
     "team": "team:payments",
     "team_name": "Payments"
    }
   },
   {
    "seq": 15,
+   "role": "comms",
+   "tool": "who_knows",
+   "reason": "Who knows svc:payments-gw best? Name them in the update.",
+   "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team",
+   "writes": false,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:checkout-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:checkout-latency",
+       "status": "open",
+       "service": "svc:checkout",
+       "alert": "alert:checkout-latency",
+       "at": 1792036800,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:checkout-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:checkout",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:checkout",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:checkout-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:checkout-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:checkout-latency",
+         "tool": "propose_hypotheses"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:checkout-latency:cart-310",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:checkout-latency:pricing-2140",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:checkout-latency:pgw-pool-1",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:checkout-latency:search-420",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:checkout-latency:legacy-193",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792034400,
+         "change_id": "chg:pgw-pool-1",
+         "hops": 2,
+         "id": "hyp:checkout-latency:pgw-pool-1",
+         "service": "svc:payments-gw",
+         "source": "dependency-path",
+         "status": "supported"
+        },
+        {
+         "at": 1792031100,
+         "change_id": "chg:pricing-2140",
+         "hops": 1,
+         "id": "hyp:checkout-latency:pricing-2140",
+         "service": "svc:pricing",
+         "source": "dependency-path",
+         "status": "refuted"
+        },
+        {
+         "at": 1792035300,
+         "change_id": "chg:cart-310",
+         "hops": 1,
+         "id": "hyp:checkout-latency:cart-310",
+         "service": "svc:cart",
+         "source": "dependency-path",
+         "status": "refuted"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:fraud-check"
+        },
+        {
+         "incident": "inc:1002",
+         "score": 2,
+         "cause_service": "svc:auth"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:0911",
+         "score": 3,
+         "cause_service": "svc:inventory"
+        }
+       ]
+      }
+     ],
+     "ms": 2.72,
+     "readonly": true
+    },
+    {
+     "name": "who_knows",
+     "cypher": "// purpose: Who knows a service, ranked by graph evidence: on the owning team (3), authored changes to it (2 each), was paged for it in an incident (1 each).\nMATCH (s:Service {id: $service})\nMATCH (p:Person)-[:MEMBER_OF]->(t:Team)\nWITH s, p, t,\n     size([(s)<-[:OWNS]-(t) | 1]) AS owns,\n     size(list.dedup([(s)<-[:CHANGED]-(c:Change)-[:AUTHORED_BY]->(p) | c.id])) AS changes,\n     size(list.dedup([(i:Incident)-[pg:PAGED]->(p) WHERE pg.for_service = s.id | i.id])) AS incidents\nWHERE owns + changes + incidents > 0\nRETURN p.id AS person, p.name AS name, p.handle AS handle, t.name AS team, owns > 0 AS on_owning_team,\n       changes, incidents, 3 * owns + 2 * changes + incidents AS score\nORDER BY score DESC, name\nLIMIT 5",
+     "params": {
+      "service": "svc:payments-gw"
+     },
+     "rows": [
+      {
+       "person": "person:sana-brandt",
+       "name": "Sana Brandt",
+       "handle": "@sana.brandt",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 3,
+       "incidents": 0,
+       "score": 9
+      },
+      {
+       "person": "person:bram-nakamura",
+       "name": "Bram Nakamura",
+       "handle": "@bram.nakamura",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 2,
+       "incidents": 1,
+       "score": 8
+      },
+      {
+       "person": "person:quinn-tanaka",
+       "name": "Quinn Tanaka",
+       "handle": "@quinn.tanaka",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 1,
+       "incidents": 0,
+       "score": 5
+      },
+      {
+       "person": "person:lena-costa",
+       "name": "Lena Costa",
+       "handle": "@lena.costa",
+       "team": "Payments",
+       "on_owning_team": true,
+       "changes": 0,
+       "incidents": 0,
+       "score": 3
+      }
+     ],
+     "ms": 5.49,
+     "readonly": true
+    },
+    {
+     "name": "record_consult",
+     "cypher": "// purpose: Comms records who it will ask about the culprit service (an action the who_knows ranking drives).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[x:CONSULTED]->(p)\nON CREATE SET x.for_service = $service, x.score = $score",
+     "params": {
+      "incident_id": "inc:checkout-latency",
+      "person": "person:sana-brandt",
+      "service": "svc:payments-gw",
+      "score": 9
+     },
+     "rows": [],
+     "ms": 1.32,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:payments-gw",
+     "person:sana-brandt",
+     "person:bram-nakamura",
+     "person:quinn-tanaka",
+     "person:lena-costa"
+    ],
+    "edges": []
+   },
+   "data": [
+    {
+     "person": "person:sana-brandt",
+     "name": "Sana Brandt",
+     "handle": "@sana.brandt",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 3,
+     "incidents": 0,
+     "score": 9
+    },
+    {
+     "person": "person:bram-nakamura",
+     "name": "Bram Nakamura",
+     "handle": "@bram.nakamura",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 2,
+     "incidents": 1,
+     "score": 8
+    },
+    {
+     "person": "person:quinn-tanaka",
+     "name": "Quinn Tanaka",
+     "handle": "@quinn.tanaka",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 1,
+     "incidents": 0,
+     "score": 5
+    },
+    {
+     "person": "person:lena-costa",
+     "name": "Lena Costa",
+     "handle": "@lena.costa",
+     "team": "Payments",
+     "on_owning_team": true,
+     "changes": 0,
+     "incidents": 0,
+     "score": 3
+    }
+   ]
+  },
+  {
+   "seq": 16,
    "role": "comms",
    "tool": "blast_radius",
    "reason": "Who else depends on svc:payments-gw? Warn them before they page us.",
@@ -3101,9 +3370,32 @@
          "role": "comms",
          "target": "svc:payments-gw",
          "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "who_knows"
         }
        ],
        "hypotheses": [
+        {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
         {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
@@ -3130,41 +3422,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "refuted"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -3179,7 +3453,7 @@
        ]
       }
      ],
-     "ms": 1.73,
+     "ms": 2.32,
      "readonly": true
     },
     {
@@ -3199,7 +3473,7 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.99,
+     "ms": 0.85,
      "readonly": true
     },
     {
@@ -3292,7 +3566,7 @@
        ]
       }
      ],
-     "ms": 1.64,
+     "ms": 1.34,
      "readonly": true
     },
     {
@@ -3333,7 +3607,7 @@
       ]
      },
      "rows": [],
-     "ms": 1.02,
+     "ms": 1.36,
      "readonly": false
     }
    ],
@@ -3526,7 +3800,7 @@
    ]
   },
   {
-   "seq": 16,
+   "seq": 17,
    "role": "comms",
    "tool": "post_update",
    "reason": "Write the status update with owners, cause and sources.",
@@ -3621,10 +3895,33 @@
         {
          "role": "comms",
          "target": "svc:payments-gw",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
          "tool": "blast_radius"
         }
        ],
        "hypotheses": [
+        {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
         {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
@@ -3651,41 +3948,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "refuted"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -3700,7 +3979,7 @@
        ]
       }
      ],
-     "ms": 2.57,
+     "ms": 2.62,
      "readonly": true
     },
     {
@@ -3720,12 +3999,12 @@
        "alert_name": "checkout p99 latency above 2s"
       }
      ],
-     "ms": 0.92,
+     "ms": 1.25,
      "readonly": true
     },
     {
      "name": "update_facts",
-     "cypher": "// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis {status: 'supported'})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\nOPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)\nWHERE rb.kind = c.kind\nRETURN a.name AS alert, impacts, paged, c.id AS change, c.summary AS change_summary, s.id AS cause_service,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, successes: rb.successes}) AS runbooks",
+     "cypher": "// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)\nWITH i, a, impacts, paged,\n     collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nWITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status\nLIMIT 1\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\nOPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)\nWHERE rb.kind = c.kind\nRETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,\n       s.id AS cause_service,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,\n                         uses: rb.uses}) AS runbooks",
      "params": {
       "incident_id": "inc:checkout-latency"
      },
@@ -3764,14 +4043,23 @@
        ],
        "paged": [
         {
-         "handle": "@bram",
+         "handle": "@bram.nakamura",
          "name": "Bram Nakamura",
          "team": "Payments"
         },
         {
-         "handle": "@ravi",
+         "handle": "@ravi.moreau",
          "name": "Ravi Moreau",
          "team": "Checkout"
+        }
+       ],
+       "experts": [
+        {
+         "handle": "@sana.brandt",
+         "id": "person:sana-brandt",
+         "name": "Sana Brandt",
+         "service": "svc:payments-gw",
+         "team": "Payments"
         }
        ],
        "change": "chg:pgw-pool-1",
@@ -3785,13 +4073,15 @@
        "runbooks": [
         {
          "id": null,
+         "steps": null,
          "successes": null,
-         "title": null
+         "title": null,
+         "uses": null
         }
        ]
       }
      ],
-     "ms": 3.43,
+     "ms": 4.93,
      "readonly": true
     },
     {
@@ -3801,20 +4091,6 @@
       "incident_id": "inc:checkout-latency"
      },
      "rows": [
-      {
-       "change": "chg:pricing-2140",
-       "service": "svc:pricing",
-       "summary": "Deploy pricing v2.14.0",
-       "reason": "change was rolled back before the alert fired",
-       "source": "dependency-path"
-      },
-      {
-       "change": "chg:cart-310",
-       "service": "svc:cart",
-       "summary": "Deploy cart v3.1.0 (UI copy changes)",
-       "reason": "cart showed no anomaly after the change",
-       "source": "dependency-path"
-      },
       {
        "change": "chg:legacy-193",
        "service": "svc:legacy-billing",
@@ -3828,31 +4104,46 @@
        "summary": "Deploy search v4.2.0 (new ranking model)",
        "reason": "no dependency path from checkout to search",
        "source": "recent-anywhere"
+      },
+      {
+       "change": "chg:pricing-2140",
+       "service": "svc:pricing",
+       "summary": "Deploy pricing v2.14.0",
+       "reason": "change was rolled back before the alert fired",
+       "source": "dependency-path"
+      },
+      {
+       "change": "chg:cart-310",
+       "service": "svc:cart",
+       "summary": "Deploy cart v3.1.0 (UI copy changes)",
+       "reason": "cart showed no anomaly after the change",
+       "source": "dependency-path"
       }
      ],
-     "ms": 1.7,
+     "ms": 1.34,
      "readonly": true
     },
     {
      "name": "post_update",
-     "cypher": "// purpose: Post the status update on the incident and link it to every node it cites.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nUNWIND $cites AS cid\nMATCH (n {id: cid})\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
+     "cypher": "// purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nOPTIONAL MATCH (m)-[old:CITES]->()\nDELETE old\nWITH DISTINCT m\nUNWIND $cites AS cid\nOPTIONAL MATCH (c:Change {id: cid})\nOPTIONAL MATCH (t:Ticket {id: cid})\nOPTIONAL MATCH (msg:Message {id: cid})\nOPTIONAL MATCH (rb:Runbook {id: cid})\nOPTIONAL MATCH (p:Person {id: cid})\nWITH m, coalesce(c, t, msg, rb, p) AS n\nWHERE n IS NOT NULL\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
      "params": {
       "incident_id": "inc:checkout-latency",
       "message_id": "msg:update:inc:checkout-latency",
-      "text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change); legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search)\nPaged: @bram (Payments), @ravi (Checkout)\nAlso at risk: payments, refunds, subscriptions\nSources: ticket:CR-881, msg:pay-deploys-1",
+      "text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search); pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change)\nPaged: @bram.nakamura (Payments), @ravi.moreau (Checkout)\nAlso at risk: payments, refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nSources: ticket:CR-881, msg:pay-deploys-1",
       "at": 1792036800,
       "cites": [
        "chg:pgw-pool-1",
        "ticket:CR-881",
-       "msg:pay-deploys-1"
+       "msg:pay-deploys-1",
+       "person:sana-brandt"
       ]
      },
      "rows": [
       {
-       "cited": 3
+       "cited": 4
       }
      ],
-     "ms": 1.68,
+     "ms": 1.74,
      "readonly": false
     }
    ],
@@ -3860,21 +4151,31 @@
     "nodes": [
      "chg:pgw-pool-1",
      "ticket:CR-881",
-     "msg:pay-deploys-1"
+     "msg:pay-deploys-1",
+     "person:sana-brandt"
     ],
     "edges": []
    },
    "data": {
-    "text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change); legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search)\nPaged: @bram (Payments), @ravi (Checkout)\nAlso at risk: payments, refunds, subscriptions\nSources: ticket:CR-881, msg:pay-deploys-1",
+    "text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search); pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change)\nPaged: @bram.nakamura (Payments), @ravi.moreau (Checkout)\nAlso at risk: payments, refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nSources: ticket:CR-881, msg:pay-deploys-1",
     "cites": [
      "chg:pgw-pool-1",
      "ticket:CR-881",
-     "msg:pay-deploys-1"
-    ]
+     "msg:pay-deploys-1",
+     "person:sana-brandt"
+    ],
+    "runbook": null,
+    "expert": {
+     "handle": "@sana.brandt",
+     "id": "person:sana-brandt",
+     "name": "Sana Brandt",
+     "service": "svc:payments-gw",
+     "team": "Payments"
+    }
    }
   },
   {
-   "seq": 17,
+   "seq": 18,
    "role": "comms",
    "tool": "handoff",
    "reason": "Update posted; waiting for a human to confirm the fix.",
@@ -3969,6 +4270,11 @@
         {
          "role": "comms",
          "target": "svc:payments-gw",
+         "tool": "who_knows"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
          "tool": "blast_radius"
         },
         {
@@ -3978,6 +4284,24 @@
         }
        ],
        "hypotheses": [
+        {
+         "at": 1792035900,
+         "change_id": "chg:legacy-193",
+         "hops": null,
+         "id": "hyp:checkout-latency:legacy-193",
+         "service": "svc:legacy-billing",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
+        {
+         "at": 1792036320,
+         "change_id": "chg:search-420",
+         "hops": null,
+         "id": "hyp:checkout-latency:search-420",
+         "service": "svc:search",
+         "source": "recent-anywhere",
+         "status": "refuted"
+        },
         {
          "at": 1792034400,
          "change_id": "chg:pgw-pool-1",
@@ -4004,41 +4328,23 @@
          "service": "svc:cart",
          "source": "dependency-path",
          "status": "refuted"
-        },
-        {
-         "at": 1792035900,
-         "change_id": "chg:legacy-193",
-         "hops": null,
-         "id": "hyp:checkout-latency:legacy-193",
-         "service": "svc:legacy-billing",
-         "source": "recent-anywhere",
-         "status": "refuted"
-        },
-        {
-         "at": 1792036320,
-         "change_id": "chg:search-420",
-         "hops": null,
-         "id": "hyp:checkout-latency:search-420",
-         "service": "svc:search",
-         "source": "recent-anywhere",
-         "status": "refuted"
         }
        ],
        "recalls": [
         {
          "incident": "inc:1003",
          "score": 2,
-         "cause_service": "svc:redis-cache"
+         "cause_service": "svc:fraud-check"
         },
         {
          "incident": "inc:1002",
          "score": 2,
-         "cause_service": "svc:checkout"
+         "cause_service": "svc:auth"
         },
         {
-         "incident": "inc:1001",
-         "score": 2,
-         "cause_service": "svc:promotions"
+         "incident": "inc:1000",
+         "score": 3,
+         "cause_service": "svc:auth"
         },
         {
          "incident": "inc:0877",
@@ -4053,7 +4359,7 @@
        ]
       }
      ],
-     "ms": 2.04,
+     "ms": 2.5,
      "readonly": true
     }
    ],
@@ -4146,6 +4452,18 @@
      "runbook": "rb:inventory-rollback",
      "runbook_title": "Roll back inventory deploy",
      "score": 3
+    },
+    {
+     "incident": "inc:1000",
+     "title": "auth degraded",
+     "symptom": "latency",
+     "cause_service": "svc:auth",
+     "cause_kind": "deploy",
+     "cause_change": "chg:hist-0",
+     "hops": 1,
+     "runbook": "rb:hist-0",
+     "runbook_title": "Recover auth",
+     "score": 3
     }
    ],
    "suspects": [],
@@ -4155,14 +4473,14 @@
    {
     "person": "person:ravi-moreau",
     "name": "Ravi Moreau",
-    "handle": "@ravi",
+    "handle": "@ravi.moreau",
     "team": "team:checkout",
     "team_name": "Checkout"
    },
    {
     "person": "person:bram-nakamura",
     "name": "Bram Nakamura",
-    "handle": "@bram",
+    "handle": "@bram.nakamura",
     "team": "team:payments",
     "team_name": "Payments"
    }
@@ -4177,33 +4495,17 @@
    "svc:refunds",
    "svc:subscriptions"
   ],
-  "update_text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change); legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search)\nPaged: @bram (Payments), @ravi (Checkout)\nAlso at risk: payments, refunds, subscriptions\nSources: ticket:CR-881, msg:pay-deploys-1",
+  "update_text": "[checkout p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, checkout, mobile-bff, web-frontend\nLikely cause: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup) (payments-gw, by Sana Brandt).\nRuled out: legacy-billing (checkout no longer depends on legacy-billing (dependency retired before the alert)); search (no dependency path from checkout to search); pricing (change was rolled back before the alert fired); cart (cart showed no anomaly after the change)\nPaged: @bram.nakamura (Payments), @ravi.moreau (Checkout)\nAlso at risk: payments, refunds, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nSources: ticket:CR-881, msg:pay-deploys-1",
   "investigator_calls": 8,
   "hypotheses_checked": 5,
-  "highlight": {
-   "nodes": [
-    "svc:checkout",
-    "svc:payments",
-    "svc:payments-gw",
-    "chg:pgw-pool-1"
-   ],
-   "edges": [
-    [
-     "svc:checkout",
-     "svc:payments",
-     "DEPENDS_ON"
-    ],
-    [
-     "svc:payments",
-     "svc:payments-gw",
-     "DEPENDS_ON"
-    ],
-    [
-     "chg:pgw-pool-1",
-     "svc:payments-gw",
-     "CHANGED"
-    ]
-   ]
+  "checks_to_culprit": 3,
+  "runbook": null,
+  "expert": {
+   "handle": "@sana.brandt",
+   "id": "person:sana-brandt",
+   "name": "Sana Brandt",
+   "service": "svc:payments-gw",
+   "team": "Payments"
   }
  }
 }

@@ -8,7 +8,8 @@ The story (fixed, hand-written so the demo is repeatable):
     - pricing deploy:               on the path, but rolled back before the alert
     - cart deploy:                  on the path, but cart shows no anomaly
   Act 2 at T2 = T1 + 3 days: "refunds p99 latency". Same upstream (refunds -> payments -> payments-gw),
-  same kind of change. With act 1 resolved, memory solves it in one check.
+  same kind of change. A newer deploy on payments (1 hop, healthy) is what nearest-first checking tries
+  first; with act 1 resolved, memory skips it and solves the incident in one check.
 Noise (random, seeded): extra people, changes, anomalies and past incidents, kept outside both act windows.
 All names are fake. All times are epoch seconds.
 """
@@ -78,7 +79,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
         for n in members:
             pid = "person:" + n.lower().replace(" ", "-")
             team_people[tid].append(pid)
-            d["people"].append({"id": pid, "name": n, "handle": "@" + n.split()[0].lower(),
+            d["people"].append({"id": pid, "name": n, "handle": "@" + n.lower().replace(" ", "."),
                                 "team": f"team:{tid}"})
         for s in services:
             d["services"].append({"id": _svc(s), "name": s, "tier": 1 if s in TIER1 else 2,
@@ -139,6 +140,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
            team_people["platform"][2], version="7.7.0")
     change("chg:fraud-512", "deploy", "fraud-check", T2 - 50 * MIN, "Deploy fraud-check v5.1.2", pay[0],
            version="5.1.2")
+    change("chg:pay-77", "deploy", "payments", T2 - 20 * MIN, "Deploy payments v7.7.0 (receipt template)", pay[2],
+           version="7.7.0")
     anomaly("anom:pgw-2", "payments-gw", T2 - 28 * MIN, "saturation", "connection pool exhausted, 140 waiters")
     anomaly("anom:pay-2", "payments", T2 - 27 * MIN, "latency", "p99 3.8s calling payments-gw")
     anomaly("anom:refunds-2", "refunds", T2 - 25 * MIN, "latency", "p99 4.4s on POST /refunds")
@@ -147,6 +150,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
                          "text": "Quarterly config template rollout across payments services."})
 
     # --- history: past incidents with runbooks (episodic + procedural memory already on file) ----------
+    owner_of = {s: tid for tid, (_, services) in TEAMS.items() for s in services}
+
     def past(iid, title, origin, symptom, at, cause, cause_kind, cause_svc, rb_id, rb_title, steps):
         change(cause, cause_kind, cause_svc, at - 30 * MIN, f"{cause_kind} on {cause_svc}",
                rng.choice(sum(team_people.values(), [])))
@@ -154,7 +159,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
                               "kind": cause_kind, "uses": 1, "successes": 1})
         d["incidents"].append({"id": iid, "title": title, "service": _svc(origin), "symptom": symptom,
                                "opened_at": at, "resolved_at": at + 2 * HOUR, "status": "resolved",
-                               "cause": cause, "runbook": rb_id})
+                               "cause": cause, "runbook": rb_id, "paged_for": _svc(cause_svc),
+                               "paged": rng.choice(team_people[owner_of[cause_svc]])})
 
     past("inc:0911", "Checkout slow during flash sale", "checkout", "latency", T1 - 60 * DAY,
          "chg:inv-880", "deploy", "inventory", "rb:inventory-rollback", "Roll back inventory deploy",

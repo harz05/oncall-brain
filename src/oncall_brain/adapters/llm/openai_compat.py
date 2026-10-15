@@ -7,6 +7,7 @@ timeout) falls back to the deterministic planner, so a flaky model can slow the 
 """
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -21,6 +22,7 @@ from oncall_brain.domain.planner import next_decision
 TIMEOUT = 15.0
 ROLES = ["triage", "investigator", "comms"]  # handoffs only go forward, so a model cannot loop the roles
 HUMAN_ONLY = {"resolve_incident"}  # confirming the root cause is the human's call, never an agent's
+ID_PREFIX = {"service": "svc", "from_service": "svc", "to_service": "svc", "change_id": "chg"}
 
 SYSTEM = """You are the {role} agent of an on-call team: triage -> investigator -> comms.
 The user message is the incident board: the shared incident state, read fresh from a FalkorDB graph before every
@@ -42,7 +44,7 @@ FINISH = {
         "handoff_to": {"type": "string", "enum": ROLES[1:]}}, "required": ["reason"]},
 }
 
-# (tool name or None, args, the model's text). Raises httpx.HTTPError / ValueError / KeyError on a bad reply.
+# (tool name or None, args, the model's text). May raise anything on a malformed reply; guarded() falls back.
 Ask = Callable[[str, str, list[dict[str, Any]]], tuple[str | None, dict[str, Any], str]]
 
 
@@ -66,9 +68,9 @@ def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: 
     """Ask the model, then accept its choice only if it is a known tool with valid args and not a repeat."""
     try:
         name, args, text = ask(SYSTEM.format(role=role), json.dumps(board, default=str), tool_list(tools))
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
+    except Exception as e:  # any malformed reply (null message, odd shapes) must not crash the run
         return fallback(role, board, _why(e))
-    if name is None or not isinstance(args, dict):
+    if not isinstance(name, str) or not isinstance(args, dict):
         return fallback(role, board, "no usable tool call")
     if name == "finish":
         nxt = ROLES[ROLES.index(role) + 1:]
@@ -77,12 +79,20 @@ def guarded(role: str, board: dict[str, Any], tools: list[dict[str, Any]], ask: 
     if name not in REGISTRY or name in HUMAN_ONLY:
         return fallback(role, board, f"unknown tool {name!r}")
     tool = REGISTRY[name]
-    if "incident_id" in tool.args_model.model_fields:  # same default the agent loop applies
-        args.setdefault("incident_id", board["incident"]["id"])
+    fields = tool.args_model.model_fields
+    args = {k: v for k, v in args.items() if k in fields}  # stray keys would skew _target and the repeat check
+    if "incident_id" in fields:  # never the model's: an invented id could write into another incident
+        args["incident_id"] = board["incident"]["id"]
     try:
         tool.args_model.model_validate(args)
     except ValidationError as e:
         return fallback(role, board, f"invalid args for {name} ({e.error_count()} errors)")
+    # Mangled or invented ids make the tool raise mid-run; catch them here while the planner can still step in.
+    if "hypothesis_id" in fields and args["hypothesis_id"] not in {
+            h["id"] for h in board["hypotheses"] if h["status"] == "open"}:
+        return fallback(role, board, "unknown/closed hypothesis id")
+    if bad := [k for k, p in ID_PREFIX.items() if k in args and not re.fullmatch(rf"{p}:\S+", args[k])]:
+        return fallback(role, board, f"malformed {bad[0]}")
     if any(s["tool"] == name and s["target"] == _target(args) for s in board["steps"]):
         return fallback(role, board, f"{name} on {_target(args) or 'this incident'} already ran")
     return Decision(action="call", tool=name, args=args, reason=text or f"LLM chose {name}")
@@ -106,7 +116,8 @@ class OpenAICompatProvider:
         r = self._client.post(self.url, json=body, headers=self._headers)
         r.raise_for_status()
         msg = r.json()["choices"][0]["message"]
-        text = (msg.get("content") or "").strip()
+        text = msg.get("content")
+        text = text.strip() if isinstance(text, str) else ""  # null, or a list of parts on some servers
         calls = msg.get("tool_calls") or []
         if not calls:
             return None, {}, text

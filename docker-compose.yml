@@ -1,5 +1,7 @@
 # docker compose up --build              -> UI + API on http://localhost:8000, FalkorDB Browser on http://localhost:3000
 # docker compose --profile mcp up --build -> also the MCP server (streamable HTTP) on http://localhost:8001/mcp
+# Every port is published on 127.0.0.1 only. To expose one on purpose, drop its "127.0.0.1:" prefix, add the public
+# name to ALLOWED_HOSTS and set API_TOKEN (see .env.example). FalkorDB itself has no password here: keep it local.
 x-app-env: &app-env
   FALKORDB_HOST: falkordb
   # Optional real-LLM planner; without a key the deterministic planner runs.
@@ -7,13 +9,16 @@ x-app-env: &app-env
   LLM_MODEL: ${LLM_MODEL:-}
   LLM_BASE_URL: ${LLM_BASE_URL:-}
   LLM_API_KEY: ${LLM_API_KEY:-}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+  API_TOKEN: ${API_TOKEN:-}
+  MAX_TENANTS: ${MAX_TENANTS:-20}
 
 services:
   falkordb:
     image: falkordb/falkordb:v4.22.0  # pinned so procedures and Cypher behaviour match local dev
     ports:
-      - "6379:6379"
-      - "3000:3000"  # FalkorDB Browser
+      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:3000:3000"  # FalkorDB Browser
     volumes:
       - falkordb-data:/var/lib/falkordb/data  # the image's data dir (/data is a symlink to it)
     healthcheck:
@@ -29,7 +34,7 @@ services:
       falkordb:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:  # uvicorn starts only after seeding, so healthy means the default tenant exists
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 5s
@@ -40,14 +45,14 @@ services:
   mcp:
     build: .
     profiles: ["mcp"]
-    # 0.0.0.0, not the 127.0.0.1 default, so the published port reaches it. Endpoint: http://localhost:8001/mcp
+    # 0.0.0.0 inside the container, not the 127.0.0.1 default, so the published port reaches it.
     command: python -m oncall_brain.mcp_server --http --host 0.0.0.0 --port 8001
     environment: *app-env
     depends_on:
       app:
         condition: service_healthy
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
 
 volumes:
   falkordb-data:

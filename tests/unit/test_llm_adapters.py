@@ -13,11 +13,16 @@ from oncall_brain.services import tools as _tools  # noqa: F401  (registers the 
 TOOLS = registry.specs()
 
 
-def board(*steps: tuple[str, str]) -> dict:
+def board(*steps: tuple[str, str], hypotheses: list | None = None) -> dict:
     return {"incident": {"id": "inc:x", "status": "open", "service": "svc:checkout", "alert": "alert:x", "at": 0,
                          "symptom": "latency"},
             "steps": [{"tool": t, "target": target, "role": "triage"} for t, target in steps],
-            "hypotheses": [], "recalls": [], "cause_service": None}
+            "hypotheses": hypotheses or [], "recalls": [], "cause_service": None}
+
+
+def hyp(hid: str, status: str) -> dict:
+    return {"id": hid, "change_id": "chg:" + hid, "service": "svc:db", "status": status, "source": "path", "hops": 1,
+            "at": 0}
 
 
 def openai_reply(tool: str, args: dict, text: str = "") -> dict:
@@ -90,11 +95,70 @@ def test_finish_hands_off_and_defaults_the_next_role(kind):
     ("resolve_incident", {"change_id": "chg:1"}, [], "unknown tool 'resolve_incident'"),
     ("check_hypothesis", {}, [], "invalid args for check_hypothesis"),
     ("blast_radius", {"service": "svc:checkout"}, [("blast_radius", "svc:checkout")], "blast_radius on svc:checkout"),
+    ("blast_radius", {"service": "checkout"}, [], "malformed service"),
+    ("dependency_path", {"from_service": "svc:checkout", "to_service": "svc:"}, [], "malformed to_service"),
+    ("change_story", {"change_id": "pgw-pool-1"}, [], "malformed change_id"),
+    ("check_hypothesis", {"hypothesis_id": "1"}, [], "unknown/closed hypothesis id"),
 ])
 def test_off_script_choices_fall_back_to_the_planner(kind, tool, args, steps, why):
     d = make(kind, REPLY[kind](tool, args)).decide("triage", board(*steps), TOOLS)
     assert d.reason.startswith(f"LLM fallback: {why}")
     assert d.tool == ("page_on_call" if steps else "blast_radius")  # what the deterministic planner picks
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(("hid", "ok"), [("hyp:a", True), ("a", False), ("hyp:b", False), ("hyp:zzz", False)])
+def test_check_hypothesis_only_on_an_open_hypothesis_of_this_incident(kind, hid, ok):
+    b = board(("recall_similar", "inc:x"), hypotheses=[hyp("hyp:a", "open"), hyp("hyp:b", "refuted")])
+    d = make(kind, REPLY[kind]("check_hypothesis", {"hypothesis_id": hid})).decide("investigator", b, TOOLS)
+    assert d.args == {"hypothesis_id": "hyp:a"}  # the model's pick, or the planner's first open hypothesis
+    assert d.reason.startswith("LLM fallback: unknown/closed hypothesis id") is not ok
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_model_cannot_point_a_tool_at_another_incident(kind):
+    args = {"service": "svc:checkout", "incident_id": "inc:someone-else", "hypothesis_id": "stray"}
+    d = make(kind, REPLY[kind]("blast_radius", args)).decide("triage", board(), TOOLS)
+    assert (d.action, d.args) == ("call", {"service": "svc:checkout", "incident_id": "inc:x"})
+
+
+CALL = {"name": "blast_radius", "arguments": '{"service": "svc:checkout"}'}
+USE = {"type": "tool_use", "id": "t1", "name": "blast_radius", "input": {"service": "svc:checkout"}}
+
+
+def oa_msg(**msg) -> dict:
+    return {"choices": [{"message": msg}]}
+
+
+def oa_call(**fn) -> dict:
+    return oa_msg(content=None, tool_calls=[{"type": "function", "function": {**CALL, **fn}}])
+
+
+@pytest.mark.parametrize(("kind", "body"), [
+    ("openai", {"choices": []}),
+    ("openai", {"choices": [{"message": None}]}),
+    ("openai", oa_msg(content=None, tool_calls={"function": CALL})),  # an object, not a list
+    ("openai", oa_msg(content=None, tool_calls="blast_radius")),
+    ("openai", oa_msg(content=None, tool_calls=[None])),
+    ("openai", oa_call(arguments="[1, 2]")),  # JSON, but not an object
+    ("openai", oa_call(arguments=7)),
+    ("openai", oa_call(arguments="{not json")),
+    ("openai", oa_call(name=["blast_radius"])),
+    ("anthropic", {"content": None, "stop_reason": "tool_use"}),
+    ("anthropic", {"content": ["blast_radius"], "stop_reason": "tool_use"}),
+    ("anthropic", {"content": [{**USE, "name": ["blast_radius"]}], "stop_reason": "tool_use"}),
+    ("anthropic", {"content": [{**USE, "input": "svc:checkout"}], "stop_reason": "tool_use"}),
+    ("anthropic", {"content": [{"type": "text", "text": None}], "stop_reason": "end_turn"}),
+])
+def test_malformed_replies_fall_back_instead_of_crashing(kind, body):
+    d = make(kind, body).decide("triage", board(), TOOLS)
+    assert d.reason.startswith("LLM fallback: ") and d.tool == "blast_radius"
+
+
+@pytest.mark.parametrize("content", [None, "", [{"type": "text", "text": "parts, not a string"}]])
+def test_openai_odd_content_still_parses_the_call(content):
+    d = make("openai", oa_msg(content=content, tool_calls=[{"function": CALL}])).decide("triage", board(), TOOLS)
+    assert (d.action, d.tool, d.reason) == ("call", "blast_radius", "LLM chose blast_radius")
 
 
 @pytest.mark.parametrize("kind", KINDS)

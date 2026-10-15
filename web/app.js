@@ -36,6 +36,7 @@ function h(tag, attrs = {}, ...kids) {
 }
 const pathChips = (ids) => h('span', { class: 'path' }, ids.map((id, i) => [i ? h('span', { class: 'arrow' }, '→') : null,
   h('span', { class: 'hop' }, short(id))]));
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
   timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST';
 
@@ -166,11 +167,12 @@ function ensureNode(id, anchorId) {
 }
 
 // Turn a highlight {nodes, edges} into graph elements, adding satellites and non-DEPENDS_ON edges on the fly.
+// Satellites without an edge (e.g. who_knows people) sit next to the highlight's first service.
 function elementsFor(hl) {
   const cy = state.cy;
   if (!cy || !hl) return null;
   const has = (id) => cy.getElementById(id).nonempty();
-  const home = state.run?.res.alert.service;
+  const home = (hl.nodes || []).find((id) => kindOf(id) === 'svc' && has(id)) || state.run?.res.alert.service;
   let eles = cy.collection();
   for (const [s, t, rel] of hl.edges || []) {
     if (!has(s) && !has(t)) ensureNode(s, home);
@@ -189,18 +191,21 @@ function elementsFor(hl) {
 }
 
 // Fade everything except what this run touched (plus one dependency hop of context); brighten `hot`.
+// Works without a run too (company-brain answers before act 1).
 function paint(hot, focus) {
-  const cy = state.cy, run = state.run;
-  if (!cy || !run) return;
+  const cy = state.cy;
+  if (!cy) return;
+  const touched = state.run?.touched || cy.collection();
+  hot = hot || cy.collection();
   cy.batch(() => {
     cy.elements().removeClass('hot ctx touched cause').addClass('dim');
-    const ctx = run.touched.nodes('.svc').connectedEdges('.dep');
+    const ctx = touched.union(hot).nodes('.svc').connectedEdges('.dep');
     ctx.union(ctx.connectedNodes()).removeClass('dim').addClass('ctx');
-    run.touched.removeClass('dim ctx').addClass('touched');
-    run.cause.addClass('cause');
-    hot?.addClass('hot');
+    touched.removeClass('dim ctx').addClass('touched');
+    state.run?.cause.addClass('cause');
+    hot.removeClass('dim ctx').addClass('hot');
   });
-  const target = focus && focus.nonempty() ? focus : run.touched;
+  const target = focus && focus.nonempty() ? focus : touched;
   if (target.nonempty()) {
     cy.stop(true);
     cy.animate({ fit: { eles: target, padding: 36 }, duration: 450, easing: 'ease-in-out-cubic' });
@@ -223,6 +228,7 @@ function learnNames(step) {
     names.set(d.person, d.name);
     names.set(d.team, `${d.team_name} team`);
   }
+  if (step.tool === 'who_knows') for (const p of d || []) names.set(p.person, p.name);
 }
 
 function queryBlock(q) {
@@ -237,6 +243,15 @@ function queryBlock(q) {
     h('pre', { class: 'params' }, `params ${JSON.stringify(q.params)}`),
     q.rows.length ? h('details', { class: 'rows' }, h('summary', {}, `rows (${q.rows.length})`),
       h('pre', {}, JSON.stringify(q.rows, null, 1))) : null);
+}
+
+function cypherList(queries) {
+  const ms = queries.reduce((a, q) => a + q.ms, 0);
+  const rows = queries.reduce((a, q) => a + q.rows.length, 0);
+  return h('details', { class: 'cypher-list' },
+    h('summary', {}, `Cypher: ${queries.length === 1 ? '1 query' : `${queries.length} queries`}, ${plural(rows, 'row')}, `
+      + `${ms.toFixed(1)} ms`),
+    queries.map(queryBlock));
 }
 
 function stepCard(step, i) {
@@ -255,8 +270,6 @@ function stepCard(step, i) {
       h('span', { class: 'reason' }, d.reason),
       verdict === 'supports' && d.live_path?.length > 1 ? pathChips(d.live_path) : null)
     : h('p', { class: 'summary' }, step.summary);
-  const ms = step.queries.reduce((a, q) => a + q.ms, 0);
-  const rows = step.queries.reduce((a, q) => a + q.rows.length, 0);
   return h('li', { class: `card ${step.role}${verdict ? ` v-${verdict}` : ''}`, 'data-i': i, tabindex: 0 },
     h('div', { class: 'card-head' },
       h('span', { class: `role ${step.role}` }, step.role),
@@ -264,18 +277,7 @@ function stepCard(step, i) {
       h('span', { class: 'seq' }, `#${step.seq}`)),
     body,
     h('p', { class: 'why' }, h('span', { class: 'why-label' }, 'why '), step.reason),
-    h('details', { class: 'cypher-list' },
-      h('summary', {}, `Cypher: ${step.queries.length} queries, ${rows} rows, ${ms.toFixed(1)} ms`),
-      step.queries.map(queryBlock)));
-}
-
-// Recall returns every past incident touching the path; only strong matches (score >= 3, the planner's bar) are
-// worth drawing, the rest would bury the one that matters.
-function strongRecalls(step) {
-  const strong = (step.data || []).filter((r) => r.score >= 3);
-  const keep = new Set(strong.flatMap((r) => [r.incident, r.cause_service]));
-  return { nodes: step.highlight.nodes.filter((id) => keep.has(id)),
-    edges: step.highlight.edges.filter(([, t]) => keep.has(t)) };
+    cypherList(step.queries));
 }
 
 function reveal(i) {
@@ -286,11 +288,11 @@ function reveal(i) {
   li.classList.add('current');
   $('trace').append(li);
   li.scrollIntoView({ block: 'nearest', behavior: state.skip ? 'auto' : 'smooth' });
-  $('trace-count').textContent = `${i + 1} / ${run.res.steps.length} steps`;
+  $('trace-count').textContent = `${i + 1}/${run.res.steps.length}`; // short: must share 380px with tabs + Skip
   if (step.role === 'investigator' && step.tool !== 'handoff') run.calls++;
   if (step.tool === 'check_hypothesis') run.hyps++;
   renderCounter();
-  const eles = elementsFor(step.tool === 'recall_similar' ? strongRecalls(step) : step.highlight);
+  const eles = elementsFor(step.highlight); // the server already keeps only strong recalls in the highlight
   if (!eles) return;
   step.eles = eles;
   run.touched = run.touched.union(eles);
@@ -313,17 +315,20 @@ function onTraceClick(ev) {
 
 // ---------- outcome ----------
 function renderCounter() {
-  const run = state.run;
+  const run = state.run, o = run.res.outcome;
   const prev = run.act === 2 && state.best[1];
   const num = (label, now, before) => h('div', { class: 'num' },
     h('span', { class: 'big' }, before != null ? [h('span', { class: 'before' }, before), h('span', { class: 'arrow' }, '→'), now] : now),
     h('span', { class: 'lbl' }, label));
+  const ctc = run.done ? o.checks_to_culprit : null; // shown once the replay ends, so it can't spoil it
   const el = h('div', { class: 'card counter', id: 'counter' },
     h('h3', {}, run.act === 2 && prev ? 'Act 2 vs act 1' : `Act ${run.act}`),
     h('div', { class: 'nums' },
       num('investigator calls', run.calls, run.done && prev ? prev.calls : null),
       num('hypotheses checked', run.hyps, run.done && prev ? prev.hyps : null)),
-    run.done && run.res.outcome.memory.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory') : null);
+    ctc != null ? h('p', { class: 'ctc' }, `culprit on check ${ctc} of ${o.hypotheses_checked}`,
+      prev?.checks != null ? h('span', { class: 'muted' }, ` (act 1: ${prev.checks} of ${prev.hyps})`) : null) : null,
+    run.done && o.memory.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory') : null);
   const old = $('counter');
   if (old) old.replaceWith(el);
   else $('outcome').prepend(el);
@@ -339,16 +344,22 @@ function intro() {
 }
 
 function renderOutcome() {
-  const res = state.run.res, o = res.outcome, home = res.alert.service;
-  const rc = o.root_cause, bp = o.baseline_pick, mem = o.memory;
+  const res = state.run.res, o = res.outcome;
+  const rc = o.root_cause, bp = o.baseline_pick, mem = o.memory, rb = o.runbook, ex = o.expert;
   const cites = res.steps.find((s) => s.tool === 'post_update')?.data?.cites || [];
-  const paged = [...new Map(o.paged.map((p) => [p.person, p])).values()];
   const recalled = mem.recalled[0];
 
   const cause = h('div', { class: 'card cause' },
     h('h3', {}, 'Root cause'),
     rc ? [h('p', { class: 'lead' }, h('b', {}, short(rc.change)), ` on ${short(rc.service)}`), pathChips(rc.live_path)]
       : h('p', {}, 'No suspect was supported by the graph.'),
+    rb || ex ? h('div', { class: 'next' },
+      rb ? h('p', {}, h('span', { class: 'k' }, 'Next action'), rb.steps?.[0] || rb.title,
+        h('span', { class: 'sub' }, `runbook “${rb.title}”`,
+          rb.uses != null ? ` · worked ${rb.successes ?? 0} of ${rb.uses} times` : '')) : null,
+      ex ? h('p', {}, h('span', { class: 'k' }, 'Ask'), h('b', {}, ex.name), ` (${ex.handle}, ${ex.team})`,
+        ex.changes != null ? h('span', { class: 'sub' }, `authored ${plural(ex.changes, 'change')}`) : null) : null)
+      : null,
     bp ? h('p', { class: `baseline ${o.baseline_correct ? 'ok' : 'bad'}` },
       'Flat change log would blame: ', h('b', {}, short(bp.change)), ' ',
       h('span', { class: 'pill' }, o.baseline_correct ? 'same answer' : 'wrong'),
@@ -370,11 +381,10 @@ function renderOutcome() {
           : `No change on ${short(recalled.cause_service)} in this window, so the search widened.`))
       : h('p', { class: 'muted' }, 'No similar past incident on this dependency path.'),
     h('div', { id: 'learned' }),
-    h('p', {}, h('span', { class: 'k' }, 'Paged '), paged.map((p, i) => [i ? ', ' : '', h('b', {}, p.name),
+    h('p', {}, h('span', { class: 'k' }, 'Paged '), o.paged.map((p, i) => [i ? ', ' : '', h('b', {}, p.name),
       ` ${p.handle} (${p.team_name})`])),
     h('p', {}, h('span', { class: 'k' }, 'Impact '), o.blast_radius.map(short).join(', ') || 'none'),
-    h('p', {}, h('span', { class: 'k' }, 'Also at risk '),
-      o.at_risk.filter((s) => s !== home && !o.blast_radius.includes(s)).map(short).join(', ') || 'none'));
+    h('p', {}, h('span', { class: 'k' }, 'Also at risk '), o.at_risk.map(short).join(', ') || 'none'));
 
   const update = h('div', { class: 'card update' },
     h('h3', {}, 'Status update posted to #incidents'),
@@ -393,6 +403,66 @@ function renderLearned(r) {
     d ? h('ol', {}, d.steps.map((s) => h('li', {}, s))) : null));
 }
 
+// ---------- company brain (track 03): the registry tools agents and MCP clients use, asked directly ----------
+function showTab(ask) {
+  $('tab-trace').setAttribute('aria-selected', String(!ask));
+  $('tab-ask').setAttribute('aria-selected', String(ask));
+  $('trace').hidden = ask;
+  $('trace-count').hidden = ask;
+  $('ask').hidden = !ask;
+  if (ask) return;
+  if (state.run) paint(); // drop an answer's highlight, back to the run's picture
+  else resetGraphView();
+}
+
+// Pickers: every service in the graph (filled by loadTenant), every change this run looked at (root cause first).
+function fillAsk() {
+  if (OFFLINE) return;
+  const res = state.run?.done ? state.run.res : null, o = res?.outcome;
+  $('ask-svc').value = o?.root_cause?.service || res?.alert.service || state.alerts[1]?.service || $('ask-svc').value;
+  const refuted = new Set(o?.refuted.map((r) => r.change));
+  const ids = res ? [o.root_cause?.change, ...res.steps.flatMap((s) => s.highlight?.nodes || []), o.baseline_pick?.change] : [];
+  const chg = [...new Set(ids)].filter((id) => id && kindOf(id) === 'chg');
+  $('ask-chg').replaceChildren(...(chg.length ? chg.map((id) => h('option', { value: id }, short(id)
+    + (id === o.root_cause?.change ? ' · root cause' : refuted.has(id) ? ' · ruled out' : '')))
+    : [h('option', { value: '' }, 'run an act first')]));
+}
+
+const whoKnows = (rows) => (rows.length ? h('ol', { class: 'people' }, rows.map((p) => h('li', {},
+  h('div', { class: 'who' }, h('span', {}, h('b', {}, p.name), ' ', h('span', { class: 'muted' }, `${p.handle} · ${p.team}`)),
+    h('span', { class: 'score' }, `score ${p.score}`)),
+  h('div', { class: 'why' }, [p.on_owning_team ? 'on the owning team' : null, `authored ${plural(p.changes, 'change')}`,
+    `paged for ${plural(p.incidents, 'incident')}`].filter(Boolean).join(' · ')))))
+  : h('p', { class: 'muted' }, 'Nobody on record for this service.'));
+
+const changeStory = (c) => [
+  h('p', { class: 'lead' }, h('b', {}, short(c.change)), ` on ${short(c.service)}`,
+    h('span', { class: 'muted' }, ` · ${c.kind}${c.at ? ` · ${ist(c.at)}` : ''}`)),
+  h('p', {}, c.summary),
+  h('p', {}, h('span', { class: 'k' }, 'By'), c.author ? `${c.author} (${c.team})` : 'unknown'),
+  c.sources.length ? h('ul', { class: 'sources' }, c.sources.map((s) => h('li', {},
+    h('span', { class: 'src' }, s.kind === 'Ticket' ? 'ticket' : s.channel || 'chat'), ' ',
+    s.title ? [h('b', {}, s.title), ' '] : null, h('span', { class: 'reason' }, s.text))))
+    : h('p', { class: 'muted' }, 'No ticket or chat message on record.'),
+  h('p', {}, h('span', { class: 'k' }, 'Caused'), c.incidents.map(short).join(', ') || 'no incidents'),
+];
+
+async function ask(tool, args, render) {
+  const out = $('ask-out');
+  out.replaceChildren(h('p', { class: 'muted' }, 'Querying FalkorDB…'));
+  try {
+    const r = await api('POST', `${T()}/tools/${tool}`, args);
+    learnNames({ tool, data: r.data });
+    out.replaceChildren(h('div', { class: 'card brain' },
+      h('div', { class: 'card-head' }, h('span', { class: 'role brain' }, 'brain'), h('code', { class: 'tool' }, tool)),
+      render(r.data), cypherList(r.queries)));
+    const eles = elementsFor(r.highlight);
+    if (eles) paint(eles, eles);
+  } catch (e) {
+    out.replaceChildren(h('p', { class: 'error' }, e.message));
+  }
+}
+
 // ---------- scenario ----------
 function syncButtons() {
   const b = state.busy, run = state.run;
@@ -401,6 +471,9 @@ function syncButtons() {
   $('btn-act2').disabled = b || !state.alerts[2];
   $('btn-resolve').disabled = b || !(run?.done && run.res.outcome.root_cause && !run.resolved);
   for (const id of ['btn-reset', 'btn-act1', 'btn-resolve', 'btn-act2']) $(id).classList.toggle('primary', !b && id === state.next);
+  if (OFFLINE) return;
+  $('ask-who').disabled = b || !$('ask-svc').value;
+  $('ask-why').disabled = b || !$('ask-chg').value;
 }
 
 async function busy(fn) {
@@ -426,7 +499,11 @@ async function loadTenant() {
     btn.replaceChildren(btn.querySelector('b'), ` Act ${a.act}: ${short(a.service)} is ${a.symptom === 'latency' ? 'slow' : a.symptom}`);
     btn.title = a.name;
   }
-  buildGraph(await api('GET', `${T()}/graph`));
+  const g = await api('GET', `${T()}/graph`);
+  buildGraph(g);
+  if (!OFFLINE) $('ask-svc').replaceChildren(...[...g.nodes].sort((a, b) => a.name.localeCompare(b.name))
+    .map((n) => h('option', { value: n.id }, n.name)));
+  fillAsk();
 }
 
 function clearRun() {
@@ -436,6 +513,7 @@ function clearRun() {
   hudIdle();
   intro();
   resetGraphView();
+  fillAsk();
 }
 
 async function doReset() {
@@ -453,6 +531,7 @@ async function doAct(act) {
   status(`Agents are working on “${alert.name}”…`);
   const res = await api('POST', `${T()}/alerts/${encodeURIComponent(alert.id)}/respond`);
   clearRun();
+  showTab(false);
   const cy = state.cy;
   state.run = { res, act, calls: 0, hyps: 0, done: false, resolved: false,
     touched: cy ? cy.collection() : null, cause: cy ? cy.collection() : null };
@@ -471,8 +550,9 @@ async function doAct(act) {
   $('btn-skip').hidden = true;
   state.run.done = true;
   const o = res.outcome;
-  state.best[act] = { calls: o.investigator_calls, hyps: o.hypotheses_checked };
+  state.best[act] = { calls: o.investigator_calls, hyps: o.hypotheses_checked, checks: o.checks_to_culprit };
   renderOutcome();
+  fillAsk();
   // Memory moment: draw new incident -> recalled incident -> its runbook (the chain the recall query walked).
   const memo = o.memory.solved_by_memory ? elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
     [[res.incident_id, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }) : null;
@@ -506,6 +586,15 @@ async function init() {
   $('btn-skip').onclick = () => { state.skip = true; };
   $('trace').addEventListener('click', onTraceClick);
   $('trace').addEventListener('keydown', (e) => { if (e.key === 'Enter') onTraceClick(e); });
+  $('tab-trace').onclick = () => showTab(false);
+  $('tab-ask').onclick = () => showTab(true);
+  if (OFFLINE) {
+    $('ask').replaceChildren(h('p', { class: 'card note' }, 'Ask the brain runs live Cypher against FalkorDB, so it needs '
+      + 'the live API: start the server and open this page without ?offline=1.'));
+  } else {
+    $('ask-who').onclick = () => busy(() => ask('who_knows', { service: $('ask-svc').value }, whoKnows));
+    $('ask-why').onclick = () => busy(() => ask('change_story', { change_id: $('ask-chg').value }, changeStory));
+  }
   intro();
   syncButtons();
   try {

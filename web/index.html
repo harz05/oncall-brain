@@ -58,11 +58,24 @@
 
     <aside class="trace-panel">
       <div class="trace-head">
-        <h2>Agent trace</h2>
-        <span id="trace-count" class="muted"></span>
-        <button id="btn-skip" class="ghost" hidden>Skip animation</button>
+        <div class="tabs" role="tablist">
+          <button id="tab-trace" class="tab" role="tab" aria-selected="true" aria-controls="trace">Agent trace</button>
+          <button id="tab-ask" class="tab" role="tab" aria-selected="false" aria-controls="ask"
+                  title="Company brain: who knows a service, and where a change came from">Ask the brain</button>
+        </div>
+        <span id="trace-count" class="muted" title="steps revealed"></span>
+        <button id="btn-skip" class="ghost" hidden title="Skip animation">Skip</button>
       </div>
-      <ol id="trace" class="trace"></ol>
+      <ol id="trace" class="trace" role="tabpanel" aria-labelledby="tab-trace"></ol>
+      <div id="ask" class="ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
+        <div class="card ask-form">
+          <label for="ask-svc">Who knows this service?</label>
+          <div class="ask-row"><select id="ask-svc"></select><button id="ask-who" class="ghost" disabled>Ask</button></div>
+          <label for="ask-chg">Why did this change?</label>
+          <div class="ask-row"><select id="ask-chg"></select><button id="ask-why" class="ghost" disabled>Ask</button></div>
+        </div>
+        <div id="ask-out"></div>
+      </div>
     </aside>
   </main>
 </body>

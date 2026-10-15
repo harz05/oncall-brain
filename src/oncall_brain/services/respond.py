@@ -6,7 +6,7 @@ from typing import Any
 from oncall_brain.agents import registry
 from oncall_brain.agents.loop import record, run_role
 from oncall_brain.agents.registry import ToolContext
-from oncall_brain.domain.models import Highlight, TraceStep
+from oncall_brain.domain.models import TraceStep
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
 from oncall_brain.ports import GraphRepository, LLMProvider
 
@@ -15,6 +15,11 @@ from oncall_brain.services import tools as _tools  # noqa: F401
 
 
 def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str, Any]:
+    with repo.lock():  # one agent run per tenant at a time (see FalkorRepository.lock)
+        return _respond(repo, alert_id, llm)
+
+
+def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str, Any]:
     trace: list[TraceStep] = []
     out = registry.call("open_incident", ToolContext(repo), {"alert_id": alert_id})
     incident_id = out.data["incident"]
@@ -30,8 +35,9 @@ def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str,
 
 
 def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str, Any]:
-    out = registry.call("resolve_incident", ToolContext(repo),
-                        {"incident_id": incident_id, "change_id": change_id})
+    with repo.lock():
+        out = registry.call("resolve_incident", ToolContext(repo),
+                            {"incident_id": incident_id, "change_id": change_id})
     return out.model_dump()
 
 
@@ -47,7 +53,8 @@ def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[An
 def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> dict[str, Any]:
     checks = _data(trace, "check_hypothesis")
     supported = [c for c in checks if c["verdict"] == "supports"]
-    baseline = repo.read("recent_changes", incident_id=incident_id, window=WINDOW).rows
+    at = next(s.data["at"] for s in trace if s.tool == "open_incident")
+    baseline = repo.read("recent_changes", since=at - WINDOW, until=at).rows
     investigator = [s for s in trace if s.role == "investigator" and s.tool != "handoff"]
     recalls = (_data(trace, "recall_similar") or [[]])[0]
     memory = _data(trace, "hypothesize_from_memory")
@@ -55,10 +62,6 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
     at_risk_rows = (_data(trace, "blast_radius", "comms") or [[]])[0]
     direct = {r["service"] for r in blast}
     updates = _data(trace, "post_update")
-    highlight = Highlight()
-    for s in trace:
-        if s.tool in ("check_hypothesis",) and s.data and s.data["verdict"] == "supports":
-            highlight = highlight.merge(s.highlight)
     return {
         "root_cause": supported[0] if supported else None,
         "refuted": [c for c in checks if c["verdict"] != "supports"],
@@ -74,5 +77,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "update_text": updates[0]["text"] if updates else None,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),
-        "highlight": highlight,
+        "checks_to_culprit": next((i + 1 for i, c in enumerate(checks) if c["verdict"] == "supports"), None),
+        "runbook": updates[0]["runbook"] if updates else None,
+        "expert": updates[0]["expert"] if updates else None,
     }

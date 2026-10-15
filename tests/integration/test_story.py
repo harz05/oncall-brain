@@ -11,16 +11,25 @@ pytestmark = pytest.mark.integration
 
 
 def _counts(repo):
-    return repo.read("incident_head", incident_id="none"), repo._graph.ro_query(
-        "MATCH (n) RETURN count(n)").result_set[0][0]
+    g = repo._graph
+    return (g.ro_query("MATCH (n) RETURN count(n)").result_set[0][0],
+            g.ro_query("MATCH ()-[e]->() RETURN count(e)").result_set[0][0])
 
 
-def test_seeding_is_idempotent(store, tenant):
+def test_ingest_is_idempotent_and_seed_rebuilds_from_scratch(store, tenant):
+    from oncall_brain.datagen import generate
+    from oncall_brain.services.seeding import load
+
     seed(store, tenant)
     repo = store.tenant(tenant)
-    n1 = _counts(repo)[1]
+    before = _counts(repo)
+    load(repo, generate(7))  # MERGE on stable ids: a second load changes nothing
+    assert _counts(repo) == before and before[0] > 200
+    respond(repo, ACTS[1], MockProvider())  # dirty the graph, then re-seed: back to exactly the seed
     seed(store, tenant)
-    assert _counts(repo)[1] == n1 > 200
+    assert _counts(repo) == before
+    reset(store, tenant)
+    assert _counts(repo) == before
 
 
 def test_read_tools_cannot_write(store, tenant):
@@ -93,3 +102,78 @@ def test_company_brain_who_knows_and_change_sources(store, tenant):
     story = call("change_story", ctx, {"change_id": "chg:pgw-pool-1"}).data
     assert {s["id"] for s in story["sources"]} == {"ticket:CR-881", "msg:pay-deploys-1"}
     assert story["team"] == "Payments"
+
+
+def test_who_knows_still_works_after_incidents_paged_people(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    respond(repo, ACTS[1], MockProvider())  # writes PAGED edges, which used to crash who_knows
+    experts = call("who_knows", ToolContext(repo), {"service": "svc:payments-gw"}).data
+    assert experts and any(e["incidents"] >= 1 for e in experts)
+
+
+def test_concurrent_responders_do_not_duplicate_work_or_edges(store, tenant):
+    from concurrent.futures import ThreadPoolExecutor
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    with ThreadPoolExecutor(4) as pool:
+        runs = list(pool.map(lambda _: respond(store.tenant(tenant), ACTS[1], MockProvider()), range(4)))
+    checks = sum(s.tool == "check_hypothesis" for r in runs for s in r["steps"])
+    assert checks == 5  # the lock serialises runs; later runs find a finished board and only hand off
+    dup = repo._graph.ro_query(
+        "MATCH (a)-[e]->(b) WITH a, b, type(e) AS t, count(e) AS n WHERE n > 1 RETURN count(*)").result_set[0][0]
+    assert dup == 0
+
+
+def test_a_bad_tool_choice_falls_back_instead_of_aborting(store, tenant):
+    from oncall_brain.domain.models import Decision
+    from oncall_brain.domain.planner import next_decision
+
+    class SloppyLLM:  # follows the planner but drops the hyp: prefix, like a careless model
+        name = "sloppy"
+
+        def decide(self, role, board, tools):
+            d = next_decision(role, board)
+            if d.tool == "check_hypothesis":
+                return Decision(action="call", tool=d.tool, reason="llm", args={
+                    "hypothesis_id": d.args["hypothesis_id"].removeprefix("hyp:")})
+            return d
+
+    seed(store, tenant)
+    o = respond(store.tenant(tenant), ACTS[1], SloppyLLM())["outcome"]
+    assert o["root_cause"]["change"] == "chg:pgw-pool-1" and o["update_text"]
+
+
+def test_step_budget_hands_on_instead_of_failing(store, tenant, monkeypatch):
+    from oncall_brain.agents import loop
+
+    monkeypatch.setattr(loop, "MAX_STEPS_PER_ROLE", 4)
+    seed(store, tenant)
+    run = respond(store.tenant(tenant), ACTS[1], MockProvider())
+    assert any("budget" in s.reason for s in run["steps"]) and run["outcome"]["update_text"]
+
+
+def test_stale_pristine_copy_is_rebuilt(store, tenant):
+    seed(store, tenant)
+    store.tenant(tenant).write("ingest_meta", version="old-generator", seed=7)
+    store.snapshot(tenant)
+    assert reset(store, tenant) == "seeded"
+    assert reset(store, tenant) == "restored"
+
+
+def test_confirmed_cause_survives_a_recheck_and_update_rewrite(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[1], MockProvider())
+    resolve(repo, run["incident_id"], "chg:pgw-pool-1")
+    ctx = ToolContext(repo)
+    call("check_hypothesis", ctx, {"hypothesis_id": "hyp:checkout-latency:pgw-pool-1"})
+    board = call("incident_board", ctx, {"incident_id": run["incident_id"]}).data
+    assert {h["status"] for h in board["hypotheses"] if h["change_id"] == "chg:pgw-pool-1"} == {"confirmed"}
+    text = call("post_update", ctx, {"incident_id": run["incident_id"]}).data["text"]
+    assert "Likely cause" in text and "Next action" in text
