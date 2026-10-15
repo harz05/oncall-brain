@@ -1,0 +1,908 @@
+{
+ "planner": "claude-sonnet-5-5 via Anthropic Messages API",
+ "date": "2026-10-16 01:42",
+ "totals": {
+  "decisions": 60,
+  "by_model": 60,
+  "fallbacks": 0,
+  "fallback_rate": 0.0,
+  "ms_p50": 1722,
+  "ms_p95": 2530,
+  "ms_mean": 1859,
+  "correct": "4/4"
+ },
+ "acts": {
+  "act1": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 2530,
+     "board_chars": 390,
+     "args": {
+      "service": "svc:checkout"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "3 services depend on svc:checkout (3 tier-1)"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1955,
+     "board_chars": 460,
+     "args": {
+      "service": "svc:checkout"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Ravi Moreau (@ravi.moreau, Checkout) for svc:checkout"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1757,
+     "board_chars": 530,
+     "args": {},
+     "reason": "Triage is done. The incident is open, the storm count is 0, blast radius for svc:checkout is computed, and on-call is paged.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 5,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 1920,
+     "board_chars": 595,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "Recalled inc:0911 'Checkout slow during flash sale' (cause on svc:inventory)"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "hypothesize_from_memory",
+     "by": "model",
+     "ms": 1722,
+     "board_chars": 1037,
+     "args": {},
+     "reason": "Recall found matches with a score of 3 or more (inc:1000 and inc:0911), so I'll hypothesize from memory.",
+     "summary": "The recalled runbooks' services had no change of their kind in this window"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "model",
+     "ms": 2496,
+     "board_chars": 1132,
+     "args": {},
+     "reason": "Memory produced no hypotheses, so the next step is propose_hypotheses.",
+     "summary": "3 changes on the dependency path, 2 more from the flat change log (newest anywhere: chg:search-420)"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1519,
+     "board_chars": 2453,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:legacy-193"
+     },
+     "reason": "LLM chose check_hypothesis",
+     "summary": "REFUTES chg:legacy-193: checkout no longer depends on legacy-billing (dependency retired before the alert)"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1595,
+     "board_chars": 2551,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:search-420"
+     },
+     "reason": "LLM chose check_hypothesis",
+     "summary": "REFUTES chg:search-420: no dependency path from checkout to search"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1936,
+     "board_chars": 2649,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:pgw-pool-1"
+     },
+     "reason": "Three hypotheses are still open, so I'm checking all three at once.",
+     "summary": "SUPPORTS chg:pgw-pool-1: anomaly propagates payments-gw -> payments -> checkout"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1747,
+     "board_chars": 2782,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:pricing-2140"
+     },
+     "reason": "Two hypotheses are still open: pricing-2140 and cart-310. I'll check both.",
+     "summary": "REFUTES chg:pricing-2140: change was rolled back before the alert fired"
+    },
+    {
+     "seq": 12,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1607,
+     "board_chars": 2896,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:cart-310"
+     },
+     "reason": "There is still one open hypothesis, cart-310, so I'll check it.",
+     "summary": "REFUTES chg:cart-310: cart showed no anomaly after the change"
+    },
+    {
+     "seq": 13,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2159,
+     "board_chars": 3006,
+     "args": {},
+     "reason": "All five hypotheses are checked. Only chg:pgw-pool-1 on svc:payments-gw is supported, and the other four are refuted. That leaves a single cause, so conclude isn't needed.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 14,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 3137,
+     "board_chars": 3070,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:payments-gw"
+    },
+    {
+     "seq": 15,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "model",
+     "ms": 1625,
+     "board_chars": 3142,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose who_knows",
+     "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 16,
+     "role": "comms",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 2406,
+     "board_chars": 3211,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "Next in comms: blast_radius on the culprit, svc:payments-gw.",
+     "summary": "7 services depend on svc:payments-gw (5 tier-1)"
+    },
+    {
+     "seq": 17,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "model",
+     "ms": 1442,
+     "board_chars": 3283,
+     "args": {},
+     "reason": "LLM chose post_update",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 18,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1716,
+     "board_chars": 3359,
+     "args": {},
+     "reason": "Comms work is done: I paged the payments-gw on-call, asked who knows payments-gw, ran blast_radius on it, and posted the status update.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pgw-pool-1",
+    "correct": true,
+    "investigator_calls": 8,
+    "hypotheses_checked": 5,
+    "checks_to_culprit": 3,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:legacy-193",
+     "chg:search-420",
+     "chg:pricing-2140",
+     "chg:cart-310"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura",
+     "@ravi.moreau"
+    ],
+    "update_posted": true,
+    "wall_s": 33.5
+   }
+  },
+  "act2": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 2028,
+     "board_chars": 386,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "3 services depend on svc:refunds (3 tier-1)"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 2107,
+     "board_chars": 455,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2141,
+     "board_chars": 524,
+     "args": {},
+     "reason": "Triage is complete: the incident is open, blast radius is assessed, on-call is paged, and the storm count is 0 so no correlation was needed.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 5,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 1891,
+     "board_chars": 589,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "hypothesize_from_memory",
+     "by": "model",
+     "ms": 1693,
+     "board_chars": 910,
+     "args": {},
+     "reason": "A recalled incident scored 3, so I'll hypothesize from memory first.",
+     "summary": "Runbook 'Revert the config change on payments-gw' (worked 1/1) points at chg:pgw-pool-2"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1582,
+     "board_chars": 1240,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2"
+     },
+     "reason": "LLM chose check_hypothesis",
+     "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2104,
+     "board_chars": 1371,
+     "args": {},
+     "reason": "The only hypothesis, chg:pgw-pool-2 on svc:payments-gw, was checked and is supported. No other hypotheses are open and there is no storm, so no conclude is needed.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 9,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1645,
+     "board_chars": 1435,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Asha Nakamura (@asha.nakamura, Payments) owns svc:payments-gw too; already engaged"
+    },
+    {
+     "seq": 10,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "model",
+     "ms": 1682,
+     "board_chars": 1507,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose who_knows",
+     "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 11,
+     "role": "comms",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 1615,
+     "board_chars": 1576,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "7 services depend on svc:payments-gw (5 tier-1)"
+    },
+    {
+     "seq": 12,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "model",
+     "ms": 1645,
+     "board_chars": 1648,
+     "args": {},
+     "reason": "LLM chose post_update",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 13,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2282,
+     "board_chars": 1723,
+     "args": {},
+     "reason": "Comms work is done. I paged the payments-gw on-call, identified the expert, checked the blast radius, and posted the update.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pgw-pool-2",
+    "correct": true,
+    "investigator_calls": 3,
+    "hypotheses_checked": 1,
+    "checks_to_culprit": 1,
+    "solved_by_memory": true,
+    "refuted": [],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura"
+    ],
+    "update_posted": true,
+    "wall_s": 22.6
+   }
+  },
+  "act2_no_memory": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 1431,
+     "board_chars": 386,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "3 services depend on svc:refunds (3 tier-1)"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1878,
+     "board_chars": 455,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1817,
+     "board_chars": 524,
+     "args": {},
+     "reason": "Triage is done: the incident is open, the blast radius of svc:refunds is mapped, the on-call owner is paged, and the storm count is 0, so no correlation was needed.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 5,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 1618,
+     "board_chars": 589,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "2 past incidents touch this path, none with the same symptom"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "model",
+     "ms": 1565,
+     "board_chars": 824,
+     "args": {},
+     "reason": "Recalled scores are 2, below 3, so propose_hypotheses.",
+     "summary": "3 changes on the dependency path, 1 more from the flat change log (newest anywhere: chg:notif-77)"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1687,
+     "board_chars": 1887,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:notif-77"
+     },
+     "reason": "Four hypotheses are open, so I'll check each one in parallel.",
+     "summary": "REFUTES chg:notif-77: no dependency path from refunds to notifications"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1890,
+     "board_chars": 1982,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:fraud-512"
+     },
+     "reason": "Three hypotheses are still open, so I'll check them all.",
+     "summary": "REFUTES chg:fraud-512: fraud-check showed no anomaly after the change"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1718,
+     "board_chars": 2091,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2"
+     },
+     "reason": "Two hypotheses are still open, so I'll check both.",
+     "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 2008,
+     "board_chars": 2222,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pay-77"
+     },
+     "reason": "LLM chose check_hypothesis",
+     "summary": "REFUTES chg:pay-77: payments showed no anomaly after the change"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2189,
+     "board_chars": 2334,
+     "args": {},
+     "reason": "All hypotheses checked; chg:pgw-pool-2 on svc:payments-gw is the only supported cause, the other three are refuted.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 12,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1303,
+     "board_chars": 2398,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Asha Nakamura (@asha.nakamura, Payments) owns svc:payments-gw too; already engaged"
+    },
+    {
+     "seq": 13,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "model",
+     "ms": 1724,
+     "board_chars": 2470,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "Next in comms: who_knows for the culprit service and blast_radius, which are independent.",
+     "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 14,
+     "role": "comms",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 1373,
+     "board_chars": 2539,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "7 services depend on svc:payments-gw (5 tier-1)"
+    },
+    {
+     "seq": 15,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "model",
+     "ms": 1585,
+     "board_chars": 2611,
+     "args": {},
+     "reason": "LLM chose post_update",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 16,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1773,
+     "board_chars": 2686,
+     "args": {},
+     "reason": "Comms steps are complete: I paged the payments-gw owner, identified the expert, checked the blast radius and posted the update.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pgw-pool-2",
+    "correct": true,
+    "investigator_calls": 6,
+    "hypotheses_checked": 4,
+    "checks_to_culprit": 3,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:notif-77",
+     "chg:fraud-512",
+     "chg:pay-77"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura"
+    ],
+    "update_posted": true,
+    "wall_s": 25.8
+   }
+  },
+  "act3": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "correlate_alerts",
+     "by": "model",
+     "ms": 1544,
+     "board_chars": 410,
+     "args": {},
+     "reason": "LLM chose correlate_alerts",
+     "summary": "3 related alerts on 3 services (checkout, refunds, subscriptions); 6 upstream services are shared by all of them, nearest to all first: payments, postgres-orders, fraud-check"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 2376,
+     "board_chars": 654,
+     "args": {
+      "service": "svc:subscriptions"
+     },
+     "reason": "LLM chose blast_radius",
+     "summary": "3 services depend on svc:subscriptions (3 tier-1)"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1438,
+     "board_chars": 729,
+     "args": {
+      "service": "svc:subscriptions"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:subscriptions"
+    },
+    {
+     "seq": 5,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 2385,
+     "board_chars": 804,
+     "args": {},
+     "reason": "Triage is done. I correlated the storm, ran blast_radius on svc:subscriptions and paged the on-call.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 1421,
+     "board_chars": 869,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "2 past incidents touch this path, none with the same symptom"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "model",
+     "ms": 1715,
+     "board_chars": 1110,
+     "args": {},
+     "reason": "Recall scores are 2, below the threshold of 3, so I'm using propose_hypotheses.",
+     "summary": "2 changes on the dependency path, 1 more from the flat change log (newest anywhere: chg:search-430)"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1794,
+     "board_chars": 1958,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:search-430"
+     },
+     "reason": "Next I'll check each open hypothesis, starting with the first one.",
+     "summary": "REFUTES chg:search-430: no dependency path from subscriptions to search"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1564,
+     "board_chars": 2061,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:pg-conn-3"
+     },
+     "reason": "LLM chose check_hypothesis",
+     "summary": "SUPPORTS chg:pg-conn-3: anomaly propagates postgres-orders -> payments -> subscriptions; explains 3 of 3 alerting services"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "model",
+     "ms": 1582,
+     "board_chars": 2238,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:subs-88"
+     },
+     "reason": "One open hypothesis remains: subs-88. I'll check it.",
+     "summary": "SUPPORTS chg:subs-88: anomaly propagates subscriptions; explains 1 of 3 alerting services (not refunds, checkout)"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "conclude",
+     "by": "model",
+     "ms": 1585,
+     "board_chars": 2365,
+     "args": {},
+     "reason": "Two suspects are supported, so the next step is to conclude.",
+     "summary": "Leading cause chg:pg-conn-3; outranked chg:subs-88"
+    },
+    {
+     "seq": 12,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1954,
+     "board_chars": 2450,
+     "args": {},
+     "reason": "Investigation is done. The conclusion is that chg:pg-conn-3 on svc:postgres-orders is the cause. It explains checkout, refunds and subscriptions. chg:search-430 was refuted, and chg:subs-88 was outranked.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 13,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "model",
+     "ms": 1586,
+     "board_chars": 2514,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "LLM chose page_on_call",
+     "summary": "Paged Hana Costa (@hana.costa, Platform) for svc:postgres-orders"
+    },
+    {
+     "seq": 14,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "model",
+     "ms": 1762,
+     "board_chars": 2590,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "LLM chose who_knows",
+     "summary": "Omar Tanaka (Platform): 2 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 15,
+     "role": "comms",
+     "tool": "blast_radius",
+     "by": "model",
+     "ms": 1635,
+     "board_chars": 2663,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "Remaining comms steps: blast_radius for the culprit, then post_update.",
+     "summary": "11 services depend on svc:postgres-orders (5 tier-1)"
+    },
+    {
+     "seq": 16,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "model",
+     "ms": 1607,
+     "board_chars": 2739,
+     "args": {},
+     "reason": "Comms steps done: page_on_call, who_knows, blast_radius. Next is post_update.",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 17,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 4320,
+     "board_chars": 2820,
+     "args": {},
+     "reason": "Comms work is complete: the owner of svc:postgres-orders was paged, the expert was consulted, dependents were checked, and the status update was posted.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pg-conn-3",
+    "correct": true,
+    "investigator_calls": 6,
+    "hypotheses_checked": 3,
+    "checks_to_culprit": 2,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:search-430",
+     "chg:subs-88"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura",
+     "@hana.costa"
+    ],
+    "update_posted": true,
+    "wall_s": 30.5
+   }
+  }
+ },
+ "deterministic": {
+  "act1": {
+   "root_cause": "chg:pgw-pool-1",
+   "correct": true,
+   "investigator_calls": 8,
+   "hypotheses_checked": 5,
+   "checks_to_culprit": 3,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:legacy-193",
+    "chg:search-420",
+    "chg:pricing-2140",
+    "chg:cart-310"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura",
+    "@ravi.moreau"
+   ],
+   "update_posted": true,
+   "wall_s": 0.2
+  },
+  "act2": {
+   "root_cause": "chg:pgw-pool-2",
+   "correct": true,
+   "investigator_calls": 3,
+   "hypotheses_checked": 1,
+   "checks_to_culprit": 1,
+   "solved_by_memory": true,
+   "refuted": [],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  },
+  "act2_no_memory": {
+   "root_cause": "chg:pgw-pool-2",
+   "correct": true,
+   "investigator_calls": 6,
+   "hypotheses_checked": 4,
+   "checks_to_culprit": 2,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:notif-77",
+    "chg:fraud-512",
+    "chg:pay-77"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  },
+  "act3": {
+   "root_cause": "chg:pg-conn-3",
+   "correct": true,
+   "investigator_calls": 6,
+   "hypotheses_checked": 3,
+   "checks_to_culprit": 1,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:search-430",
+    "chg:subs-88"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura",
+    "@hana.costa"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  }
+ }
+}

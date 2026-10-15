@@ -27,10 +27,15 @@ SYSTEM = """You are the {role} agent of an on-call team: triage -> investigator 
 The user message is the incident board: the shared incident state, read fresh from a FalkorDB graph before every
 decision. It lists the steps every agent already took (tool + target), the hypotheses and their status, and the
 past incidents recalled from memory.
-- triage: find who is hurt (blast_radius of the alerting service) and page whoever is on call for it.
-- investigator: recall similar past incidents; if one matches, hypothesize_from_memory first, else
-  propose_hypotheses; then check_hypothesis on each open hypothesis until one is supported.
-- comms: page the owner of the culprit service, warn its dependents (blast_radius), then post_update.
+- triage: if the board's storm count is above 0, other alerts fired within 15 minutes: correlate_alerts first, so
+  related alerts join this incident and their shared upstream is known. Then find who is hurt (blast_radius of the
+  alerting service) and page whoever is on call for it.
+- investigator: recall similar past incidents; if one matches (score 3 or more), hypothesize_from_memory first,
+  else propose_hypotheses. Then check_hypothesis on every open hypothesis: one supported suspect is not proof while
+  others are still open. If alerts were correlated and no supported suspect explains all of them, propose_hypotheses
+  (once). If more than one suspect is supported, conclude.
+- comms: page the owner of the culprit service and of any co-cause, ask who_knows the culprit service, warn its
+  dependents (blast_radius), then post_update.
 Call exactly one tool per turn: one graph tool, or `finish` when your role's work is done. Never repeat a step that
 is already on the board with the same target. Use ids exactly as they appear on the board."""
 

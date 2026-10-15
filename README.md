@@ -152,7 +152,7 @@ make dev       # API + web UI on http://localhost:8000
 make test      # unit + integration tests (integration tests skip if FalkorDB is not running)
 ```
 
-No LLM key is needed: by default one deterministic planner plays all three roles, choosing each step by fixed rules from what the graph returns. To let an LLM choose the tools instead, set `LLM_PROVIDER` (gemini, openai, groq, openrouter, ollama, anthropic) and a key in `.env` (see `.env.example`). If the model picks an unknown tool, invalid arguments or a repeated step, or the API fails, that step falls back to the deterministic planner and the trace says so. Plainly: the LLM adapters are tested only against canned HTTP replies and have not been run against a live model in this project; every number in this repo comes from the deterministic planner.
+No LLM key is needed: by default one deterministic planner plays all three roles, choosing each step by fixed rules from what the graph returns. To let an LLM choose the tools instead, set `LLM_PROVIDER` (gemini, openai, groq, openrouter, ollama, anthropic) and a key in `.env` (see `.env.example`). If the model picks an unknown tool, invalid arguments or a repeated step, or the API fails, that step falls back to the deterministic planner and the trace says so. With Claude Opus 5.5 or Sonnet 5.5 choosing every step, the full story (acts 1-3, 60 decisions) finds the right cause in all four runs with zero fallbacks: [docs/LLM_RUN.md](docs/LLM_RUN.md). The 200-incident eval numbers come from the deterministic planner.
 
 ## Using it
 

@@ -1,0 +1,811 @@
+{
+ "planner": "qwen2.5:3b via openai-compatible API",
+ "date": "2026-10-15 23:01",
+ "totals": {
+  "decisions": 53,
+  "by_model": 19,
+  "fallbacks": 34,
+  "fallback_rate": 0.642,
+  "ms_p50": 674,
+  "ms_p95": 1505,
+  "ms_mean": 776,
+  "correct": "3/4"
+ },
+ "acts": {
+  "act1": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "fallback",
+     "ms": 2535,
+     "board_chars": 390,
+     "args": {
+      "service": "svc:checkout"
+     },
+     "reason": "LLM fallback: no usable tool call. Who is hurt? Walk DEPENDS_ON backwards from svc:checkout.",
+     "summary": "3 services depend on svc:checkout (3 tier-1)"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "open_incident",
+     "by": "model",
+     "ms": 488,
+     "board_chars": 460,
+     "args": {
+      "alert_id": "alert:checkout-latency"
+     },
+     "reason": "LLM chose open_incident",
+     "summary": "Opened inc:checkout-latency for 'checkout p99 latency above 2s' on svc:checkout"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 431,
+     "board_chars": 519,
+     "args": {
+      "service": "svc:checkout"
+     },
+     "reason": "LLM fallback: no usable tool call. Find and page whoever is on call for svc:checkout right now.",
+     "summary": "Paged Ravi Moreau (@ravi.moreau, Checkout) for svc:checkout"
+    },
+    {
+     "seq": 5,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "fallback",
+     "ms": 462,
+     "board_chars": 589,
+     "args": {},
+     "reason": "LLM fallback: invalid args for open_incident (1 errors). Impact and owner known; hand the board to the investigator.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 1407,
+     "board_chars": 654,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "Recalled inc:0911 'Checkout slow during flash sale' (cause on svc:inventory)"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "hypothesize_from_memory",
+     "by": "fallback",
+     "ms": 495,
+     "board_chars": 1096,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:checkout-latency already ran. A past incident matches structurally; test its root cause pattern first.",
+     "summary": "The recalled runbooks' services had no change of their kind in this window"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "fallback",
+     "ms": 500,
+     "board_chars": 1191,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:checkout-latency already ran. Memory did not explain it; list changes on services the alert depends on, plus the flat-log baseline.",
+     "summary": "3 changes on the dependency path, 2 more from the flat change log (newest anywhere: chg:search-420)"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 724,
+     "board_chars": 2512,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:cart-310"
+     },
+     "reason": "LLM fallback: recall_similar on inc:checkout-latency already ran. Test suspect chg:cart-310 on svc:cart against the graph.",
+     "summary": "REFUTES chg:cart-310: cart showed no anomaly after the change"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 742,
+     "board_chars": 2622,
+     "args": {
+      "hypothesis_id": "hyp:checkout-latency:pricing-2140"
+     },
+     "reason": "LLM fallback: recall_similar on inc:checkout-latency already ran. Test suspect chg:pricing-2140 on svc:pricing against the graph.",
+     "summary": "REFUTES chg:pricing-2140: change was rolled back before the alert fired"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 822,
+     "board_chars": 2736,
+     "args": {},
+     "reason": "Investigator has proposed hypotheses and checked one, so is done.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 12,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "fallback",
+     "ms": 1641,
+     "board_chars": 2800,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:checkout-latency already ran. Write the status update with owners, cause and sources.",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 13,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 684,
+     "board_chars": 2876,
+     "args": {},
+     "reason": "LLM finished",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": null,
+    "correct": false,
+    "investigator_calls": 5,
+    "hypotheses_checked": 2,
+    "checks_to_culprit": null,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:pricing-2140",
+     "chg:cart-310"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@ravi.moreau"
+    ],
+    "update_posted": true,
+    "wall_s": 11.3
+   }
+  },
+  "act2": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "open_incident",
+     "by": "model",
+     "ms": 858,
+     "board_chars": 386,
+     "args": {
+      "alert_id": "alert:refunds-latency"
+     },
+     "reason": "LLM chose open_incident",
+     "summary": "Opened inc:refunds-latency for 'refunds p99 latency above 2s' on svc:refunds"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "fallback",
+     "ms": 461,
+     "board_chars": 445,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM fallback: open_incident on this incident already ran. Who is hurt? Walk DEPENDS_ON backwards from svc:refunds.",
+     "summary": "3 services depend on svc:refunds (3 tier-1)"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 1308,
+     "board_chars": 514,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM fallback: open_incident on this incident already ran. Find and page whoever is on call for svc:refunds right now.",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds"
+    },
+    {
+     "seq": 5,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "fallback",
+     "ms": 861,
+     "board_chars": 583,
+     "args": {},
+     "reason": "LLM fallback: open_incident on this incident already ran. Impact and owner known; hand the board to the investigator.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 6,
+     "role": "investigator",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 631,
+     "board_chars": 648,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)"
+    },
+    {
+     "seq": 7,
+     "role": "investigator",
+     "tool": "hypothesize_from_memory",
+     "by": "fallback",
+     "ms": 506,
+     "board_chars": 969,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. A past incident matches structurally; test its root cause pattern first.",
+     "summary": "Runbook 'Revert the config change on payments-gw' (worked 1/1) points at chg:pgw-pool-2"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 592,
+     "board_chars": 1299,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2"
+     },
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Test suspect chg:pgw-pool-2 on svc:payments-gw against the graph.",
+     "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "fallback",
+     "ms": 561,
+     "board_chars": 1430,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Root cause supported: chg:pgw-pool-2 on svc:payments-gw; others ruled out.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 10,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1094,
+     "board_chars": 1494,
+     "args": {},
+     "reason": "Investigator has recalled a service that explains the incident, and has checked this suspect. Triage is ready to move to the next step.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pgw-pool-2",
+    "correct": true,
+    "investigator_calls": 3,
+    "hypotheses_checked": 1,
+    "checks_to_culprit": 1,
+    "solved_by_memory": true,
+    "refuted": [],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura"
+    ],
+    "update_posted": false,
+    "wall_s": 8.0
+   }
+  },
+  "act2_no_memory": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "open_incident",
+     "by": "model",
+     "ms": 851,
+     "board_chars": 386,
+     "args": {
+      "alert_id": "alert:refunds-latency"
+     },
+     "reason": "LLM chose open_incident",
+     "summary": "Opened inc:refunds-latency for 'refunds p99 latency above 2s' on svc:refunds"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "fallback",
+     "ms": 590,
+     "board_chars": 445,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM fallback: no usable tool call. Who is hurt? Walk DEPENDS_ON backwards from svc:refunds.",
+     "summary": "3 services depend on svc:refunds (3 tier-1)"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 801,
+     "board_chars": 514,
+     "args": {
+      "service": "svc:refunds"
+     },
+     "reason": "LLM fallback: no usable tool call. Find and page whoever is on call for svc:refunds right now.",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds"
+    },
+    {
+     "seq": 5,
+     "role": "triage",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 453,
+     "board_chars": 583,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "2 past incidents touch this path, none with the same symptom"
+    },
+    {
+     "seq": 6,
+     "role": "triage",
+     "tool": "hypothesize_from_memory",
+     "by": "model",
+     "ms": 403,
+     "board_chars": 812,
+     "args": {},
+     "reason": "LLM chose hypothesize_from_memory",
+     "summary": "The recalled runbooks' services had no change of their kind in this window"
+    },
+    {
+     "seq": 7,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "fallback",
+     "ms": 443,
+     "board_chars": 900,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Impact and owner known; hand the board to the investigator.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "fallback",
+     "ms": 563,
+     "board_chars": 965,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Memory did not explain it; list changes on services the alert depends on, plus the flat-log baseline.",
+     "summary": "3 changes on the dependency path, 1 more from the flat change log (newest anywhere: chg:notif-77)"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 874,
+     "board_chars": 2028,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pay-77"
+     },
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Test suspect chg:pay-77 on svc:payments against the graph.",
+     "summary": "REFUTES chg:pay-77: payments showed no anomaly after the change"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 571,
+     "board_chars": 2140,
+     "args": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2"
+     },
+     "reason": "LLM fallback: recall_similar on inc:refunds-latency already ran. Test suspect chg:pgw-pool-2 on svc:payments-gw against the graph.",
+     "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 628,
+     "board_chars": 2271,
+     "args": {},
+     "reason": "investigator is processing hypotheses",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 12,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 1505,
+     "board_chars": 2335,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM fallback: open_incident on this incident already ran. The culprit lives in svc:payments-gw; page its owning team too.",
+     "summary": "Asha Nakamura (@asha.nakamura, Payments) owns svc:payments-gw too; already engaged"
+    },
+    {
+     "seq": 13,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "fallback",
+     "ms": 1137,
+     "board_chars": 2407,
+     "args": {
+      "service": "svc:payments-gw"
+     },
+     "reason": "LLM fallback: open_incident on this incident already ran. Who knows svc:payments-gw best? Name them in the update.",
+     "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 14,
+     "role": "comms",
+     "tool": "incident_board",
+     "by": "model",
+     "ms": 717,
+     "board_chars": 2476,
+     "args": {},
+     "reason": "LLM chose incident_board",
+     "summary": "13 steps, 4 hypotheses"
+    },
+    {
+     "seq": 15,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "model",
+     "ms": 555,
+     "board_chars": 2554,
+     "args": {},
+     "reason": "LLM chose post_update",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 16,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 879,
+     "board_chars": 2629,
+     "args": {},
+     "reason": "Investigator has proposed hypotheses, checked them, and now Communications needs to page on-call and write the update.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pgw-pool-2",
+    "correct": true,
+    "investigator_calls": 3,
+    "hypotheses_checked": 2,
+    "checks_to_culprit": 2,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:pay-77"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura"
+    ],
+    "update_posted": true,
+    "wall_s": 11.9
+   }
+  },
+  "act3": {
+   "steps": [
+    {
+     "seq": 2,
+     "role": "triage",
+     "tool": "open_incident",
+     "by": "model",
+     "ms": 831,
+     "board_chars": 410,
+     "args": {
+      "alert_id": "alert:subscriptions-latency"
+     },
+     "reason": "LLM chose open_incident",
+     "summary": "Opened inc:subscriptions-latency for 'subscriptions p99 latency above 2s' on svc:subscriptions"
+    },
+    {
+     "seq": 3,
+     "role": "triage",
+     "tool": "recall_similar",
+     "by": "model",
+     "ms": 492,
+     "board_chars": 469,
+     "args": {},
+     "reason": "LLM chose recall_similar",
+     "summary": "2 past incidents touch this path, none with the same symptom"
+    },
+    {
+     "seq": 4,
+     "role": "triage",
+     "tool": "correlate_alerts",
+     "by": "fallback",
+     "ms": 463,
+     "board_chars": 704,
+     "args": {},
+     "reason": "LLM fallback: no usable tool call. 2 other alert(s) fired in the last 15 min; find what they share before investigating each one.",
+     "summary": "3 related alerts on 3 services (checkout, refunds, subscriptions); 6 upstream services are shared by all of them, nearest to all first: payments, postgres-orders, fraud-check"
+    },
+    {
+     "seq": 5,
+     "role": "triage",
+     "tool": "blast_radius",
+     "by": "fallback",
+     "ms": 412,
+     "board_chars": 948,
+     "args": {
+      "service": "svc:subscriptions"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Who is hurt? Walk DEPENDS_ON backwards from svc:subscriptions.",
+     "summary": "3 services depend on svc:subscriptions (3 tier-1)"
+    },
+    {
+     "seq": 6,
+     "role": "triage",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 562,
+     "board_chars": 1023,
+     "args": {
+      "service": "svc:subscriptions"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Find and page whoever is on call for svc:subscriptions right now.",
+     "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:subscriptions"
+    },
+    {
+     "seq": 7,
+     "role": "triage",
+     "tool": "handoff",
+     "by": "fallback",
+     "ms": 515,
+     "board_chars": 1098,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Impact and owner known; hand the board to the investigator.",
+     "summary": "triage hands off to investigator"
+    },
+    {
+     "seq": 8,
+     "role": "investigator",
+     "tool": "propose_hypotheses",
+     "by": "fallback",
+     "ms": 650,
+     "board_chars": 1163,
+     "args": {},
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. No matching memory; list changes on services the alert depends on, plus the flat-log baseline.",
+     "summary": "2 changes on the dependency path, 1 more from the flat change log (newest anywhere: chg:search-430)"
+    },
+    {
+     "seq": 9,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 791,
+     "board_chars": 2011,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:pg-conn-3"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Test suspect chg:pg-conn-3 on svc:postgres-orders against the graph.",
+     "summary": "SUPPORTS chg:pg-conn-3: anomaly propagates postgres-orders -> payments -> subscriptions; explains 3 of 3 alerting services"
+    },
+    {
+     "seq": 10,
+     "role": "investigator",
+     "tool": "who_knows",
+     "by": "model",
+     "ms": 662,
+     "board_chars": 2188,
+     "args": {
+      "service": "svc:subscriptions"
+     },
+     "reason": "LLM chose who_knows",
+     "summary": "Lena Costa (Payments): 1 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 11,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 767,
+     "board_chars": 2266,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:subs-88"
+     },
+     "reason": "LLM fallback: unknown/closed hypothesis id. Test suspect chg:subs-88 on svc:subscriptions against the graph.",
+     "summary": "SUPPORTS chg:subs-88: anomaly propagates subscriptions; explains 1 of 3 alerting services (not refunds, checkout)"
+    },
+    {
+     "seq": 12,
+     "role": "investigator",
+     "tool": "check_hypothesis",
+     "by": "fallback",
+     "ms": 918,
+     "board_chars": 2393,
+     "args": {
+      "hypothesis_id": "hyp:subscriptions-latency:search-430"
+     },
+     "reason": "LLM fallback: invalid args for open_incident (1 errors). Test suspect chg:search-430 on svc:search against the graph.",
+     "summary": "REFUTES chg:search-430: no dependency path from subscriptions to search"
+    },
+    {
+     "seq": 13,
+     "role": "investigator",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 849,
+     "board_chars": 2496,
+     "args": {},
+     "reason": "The cause_service has been identified as svc:postgres-orders. The service_map and blast_radius steps are now completed.",
+     "summary": "investigator hands off to comms"
+    },
+    {
+     "seq": 14,
+     "role": "comms",
+     "tool": "page_on_call",
+     "by": "fallback",
+     "ms": 948,
+     "board_chars": 2560,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. The culprit lives in svc:postgres-orders; page its owning team too.",
+     "summary": "Paged Hana Costa (@hana.costa, Platform) for svc:postgres-orders"
+    },
+    {
+     "seq": 15,
+     "role": "comms",
+     "tool": "who_knows",
+     "by": "fallback",
+     "ms": 634,
+     "board_chars": 2636,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Who knows svc:postgres-orders best? Name them in the update.",
+     "summary": "Omar Tanaka (Platform): 2 changes, 0 incidents, on the owning team"
+    },
+    {
+     "seq": 16,
+     "role": "comms",
+     "tool": "blast_radius",
+     "by": "fallback",
+     "ms": 674,
+     "board_chars": 2709,
+     "args": {
+      "service": "svc:postgres-orders"
+     },
+     "reason": "LLM fallback: recall_similar on inc:subscriptions-latency already ran. Who else depends on svc:postgres-orders? Warn them before they page us.",
+     "summary": "11 services depend on svc:postgres-orders (5 tier-1)"
+    },
+    {
+     "seq": 17,
+     "role": "comms",
+     "tool": "post_update",
+     "by": "fallback",
+     "ms": 1207,
+     "board_chars": 2785,
+     "args": {},
+     "reason": "LLM fallback: unknown/closed hypothesis id. Write the status update with owners, cause and sources.",
+     "summary": "Wrote the status update for #incidents (stored on the incident)"
+    },
+    {
+     "seq": 18,
+     "role": "comms",
+     "tool": "handoff",
+     "by": "model",
+     "ms": 1004,
+     "board_chars": 2866,
+     "args": {},
+     "reason": "investigator is done with the hypotheses and ready for the cause to be determined.",
+     "summary": "comms hands off to human"
+    }
+   ],
+   "outcome": {
+    "root_cause": "chg:pg-conn-3",
+    "correct": true,
+    "investigator_calls": 5,
+    "hypotheses_checked": 3,
+    "checks_to_culprit": 1,
+    "solved_by_memory": false,
+    "refuted": [
+     "chg:search-430"
+    ],
+    "co_causes": [],
+    "paged": [
+     "@asha.nakamura",
+     "@hana.costa"
+    ],
+    "update_posted": true,
+    "wall_s": 14.0
+   }
+  }
+ },
+ "deterministic": {
+  "act1": {
+   "root_cause": "chg:pgw-pool-1",
+   "correct": true,
+   "investigator_calls": 8,
+   "hypotheses_checked": 5,
+   "checks_to_culprit": 3,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:legacy-193",
+    "chg:search-420",
+    "chg:pricing-2140",
+    "chg:cart-310"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura",
+    "@ravi.moreau"
+   ],
+   "update_posted": true,
+   "wall_s": 0.5
+  },
+  "act2": {
+   "root_cause": "chg:pgw-pool-2",
+   "correct": true,
+   "investigator_calls": 3,
+   "hypotheses_checked": 1,
+   "checks_to_culprit": 1,
+   "solved_by_memory": true,
+   "refuted": [],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  },
+  "act2_no_memory": {
+   "root_cause": "chg:pgw-pool-2",
+   "correct": true,
+   "investigator_calls": 6,
+   "hypotheses_checked": 4,
+   "checks_to_culprit": 2,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:notif-77",
+    "chg:fraud-512",
+    "chg:pay-77"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  },
+  "act3": {
+   "root_cause": "chg:pg-conn-3",
+   "correct": true,
+   "investigator_calls": 6,
+   "hypotheses_checked": 3,
+   "checks_to_culprit": 1,
+   "solved_by_memory": false,
+   "refuted": [
+    "chg:search-430",
+    "chg:subs-88"
+   ],
+   "co_causes": [],
+   "paged": [
+    "@asha.nakamura",
+    "@hana.costa"
+   ],
+   "update_posted": true,
+   "wall_s": 0.1
+  }
+ }
+}
