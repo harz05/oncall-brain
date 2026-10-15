@@ -198,10 +198,10 @@ function closeMenus() {
 function renderSimulateMenu() {
   const list = scenarios(), next = nextScenario();
   const items = list.map((sc) => {
-    const done = fired(sc);
-    return h('div', { class: `menu-item${sc === next ? ' next' : ''}`, role: 'none' },
+    const done = fired(sc), isNext = sc.act === next?.act;
+    return h('div', { class: `menu-item${isNext ? ' next' : ''}`, role: 'none' },
       h('div', { class: 'mi-text' }, h('b', {}, scenarioTitle(sc)), h('span', { class: 'muted small' }, SCENARIO_NOTE[sc.act] || '')),
-      h('button', { class: sc === next ? 'primary-btn' : 'ghost', role: 'menuitem', disabled: done || state.running,
+      h('button', { class: isNext ? 'primary-btn' : 'ghost', role: 'menuitem', disabled: done || state.running,
         onclick: () => { closeMenus(); fire(sc.act); } }, done ? 'Simulated ✓' : 'Simulate'));
   });
   const svcs = [...(state.graph?.nodes || [])].sort((a, b) => a.name.localeCompare(b.name));

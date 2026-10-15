@@ -8,7 +8,7 @@
   "symptom": "latency",
   "alert": "refunds p99 latency above 2s"
  },
- "planner": "deterministic planner",
+ "planner": "claude-opus-5-5 via Anthropic Messages API",
  "steps": [
   {
    "seq": 1,
@@ -16,6 +16,7 @@
    "tool": "open_incident",
    "reason": "An alert fired; open the shared board.",
    "summary": "Opened inc:refunds-latency for 'refunds p99 latency above 2s' on svc:refunds",
+   "by": "rules",
    "writes": true,
    "queries": [
     {
@@ -35,7 +36,7 @@
        "alert": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.23,
+     "ms": 1.09,
      "readonly": false
     }
    ],
@@ -58,13 +59,14 @@
    "seq": 2,
    "role": "triage",
    "tool": "blast_radius",
-   "reason": "Who is hurt? Walk DEPENDS_ON backwards from svc:refunds.",
+   "reason": "Storm count is 0, so no alerts to correlate; I'm checking which services depend on refunds to see who is affected.",
    "summary": "3 services depend on svc:refunds (3 tier-1)",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -93,6 +95,7 @@
          "hops": null,
          "id": null,
          "onset": null,
+         "red_before": null,
          "service": null,
          "source": null,
          "status": null
@@ -110,7 +113,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.03,
+     "ms": 0.98,
      "readonly": true
     },
     {
@@ -130,12 +133,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.47,
+     "ms": 1.27,
      "readonly": true
     },
     {
      "name": "blast_radius",
-     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH p = (caller:Service)-[:DEPENDS_ON*1..6]->(:Service {id: $service})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH caller, p\nORDER BY length(p)\nWITH caller, collect(p)[0] AS p\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path\nORDER BY hops, service",
+     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH (target:Service {id: $service})\nWITH [[target]] AS f0\n// Breadth-first against the edge direction, one hop per CALL, over edges live at $at: level k lists one path\n// [caller, ..., target] per caller k hops away, so each service is expanded once per level instead of once per path.\n// A caller keeps its path through its first parent in level order, and callers are ordered by that parent, then by\n// id descending: the order a depth-first traversal meets them, so ties pick the same path the plain\n// (caller)-[:DEPENDS_ON*1..6]->(target) query does (queries/reference.cypher).\nCALL { WITH f0 UNWIND range(0, size(f0) - 1) AS i WITH i, f0[i] AS path, f0[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f1 }\nCALL { WITH f1 UNWIND range(0, size(f1) - 1) AS i WITH i, f1[i] AS path, f1[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f2 }\nCALL { WITH f2 UNWIND range(0, size(f2) - 1) AS i WITH i, f2[i] AS path, f2[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f3 }\nCALL { WITH f3 UNWIND range(0, size(f3) - 1) AS i WITH i, f3[i] AS path, f3[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f4 }\nCALL { WITH f4 UNWIND range(0, size(f4) - 1) AS i WITH i, f4[i] AS path, f4[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f5 }\nCALL { WITH f5 UNWIND range(0, size(f5) - 1) AS i WITH i, f5[i] AS path, f5[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f6 }\n// A service can come back at a later level (a longer walk); its first level is its distance.\nUNWIND [f1, f2, f3, f4, f5, f6] AS level\nUNWIND level AS path\nWITH path[0] AS caller, collect(path)[0] AS path\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path\nORDER BY hops, service",
      "params": {
       "service": "svc:refunds",
       "at": 1792296000
@@ -174,7 +177,7 @@
        ]
       }
      ],
-     "ms": 0.6,
+     "ms": 1.82,
      "readonly": true
     },
     {
@@ -199,7 +202,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.27,
+     "ms": 0.73,
      "readonly": false
     }
    ],
@@ -277,13 +280,14 @@
    "seq": 3,
    "role": "triage",
    "tool": "page_on_call",
-   "reason": "Find and page whoever is on call for svc:refunds right now.",
+   "reason": "Blast radius for refunds is mapped, so next I'm paging whoever is on call for svc:refunds.",
    "summary": "Paged Asha Nakamura (@asha.nakamura, Payments) for svc:refunds",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -317,6 +321,7 @@
          "hops": null,
          "id": null,
          "onset": null,
+         "red_before": null,
          "service": null,
          "source": null,
          "status": null
@@ -334,7 +339,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.91,
+     "ms": 2.02,
      "readonly": true
     },
     {
@@ -354,7 +359,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.32,
+     "ms": 1.18,
      "readonly": true
     },
     {
@@ -373,7 +378,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.24,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -390,7 +395,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.15,
+     "ms": 0.8,
      "readonly": false
     }
    ],
@@ -425,13 +430,14 @@
    "seq": 4,
    "role": "triage",
    "tool": "handoff",
-   "reason": "Impact and owner known; hand the board to the investigator.",
+   "reason": "Triage is done: incident opened, blast radius recorded and on-call paged, with no alert storm to correlate.",
    "summary": "triage hands off to investigator",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -470,6 +476,7 @@
          "hops": null,
          "id": null,
          "onset": null,
+         "red_before": null,
          "service": null,
          "source": null,
          "status": null
@@ -487,7 +494,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.74,
+     "ms": 1.28,
      "readonly": true
     }
    ],
@@ -501,13 +508,14 @@
    "seq": 5,
    "role": "investigator",
    "tool": "recall_similar",
-   "reason": "Have we seen this before? Recall resolved incidents with the same shape.",
+   "reason": "Before suggesting suspects, I'm checking memory for past incidents on the refunds dependency path that look like this one.",
    "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -551,6 +559,7 @@
          "hops": null,
          "id": null,
          "onset": null,
+         "red_before": null,
          "service": null,
          "source": null,
          "status": null
@@ -568,12 +577,12 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.94,
+     "ms": 1.49,
      "readonly": true
     },
     {
      "name": "recall_similar",
-     "cypher": "// purpose: Episodic recall by structure, not text: resolved incidents whose root-cause service is on the alerting service's live dependency path. Same symptom scores higher.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (past:Incident {status: 'resolved'})-[:CAUSED_BY]->(c:Change)-[:CHANGED]->(cs:Service)\nWHERE past.opened_at < a.at AND past.id <> i.id\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nWITH past, c, cs, a, min(length(p)) AS hops\nOPTIONAL MATCH (past)-[:FIXED_WITH]->(rb:Runbook)\nRETURN past.id AS incident, past.title AS title, past.symptom AS symptom, cs.id AS cause_service,\n       c.kind AS cause_kind, c.id AS cause_change, hops, rb.id AS runbook, rb.title AS runbook_title,\n       2 + CASE WHEN past.symptom = a.symptom THEN 1 ELSE 0 END AS score\nORDER BY score DESC, past.opened_at DESC\nLIMIT 5",
+     "cypher": "// purpose: Episodic recall by structure, not text: resolved incidents whose root-cause service is on the alerting service's live dependency path. Same symptom scores higher.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (past:Incident {status: 'resolved'})-[:CAUSED_BY]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE past.opened_at < a.at AND past.id <> i.id\nWITH o, s, a.at AS alert_at, a, past, c\nCALL {\n  // Live hops o -> s (same block as path_suspects, which explains it).\n  WITH o, s, alert_at\n  WITH o, s, alert_at, shortestPath((o)-[:DEPENDS_ON*0..6]->(s)) AS sp\n  WHERE sp IS NOT NULL\n  WITH o, s, alert_at, sp,\n       all(r IN relationships(sp) WHERE r.valid_from <= alert_at AND (r.valid_to IS NULL OR r.valid_to > alert_at)) AS live\n  OPTIONAL MATCH p = (o)-[e:DEPENDS_ON*0..6]->(s)\n  WHERE NOT live AND e.valid_from <= alert_at AND (e.valid_to IS NULL OR e.valid_to > alert_at)\n  WITH live, sp, min(length(p)) AS shortest_live\n  WITH CASE WHEN live THEN length(sp) ELSE shortest_live END AS hops\n  WHERE hops IS NOT NULL\n  RETURN hops\n}\nOPTIONAL MATCH (past)-[:FIXED_WITH]->(rb:Runbook)\nRETURN past.id AS incident, past.title AS title, past.symptom AS symptom, s.id AS cause_service,\n       c.kind AS cause_kind, c.id AS cause_change, hops, rb.id AS runbook, rb.title AS runbook_title,\n       2 + CASE WHEN past.symptom = a.symptom THEN 1 ELSE 0 END AS score\nORDER BY score DESC, past.opened_at DESC\nLIMIT 5",
      "params": {
       "incident_id": "inc:refunds-latency"
      },
@@ -615,7 +624,7 @@
        "score": 2
       }
      ],
-     "ms": 2.01,
+     "ms": 8.8,
      "readonly": true
     },
     {
@@ -663,7 +672,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.74,
+     "ms": 1.05,
      "readonly": false
     }
    ],
@@ -723,13 +732,14 @@
    "seq": 6,
    "role": "investigator",
    "tool": "hypothesize_from_memory",
-   "reason": "A past incident matches structurally; test its root cause pattern first.",
+   "reason": "A past incident (payments-gw, score 3) matches, so I'm generating hypotheses from the runbook that fixed it.",
    "summary": "Runbook 'Revert the config change on payments-gw' (worked 1/1) points at chg:pgw-pool-2",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -778,6 +788,7 @@
          "hops": null,
          "id": null,
          "onset": null,
+         "red_before": null,
          "service": null,
          "source": null,
          "status": null
@@ -805,7 +816,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.05,
+     "ms": 1.37,
      "readonly": true
     },
     {
@@ -825,12 +836,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.48,
+     "ms": 1.69,
      "readonly": true
     },
     {
      "name": "memory_suspects",
-     "cypher": "// purpose: Procedural memory decides: for each recalled incident, the runbook that fixed it names a service and a change kind; suspect in-window changes of that kind on that service, most trusted runbook first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:FIXED_WITH]->(rb:Runbook)-[:FOR_SERVICE]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change {kind: rb.kind})-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       rb.id AS runbook, rb.title AS runbook_title, rb.successes AS successes, rb.uses AS uses,\n       collect(DISTINCT past.id) AS recalled\nORDER BY toFloat(successes) / uses DESC, at DESC",
+     "cypher": "// purpose: Procedural memory decides: for each recalled incident, the runbook that fixed it names a service and a change kind; suspect in-window changes of that kind on that service, most trusted runbook first.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:FIXED_WITH]->(rb:Runbook)-[:FOR_SERVICE]->(s:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change {kind: rb.kind})-[:CHANGED]->(s)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nWITH o, s, a.at AS alert_at, past, rb, c\nCALL {\n  // Live hops o -> s (same block as path_suspects, which explains it).\n  WITH o, s, alert_at\n  WITH o, s, alert_at, shortestPath((o)-[:DEPENDS_ON*0..6]->(s)) AS sp\n  WHERE sp IS NOT NULL\n  WITH o, s, alert_at, sp,\n       all(r IN relationships(sp) WHERE r.valid_from <= alert_at AND (r.valid_to IS NULL OR r.valid_to > alert_at)) AS live\n  OPTIONAL MATCH p = (o)-[e:DEPENDS_ON*0..6]->(s)\n  WHERE NOT live AND e.valid_from <= alert_at AND (e.valid_to IS NULL OR e.valid_to > alert_at)\n  WITH live, sp, min(length(p)) AS shortest_live\n  WITH CASE WHEN live THEN length(sp) ELSE shortest_live END AS hops\n  WHERE hops IS NOT NULL\n  RETURN hops\n}\nRETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, hops,\n       rb.id AS runbook, rb.title AS runbook_title, rb.successes AS successes, rb.uses AS uses,\n       collect(DISTINCT past.id) AS recalled\nORDER BY toFloat(successes) / uses DESC, at DESC",
      "params": {
       "incident_id": "inc:refunds-latency",
       "window": 7200,
@@ -852,7 +863,7 @@
        ]
       }
      ],
-     "ms": 1.7,
+     "ms": 4.17,
      "readonly": true
     },
     {
@@ -876,7 +887,7 @@
        "id": "hyp:refunds-latency:pgw-pool-2"
       }
      ],
-     "ms": 0.86,
+     "ms": 1.49,
      "readonly": false
     }
    ],
@@ -914,13 +925,14 @@
    "seq": 7,
    "role": "investigator",
    "tool": "check_hypothesis",
-   "reason": "Test suspect chg:pgw-pool-2 on svc:payments-gw against the graph.",
+   "reason": "Memory suggested the payments-gw pool change, so I'm checking that one open hypothesis against the dependency graph now.",
    "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -974,6 +986,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": null,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "open"
@@ -1001,7 +1014,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.04,
+     "ms": 2.4,
      "readonly": true
     },
     {
@@ -1024,12 +1037,12 @@
        "storm_services": []
       }
      ],
-     "ms": 0.9,
+     "ms": 1.8,
      "readonly": true
     },
     {
      "name": "live_paths",
-     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
+     "cypher": "// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.\nMATCH (o:Service {id: $origin}), (t:Service {id: $target})\n// No path at all within 6 hops (live or not): done, without walking every path out of the origin.\nWITH o, shortestPath((o)-[:DEPENDS_ON*0..6]->(t)) AS sp\nWHERE sp IS NOT NULL\n// Otherwise list the paths as before: which 20 are kept among equally long ones, and their order, is the order this\n// traversal meets them, so it stays exactly as it was (a per-hop filter on the edges would change that order). The\n// target is matched again, not carried over, so the traversal still runs from the origin.\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 20\nRETURN [n IN nodes(p) | n.id] AS path",
      "params": {
       "origin": "svc:refunds",
       "target": "svc:payments-gw",
@@ -1044,7 +1057,7 @@
        ]
       }
      ],
-     "ms": 0.66,
+     "ms": 1.3,
      "readonly": true
     },
     {
@@ -1076,12 +1089,28 @@
        "summary": "p99 4.4s on POST /refunds"
       }
      ],
-     "ms": 0.52,
+     "ms": 1.41,
+     "readonly": true
+    },
+    {
+     "name": "red_before",
+     "cypher": "// purpose: The latest anomaly on a service between the start of the alert window and a change landing on it: was the service already failing before its own change (a cascade victim)?\nMATCH (x:Anomaly)-[:ON]->(:Service {id: $service})\nWHERE x.at >= $since AND x.at < $until\nRETURN max(x.at) AS at",
+     "params": {
+      "service": "svc:payments-gw",
+      "since": 1792288800,
+      "until": 1792294200
+     },
+     "rows": [
+      {
+       "at": null
+      }
+     ],
+     "ms": 1.14,
      "readonly": true
     },
     {
      "name": "record_evidence",
-     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.tag = $tag, e.path = $path, e.at = $at, e.explained = $explained\nWITH h, e, h.status AS before\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,\n    h.explained = $explained, h.onset = $onset, h.gaps = $gaps\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h, before\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence (once).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'open' THEN [rb] ELSE [] END |\n  SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.tag = $tag, e.path = $path, e.at = $at, e.explained = $explained\nWITH h, e, h.status AS before\n// A human-confirmed cause stays confirmed whatever a later re-check says.\nSET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'\n                    WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,\n    h.explained = $explained, h.onset = $onset, h.gaps = $gaps, h.red_before = $red_before\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nWITH h, before\n// Procedural memory learns from misses too: a runbook whose suggestion was refuted loses confidence (once).\nOPTIONAL MATCH (rb:Runbook {id: h.runbook})\nFOREACH (x IN CASE WHEN rb IS NOT NULL AND $verdict = 'refutes' AND before = 'open' THEN [rb] ELSE [] END |\n  SET x.uses = x.uses + 1)\nRETURN h.id AS hypothesis, h.status AS status",
      "params": {
       "hypothesis_id": "hyp:refunds-latency:pgw-pool-2",
       "evidence_id": "ev:refunds-latency:pgw-pool-2",
@@ -1098,7 +1127,8 @@
        "svc:refunds"
       ],
       "onset": 1792294320,
-      "gaps": []
+      "gaps": [],
+      "red_before": null
      },
      "rows": [
       {
@@ -1106,7 +1136,7 @@
        "status": "supported"
       }
      ],
-     "ms": 0.93,
+     "ms": 1.69,
      "readonly": false
     }
    ],
@@ -1158,13 +1188,14 @@
    "seq": 8,
    "role": "investigator",
    "tool": "handoff",
-   "reason": "Root cause supported: chg:pgw-pool-2 on svc:payments-gw; others ruled out.",
+   "reason": "The only hypothesis, chg:pgw-pool-2 on svc:payments-gw, was checked and supported, no other suspects are open and there was no alert storm, so the cause is payments-gw.",
    "summary": "investigator hands off to comms",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -1225,6 +1256,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -1252,7 +1284,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 0.93,
+     "ms": 2.19,
      "readonly": true
     }
    ],
@@ -1266,13 +1298,14 @@
    "seq": 9,
    "role": "comms",
    "tool": "page_on_call",
-   "reason": "The culprit lives in svc:payments-gw; page its owning team too.",
+   "reason": "Payments-gw is the supported culprit, so I'm paging its on-call owner first.",
    "summary": "Asha Nakamura (@asha.nakamura, Payments) owns svc:payments-gw too; already engaged",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -1338,6 +1371,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -1365,7 +1399,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 1.3,
+     "ms": 2.09,
      "readonly": true
     },
     {
@@ -1385,7 +1419,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.35,
+     "ms": 1.15,
      "readonly": true
     },
     {
@@ -1404,7 +1438,7 @@
        "team_name": "Payments"
       }
      ],
-     "ms": 0.7,
+     "ms": 0.94,
      "readonly": true
     },
     {
@@ -1421,7 +1455,7 @@
        "first_for": "svc:refunds"
       }
      ],
-     "ms": 0.31,
+     "ms": 0.92,
      "readonly": false
     }
    ],
@@ -1456,13 +1490,14 @@
    "seq": 10,
    "role": "comms",
    "tool": "who_knows",
-   "reason": "Who knows svc:payments-gw best? Name them in the update.",
+   "reason": "Payments-gw on-call is paged. Next I'm checking who knows payments-gw best so the update names an expert to ask.",
    "summary": "Sana Brandt (Payments): 3 changes, 0 incidents, on the owning team",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -1533,6 +1568,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -1560,7 +1596,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.2,
+     "ms": 1.75,
      "readonly": true
     },
     {
@@ -1626,7 +1662,7 @@
        "score": 3
       }
      ],
-     "ms": 5.51,
+     "ms": 8.2,
      "readonly": true
     },
     {
@@ -1639,7 +1675,7 @@
       "score": 12
      },
      "rows": [],
-     "ms": 0.86,
+     "ms": 1.33,
      "readonly": false
     }
    ],
@@ -1716,13 +1752,14 @@
    "seq": 11,
    "role": "comms",
    "tool": "blast_radius",
-   "reason": "Who else depends on svc:payments-gw? Warn them before they page us.",
+   "reason": "Next I'm warning the services that depend on payments-gw, the culprit behind the refunds latency, by recording its blast radius.",
    "summary": "7 services depend on svc:payments-gw (5 tier-1)",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -1798,6 +1835,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -1825,7 +1863,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.08,
+     "ms": 3.13,
      "readonly": true
     },
     {
@@ -1845,12 +1883,12 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 0.96,
+     "ms": 1.19,
      "readonly": true
     },
     {
      "name": "blast_radius",
-     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH p = (caller:Service)-[:DEPENDS_ON*1..6]->(:Service {id: $service})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH caller, p\nORDER BY length(p)\nWITH caller, collect(p)[0] AS p\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path\nORDER BY hops, service",
+     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH (target:Service {id: $service})\nWITH [[target]] AS f0\n// Breadth-first against the edge direction, one hop per CALL, over edges live at $at: level k lists one path\n// [caller, ..., target] per caller k hops away, so each service is expanded once per level instead of once per path.\n// A caller keeps its path through its first parent in level order, and callers are ordered by that parent, then by\n// id descending: the order a depth-first traversal meets them, so ties pick the same path the plain\n// (caller)-[:DEPENDS_ON*1..6]->(target) query does (queries/reference.cypher).\nCALL { WITH f0 UNWIND range(0, size(f0) - 1) AS i WITH i, f0[i] AS path, f0[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f1 }\nCALL { WITH f1 UNWIND range(0, size(f1) - 1) AS i WITH i, f1[i] AS path, f1[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f2 }\nCALL { WITH f2 UNWIND range(0, size(f2) - 1) AS i WITH i, f2[i] AS path, f2[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f3 }\nCALL { WITH f3 UNWIND range(0, size(f3) - 1) AS i WITH i, f3[i] AS path, f3[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f4 }\nCALL { WITH f4 UNWIND range(0, size(f4) - 1) AS i WITH i, f4[i] AS path, f4[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f5 }\nCALL { WITH f5 UNWIND range(0, size(f5) - 1) AS i WITH i, f5[i] AS path, f5[i][0] AS x\n       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)\n       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC\n       RETURN collect([n] + path) AS f6 }\n// A service can come back at a later level (a longer walk); its first level is its distance.\nUNWIND [f1, f2, f3, f4, f5, f6] AS level\nUNWIND level AS path\nWITH path[0] AS caller, collect(path)[0] AS path\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path\nORDER BY hops, service",
      "params": {
       "service": "svc:payments-gw",
       "at": 1792296000
@@ -1938,7 +1976,7 @@
        ]
       }
      ],
-     "ms": 1.39,
+     "ms": 1.92,
      "readonly": true
     },
     {
@@ -1979,7 +2017,7 @@
       ]
      },
      "rows": [],
-     "ms": 0.98,
+     "ms": 0.85,
      "readonly": false
     }
    ],
@@ -2175,13 +2213,14 @@
    "seq": 12,
    "role": "comms",
    "tool": "post_update",
-   "reason": "Write the status update with owners, cause and sources.",
+   "reason": "Payments-gw's owner has been paged, the expert found and its dependents warned, so I'm posting the status update now.",
    "summary": "Wrote the status update for #incidents (stored on the incident)",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -2262,6 +2301,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -2289,7 +2329,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 2.11,
+     "ms": 1.55,
      "readonly": true
     },
     {
@@ -2309,7 +2349,7 @@
        "alert_name": "refunds p99 latency above 2s"
       }
      ],
-     "ms": 1.26,
+     "ms": 0.92,
      "readonly": true
     },
     {
@@ -2393,7 +2433,7 @@
        ]
       }
      ],
-     "ms": 2.48,
+     "ms": 2.78,
      "readonly": true
     },
     {
@@ -2403,7 +2443,7 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 0.82,
+     "ms": 1.17,
      "readonly": true
     },
     {
@@ -2413,12 +2453,12 @@
       "incident_id": "inc:refunds-latency"
      },
      "rows": [],
-     "ms": 1.11,
+     "ms": 0.83,
      "readonly": true
     },
     {
      "name": "cause_facts",
-     "cypher": "// purpose: The incident's leading cause as the graph records it (confirmed, else supported) with its evidence.\nMATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nOPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)\nRETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, e.path AS live_path,\n       h.status AS status\nORDER BY status, size(coalesce(e.path, [])) DESC\nLIMIT 1",
+     "cypher": "// purpose: The incident's leading cause as the graph records it (confirmed, else supported) with its evidence.\nMATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nOPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(h)\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(p:Person)\nRETURN c.id AS change, s.id AS service, c.summary AS summary, c.kind AS kind, c.at AS at, p.name AS author,\n       e.reason AS reason, e.path AS live_path, h.status AS status, coalesce(h.explained, []) AS explained,\n       coalesce(h.gaps, []) AS gaps\nORDER BY status, size(coalesce(e.path, [])) DESC\nLIMIT 1",
      "params": {
       "incident_id": "inc:refunds-latency"
      },
@@ -2427,39 +2467,76 @@
        "change": "chg:pgw-pool-2",
        "service": "svc:payments-gw",
        "summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+       "kind": "config",
+       "at": 1792294200,
+       "author": "Quinn Tanaka",
        "reason": "anomaly propagates payments-gw -> payments -> refunds",
        "live_path": [
         "svc:refunds",
         "svc:payments",
         "svc:payments-gw"
        ],
-       "status": "supported"
+       "status": "supported",
+       "explained": [
+        "svc:refunds"
+       ],
+       "gaps": []
       }
      ],
-     "ms": 1.42,
+     "ms": 1.48,
+     "readonly": true
+    },
+    {
+     "name": "cause_context",
+     "cypher": "// purpose: Company knowledge behind the cause: current docs that mention the culprit change, then decision records and postmortems about its service, written before the incident. The update cites them so the on-call engineer sees the decision history.\nMATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWHERE h.status IN ['confirmed', 'supported']\nMATCH (d:Doc)-[:DECIDES|MENTIONS]->(x)\nWHERE (x = c OR x = s) AND d.at <= $at AND NOT ()-[:SUPERSEDES]->(d)\nWITH DISTINCT d, max(CASE WHEN x = c THEN 1 ELSE 0 END) AS about_change,\n     CASE d.kind WHEN 'decision' THEN 2 WHEN 'postmortem' THEN 1 ELSE 0 END AS weighty\nRETURN d.id AS id, d.title AS title, d.kind AS kind, d.at AS at, about_change, weighty\nORDER BY about_change DESC, weighty DESC, at DESC\nLIMIT 2",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "id": "doc:pm-load-test-pgw",
+       "title": "Postmortem: payments gateway pool exhausted in the peak load test",
+       "kind": "postmortem",
+       "at": 1773892800,
+       "about_change": 0,
+       "weighty": 1
+      },
+      {
+       "id": "doc:cost-review-pgw",
+       "title": "Q4 cost review: payments gateway idle connections",
+       "kind": "design",
+       "at": 1791259200,
+       "about_change": 0,
+       "weighty": 0
+      }
+     ],
+     "ms": 10.51,
      "readonly": true
     },
     {
      "name": "post_update",
-     "cypher": "// purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nOPTIONAL MATCH (m)-[old:CITES]->()\nDELETE old\nWITH DISTINCT m\nUNWIND $cites AS cid\nOPTIONAL MATCH (c:Change {id: cid})\nOPTIONAL MATCH (t:Ticket {id: cid})\nOPTIONAL MATCH (msg:Message {id: cid})\nOPTIONAL MATCH (rb:Runbook {id: cid})\nOPTIONAL MATCH (p:Person {id: cid})\nWITH m, coalesce(c, t, msg, rb, p) AS n\nWHERE n IS NOT NULL\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
+     "cypher": "// purpose: Post (or rewrite) the status update on the incident and link it to every node it cites; stale citations are dropped. Lookups are per label so the id indexes are used.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nOPTIONAL MATCH (m)-[old:CITES]->()\nDELETE old\nWITH DISTINCT m\nUNWIND $cites AS cid\nOPTIONAL MATCH (c:Change {id: cid})\nOPTIONAL MATCH (t:Ticket {id: cid})\nOPTIONAL MATCH (msg:Message {id: cid})\nOPTIONAL MATCH (rb:Runbook {id: cid})\nOPTIONAL MATCH (p:Person {id: cid})\nOPTIONAL MATCH (d:Doc {id: cid})\nWITH m, coalesce(c, t, msg, rb, p, d) AS n\nWHERE n IS NOT NULL\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
      "params": {
       "incident_id": "inc:refunds-latency",
       "message_id": "msg:update:inc:refunds-latency",
-      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
       "at": 1792296000,
       "cites": [
        "chg:pgw-pool-2",
        "ticket:CR-902",
        "rb:payments-gw:config",
-       "person:sana-brandt"
+       "person:sana-brandt",
+       "doc:pm-load-test-pgw",
+       "doc:cost-review-pgw"
       ]
      },
      "rows": [
       {
-       "cited": 4
+       "cited": 6
       }
      ],
-     "ms": 1.95,
+     "ms": 2.22,
      "readonly": false
     }
    ],
@@ -2468,17 +2545,21 @@
      "chg:pgw-pool-2",
      "ticket:CR-902",
      "rb:payments-gw:config",
-     "person:sana-brandt"
+     "person:sana-brandt",
+     "doc:pm-load-test-pgw",
+     "doc:cost-review-pgw"
     ],
     "edges": []
    },
    "data": {
-    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
     "cites": [
      "chg:pgw-pool-2",
      "ticket:CR-902",
      "rb:payments-gw:config",
-     "person:sana-brandt"
+     "person:sana-brandt",
+     "doc:pm-load-test-pgw",
+     "doc:cost-review-pgw"
     ],
     "runbook": {
      "id": "rb:payments-gw:config",
@@ -2505,13 +2586,14 @@
    "seq": 13,
    "role": "comms",
    "tool": "handoff",
-   "reason": "Update posted; waiting for a human to confirm the fix.",
+   "reason": "All comms steps are on the board: culprit owner paged, expert consulted, dependents warned, status update posted.",
    "summary": "comms hands off to human",
+   "by": "claude-opus-5-5",
    "writes": true,
    "queries": [
     {
      "name": "incident_board",
-     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at, explained: h.explained, onset: h.onset, gaps: h.gaps,\n              red_before: h.red_before}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nWITH i, a, o, steps, hypotheses,\n     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls\nOPTIONAL MATCH (other:Alert)\nWHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at + $storm_window\nWITH i, a, o, steps, hypotheses, recalls, count(other) AS storm\nOPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, collect(DISTINCT cs.id) AS correlated\nOPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)\nWITH i, a, o, steps, hypotheses, recalls, storm, correlated, u, su\nORDER BY su.rank\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream",
      "params": {
       "incident_id": "inc:refunds-latency",
       "storm_window": 900
@@ -2597,6 +2679,7 @@
          "hops": 2,
          "id": "hyp:refunds-latency:pgw-pool-2",
          "onset": 1792294320,
+         "red_before": null,
          "service": "svc:payments-gw",
          "source": "memory",
          "status": "supported"
@@ -2624,7 +2707,7 @@
        "shared_upstream": []
       }
      ],
-     "ms": 3.23,
+     "ms": 1.4,
      "readonly": true
     }
    ],
@@ -2635,11 +2718,15 @@
    "data": null
   }
  ],
+ "joined": null,
  "outcome": {
   "root_cause": {
    "change": "chg:pgw-pool-2",
    "service": "svc:payments-gw",
    "summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+   "kind": "config",
+   "at": 1792294200,
+   "author": "Quinn Tanaka",
    "reason": "anomaly propagates payments-gw -> payments -> refunds",
    "live_path": [
     "svc:refunds",
@@ -2647,13 +2734,18 @@
     "svc:payments-gw"
    ],
    "status": "supported",
-   "verdict": "supports",
-   "retired_path": [],
-   "tag": "supported",
    "explained": [
     "svc:refunds"
    ],
-   "gaps": []
+   "gaps": [],
+   "verdict": "supports",
+   "retired_path": [],
+   "tag": "supported"
+  },
+  "confidence": {
+   "level": "high",
+   "label": "Very likely",
+   "why": "anomalies follow this change along the live dependency path to the alerting service"
   },
   "refuted": [],
   "baseline_pick": {
@@ -2727,7 +2819,45 @@
    "svc:subscriptions"
   ],
   "co_causes": [],
-  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: config change on payments-gw by Quinn Tanaka: \"Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)\"\nContext: Postmortem: payments gateway pool exhausted in the peak load test (postmortem); Q4 cost review: payments gateway idle connections (design)\nPaged: @asha.nakamura (Payments)\nAlso at risk: checkout, subscriptions\nAsk: Sana Brandt (@sana.brandt, Payments) knows payments-gw best\nNext action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)\nSources: ticket:CR-902",
+  "sources": [
+   {
+    "id": "chg:pgw-pool-2",
+    "kind": "Change",
+    "title": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+    "at": 1792294200
+   },
+   {
+    "id": "doc:pm-load-test-pgw",
+    "kind": "Doc",
+    "title": "Postmortem: payments gateway pool exhausted in the peak load test",
+    "at": 1773892800
+   },
+   {
+    "id": "doc:cost-review-pgw",
+    "kind": "Doc",
+    "title": "Q4 cost review: payments gateway idle connections",
+    "at": 1791259200
+   },
+   {
+    "id": "person:sana-brandt",
+    "kind": "Person",
+    "title": "Sana Brandt",
+    "at": null
+   },
+   {
+    "id": "rb:payments-gw:config",
+    "kind": "Runbook",
+    "title": "Revert the config change on payments-gw",
+    "at": null
+   },
+   {
+    "id": "ticket:CR-902",
+    "kind": "Ticket",
+    "title": "CR-902 Roll out config template 2026.10.18",
+    "at": 1792209600
+   }
+  ],
   "investigator_calls": 3,
   "hypotheses_checked": 1,
   "checks_to_culprit": 1,
@@ -2752,11 +2882,13 @@
   },
   "storm": null
  },
+ "llm_tokens": 60419,
+ "slack": "off",
  "ablation": {
   "without_memory": {
    "investigator_calls": 6,
    "hypotheses_checked": 4,
-   "checks_to_culprit": 2,
+   "checks_to_culprit": 3,
    "root_cause": "chg:pgw-pool-2"
   }
  }
