@@ -13,7 +13,7 @@ the MCP Inspector or any other MCP client can call the tools directly: 23 regist
 | human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
 | company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; read-only, no LLM), `who_knows`, `change_story` |
 | read tools | `dependency_path`, `service_map`, `incident_board` |
-| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`: keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
+| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
 Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
