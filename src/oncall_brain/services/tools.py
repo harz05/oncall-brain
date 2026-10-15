@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain import update
 from oncall_brain.domain.models import Highlight, ToolOutput
-from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
+from oncall_brain.domain.planner import RECALL_MIN_SCORE, STORM_WINDOW, WINDOW
 from oncall_brain.domain.verdict import CheckFacts, judge
 
 
@@ -120,6 +120,39 @@ def page_on_call(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
 
 
 @tool(writes=True)
+def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
+    """Alert storm: fold other alerts from the last 15 minutes into this incident, find the services every
+    alerting service depends on (shared upstream), and rank them with betweenness centrality (algo.betweenness:
+    where dependency paths converge). Investigators then check suspects there first, and a suspect that cannot
+    reach every alerting service is refuted."""
+    head, qs = _head(ctx, a.incident_id)
+    storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, window=STORM_WINDOW)
+    qs.append(storm)
+    if not storm.rows:
+        return ToolOutput(summary="No other alerts in the storm window", data={"alerts": [], "shared": []},
+                          queries=qs)
+    services = sorted({head["service"], *(r["service"] for r in storm.rows)})
+    shared_q = ctx.repo.read("shared_upstream", services=services, at=head["at"])
+    qs.append(shared_q)
+    shared_ids = [r["service"] for r in shared_q.rows]
+    ranked: list[dict] = []
+    if shared_ids:
+        cq = ctx.repo.read("chokepoints", services=shared_ids)
+        qs.append(cq)
+        ranked = [{"service": r["service"], "score": r["score"], "rank": i + 1} for i, r in enumerate(cq.rows)]
+    qs.append(ctx.repo.write("record_correlation", incident_id=a.incident_id, origin=head["service"],
+                             alerts=[{"alert": r["alert"], "service": r["service"]} for r in storm.rows],
+                             shared=ranked))
+    names = ", ".join(r["service"].removeprefix("svc:") for r in storm.rows)
+    top = ranked[0]["service"].removeprefix("svc:") if ranked else None
+    summary = (f"{len(storm.rows) + 1} alerts ({names} too) share {len(ranked)} upstream services; "
+               f"paths converge on {top}" if ranked else f"{len(storm.rows) + 1} alerts share no upstream service")
+    hl = Highlight(nodes=services + [r["service"] for r in ranked],
+                   edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in storm.rows])
+    return ToolOutput(summary=summary, data={"alerts": storm.rows, "shared": ranked}, queries=qs, highlight=hl)
+
+
+@tool(writes=True)
 def recall_similar(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     """Episodic memory: resolved incidents whose root-cause service sits on this alert's live dependency path."""
     q = ctx.repo.read("recall_similar", incident_id=a.incident_id)
@@ -211,10 +244,16 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         anomalous = {r["service"] for r in an.rows}
     # The symptom may have travelled any live path; judge the one it lit up most (shortest on ties).
     live_path = min(paths, key=lambda p: (sum(s not in anomalous for s in p[1:-1]), len(p))) if paths else []
+    unexplained: list[str] = []
+    others = [x for x in f["storm_services"] if x != f["origin"]]
+    if paths and others:  # alert storm: one cause has to explain every correlated alert
+        sq = ctx.repo.read("storm_unexplained", services=others, target=f["service"], at=f["at"])
+        qs.append(sq)
+        unexplained = [r["service"] for r in sq.rows]
     facts = CheckFacts(
         change_service=f["service"], alert_service=f["origin"],
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],
-        live_path=live_path, any_path=any_path, anomalous=anomalous)
+        live_path=live_path, any_path=any_path, anomalous=anomalous, storm_unexplained=tuple(unexplained))
     v = judge(facts)
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,

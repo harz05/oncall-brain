@@ -5,7 +5,7 @@ from pathlib import Path
 
 from oncall_brain.adapters.falkordb import queries
 from oncall_brain.agents import registry
-from oncall_brain.datagen import ACTS, T1, T2, generate
+from oncall_brain.datagen import ACTS, T1, T2, T3, generate
 from oncall_brain.domain.planner import WINDOW
 from oncall_brain.services import respond  # noqa: F401  (registers tools)
 
@@ -31,12 +31,11 @@ def test_tools_have_descriptions_and_schemas():
 def test_generator_is_deterministic_and_keeps_noise_out_of_the_act_windows():
     a, b = generate(7), generate(7)
     assert a == b and generate(8) != a
-    in_window = [c["id"] for c in a["changes"]
-                 if T1 - WINDOW <= c["at"] <= T1 or T2 - WINDOW <= c["at"] <= T2]
+    in_window = [c["id"] for c in a["changes"] if any(t - WINDOW <= c["at"] <= t for t in (T1, T2, T3))]
     assert sorted(in_window) == sorted(["chg:pgw-pool-1", "chg:search-420", "chg:legacy-193", "chg:pricing-2140",
                                         "chg:cart-310", "chg:pgw-pool-2", "chg:notif-77", "chg:fraud-512",
-                                        "chg:pay-77"])
-    assert {al["id"] for al in a["alerts"]} == set(ACTS.values())
+                                        "chg:pay-77", "chg:pg-conn-3", "chg:subs-88", "chg:search-430"])
+    assert set(ACTS.values()) <= {al["id"] for al in a["alerts"]}
 
 
 def test_generated_names_are_fake_and_ids_unique():

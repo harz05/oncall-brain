@@ -41,7 +41,8 @@ def test_two_act_story_over_http(api):
     c, base = api
     assert c.post(f"{base}/reset").json()["status"] == "seeded"
     assert c.post(f"{base}/reset").json()["status"] == "restored"
-    assert [a["id"] for a in c.get(f"{base}/alerts").json()] == [ACTS[1], ACTS[2]]
+    alerts = [a["id"] for a in c.get(f"{base}/alerts").json()]
+    assert alerts[:2] == [ACTS[1], ACTS[2]] and ACTS[3] in alerts
 
     # Exact step counts belong to the planner tests; here: the shape the UI reads, and warm beats cold.
     act1 = c.post(f"{base}/alerts/{ACTS[1]}/respond").json()

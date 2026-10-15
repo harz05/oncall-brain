@@ -64,3 +64,20 @@ def test_comms_pages_culprit_owner_names_an_expert_warns_dependents_then_posts()
     assert next_decision("comms", b).tool == "blast_radius"
     b["steps"].append({"tool": "blast_radius", "target": "svc:payments-gw", "role": "comms"})
     assert next_decision("comms", b).tool == "post_update"
+
+
+def test_triage_correlates_an_alert_storm_first():
+    b = board()
+    b["storm"] = 2
+    assert next_decision("triage", b).tool == "correlate_alerts"
+    b["steps"].append({"tool": "correlate_alerts", "target": "inc:x", "role": "triage"})
+    assert next_decision("triage", b).tool == "blast_radius"
+
+
+def test_storm_puts_shared_upstream_suspects_first_in_betweenness_order():
+    hyps = [hyp("near", hops=0, at=90, svc="svc:subs"), hyp("pg", hops=2, at=10, svc="svc:pg"),
+            hyp("pay", hops=1, at=5, svc="svc:pay")]
+    b = board([("recall_similar", "inc:x"), ("propose_hypotheses", "inc:x")], hyps)
+    assert next_decision("investigator", b).args == {"hypothesis_id": "near"}  # no storm: nearest first
+    b["shared_upstream"] = ["svc:pay", "svc:pg"]
+    assert next_decision("investigator", b).args == {"hypothesis_id": "pay"}

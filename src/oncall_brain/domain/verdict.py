@@ -13,6 +13,7 @@ class CheckFacts:
     live_path: list[str]  # alert service -> ... -> changed service, using DEPENDS_ON edges valid at alert time
     any_path: list[str]  # same, ignoring edge validity (to tell "retired dependency" from "never connected")
     anomalous: set[str]  # services on/near the path with an anomaly between the change and the alert
+    storm_unexplained: tuple[str, ...] = ()  # correlated alerting services that do not depend on the changed service
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,9 @@ def judge(f: CheckFacts) -> Verdict:
             return Verdict("refutes", f"{_n(f.alert_service)} no longer depends on {_n(f.change_service)} "
                                       "(dependency retired before the alert)")
         return Verdict("refutes", f"no dependency path from {_n(f.alert_service)} to {_n(f.change_service)}")
+    if f.storm_unexplained:
+        return Verdict("refutes", f"cannot explain the alerts on {', '.join(map(_n, f.storm_unexplained))} "
+                                  f"(they do not depend on {_n(f.change_service)})")
     if f.change_service not in f.anomalous:
         return Verdict("refutes", f"{_n(f.change_service)} showed no anomaly after the change")
     # The symptom must travel the dependency path from the changed service to the alerting service.

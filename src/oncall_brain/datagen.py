@@ -10,6 +10,10 @@ The story (fixed, hand-written so the demo is repeatable):
   Act 2 at T2 = T1 + 3 days: "refunds p99 latency". Same upstream (refunds -> payments -> payments-gw),
   same kind of change. A newer deploy on payments (1 hop, healthy) is what nearest-first checking tries
   first; with act 1 resolved, memory skips it and solves the incident in one check.
+  Act 3 at T3 = T1 + 5 days: an alert storm. checkout, refunds and subscriptions alert within 4 minutes.
+  Real cause: a config change on postgres-orders, which all three reach through payments. A deploy on
+  subscriptions 10 minutes earlier looks guilty from subscriptions' point of view alone, but it cannot
+  explain the checkout and refunds alerts: correlating the alerts over the dependency graph refutes it.
 Noise (random, seeded): extra people, changes, anomalies and past incidents, kept outside both act windows.
 All names are fake. All times are epoch seconds.
 """
@@ -22,6 +26,7 @@ from oncall_brain.domain.planner import WINDOW
 MIN, HOUR, DAY = 60, 3600, 86400
 T1 = int(datetime(2026, 10, 15, 4, 0, tzinfo=UTC).timestamp())  # 09:30 IST
 T2 = T1 + 3 * DAY
+T3 = T1 + 5 * DAY
 EPOCH = T1 - 400 * DAY  # when the "company" started; most dependencies are valid from here
 
 TEAMS = {
@@ -149,6 +154,26 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
                          "title": "CR-902 Roll out config template 2026.10.18",
                          "text": "Quarterly config template rollout across payments services."})
 
+    # --- act 3: alert storm --------------------------------------------------------------------------
+    for aid, svc, dt in (("alert:checkout-latency-3", "checkout", 4), ("alert:refunds-latency-3", "refunds", 2),
+                         ("alert:subscriptions-latency", "subscriptions", 0)):
+        d["alerts"].append({"id": aid, "service": _svc(svc), "at": T3 - dt * MIN, "act": 3, "symptom": "latency",
+                            "name": f"{svc} p99 latency above 2s"})
+    change("chg:pg-conn-3", "config", "postgres-orders", T3 - 25 * MIN,
+           "postgres-orders max_connections 500 -> 150 (memory tuning)", team_people["platform"][1])
+    change("chg:subs-88", "deploy", "subscriptions", T3 - 10 * MIN, "Deploy subscriptions v8.8.0 (billing cycles)",
+           pay[0], version="8.8.0")
+    change("chg:search-430", "deploy", "search", T3 - 3 * MIN, "Deploy search v4.3.0", team_people["storefront"][0],
+           version="4.3.0")
+    anomaly("anom:pg-3", "postgres-orders", T3 - 22 * MIN, "saturation", "connection slots exhausted")
+    anomaly("anom:pay-3", "payments", T3 - 20 * MIN, "latency", "p99 3.1s waiting on postgres-orders")
+    anomaly("anom:checkout-3", "checkout", T3 - 5 * MIN, "latency", "p99 4.0s on POST /checkout")
+    anomaly("anom:refunds-3", "refunds", T3 - 3 * MIN, "latency", "p99 3.6s on POST /refunds")
+    anomaly("anom:subs-3", "subscriptions", T3 - 1 * MIN, "latency", "p99 3.9s on renewals")
+    d["tickets"].append({"id": "ticket:CR-917", "change": "chg:pg-conn-3", "author": team_people["platform"][1],
+                         "at": T3 - DAY, "title": "CR-917 Lower postgres-orders max_connections",
+                         "text": "Memory pressure on the primary; cap connections at 150."})
+
     # --- history: past incidents with runbooks (episodic + procedural memory already on file) ----------
     owner_of = {s: tid for tid, (_, services) in TEAMS.items() for s in services}
 
@@ -177,7 +202,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
 
     # --- noise: routine changes and blips, never inside an act window -------------------------------
     def outside_windows(t):
-        return not (T1 - WINDOW - HOUR <= t <= T1 + HOUR or T2 - WINDOW - HOUR <= t <= T2 + HOUR)
+        return not any(t0 - WINDOW - HOUR <= t <= t0 + HOUR for t0 in (T1, T2, T3))
 
     svc_names = [s["name"] for s in d["services"]]
     owners = {s["name"]: s["team"].split(":")[1] for s in d["services"]}
@@ -203,4 +228,4 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     return d
 
 
-ACTS = {1: "alert:checkout-latency", 2: "alert:refunds-latency"}
+ACTS = {1: "alert:checkout-latency", 2: "alert:refunds-latency", 3: "alert:subscriptions-latency"}

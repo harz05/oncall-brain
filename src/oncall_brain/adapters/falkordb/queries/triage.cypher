@@ -43,3 +43,46 @@ MATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})
 MERGE (i)-[pg:PAGED]->(p)
 ON CREATE SET pg.at = $at, pg.for_service = $service
 RETURN pg.for_service AS first_for
+
+// name: storm_alerts
+// purpose: Other alerts that fired in the $window seconds before this incident's alert (an alert storm).
+MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
+MATCH (other:Alert)-[:FIRED_ON]->(s:Service)
+WHERE other.id <> a.id AND other.at >= a.at - $window AND other.at <= a.at
+RETURN other.id AS alert, other.name AS name, s.id AS service, other.at AS at
+ORDER BY at
+
+// name: shared_upstream
+// purpose: Services that every alerting service depends on (live edges at alert time, 0..6 hops): where one common cause would have to sit.
+UNWIND $services AS sid
+MATCH p = (:Service {id: sid})-[:DEPENDS_ON*0..6]->(u:Service)
+WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
+WITH u, count(DISTINCT sid) AS covers
+WHERE covers = size($services)
+RETURN u.id AS service
+
+// name: chokepoints
+// purpose: Graph algorithm: betweenness centrality over Service/DEPENDS_ON (algo.betweenness) ranks the shared upstream by how many dependency paths run through each service. Exact on this graph size (samplingSize > node count, fixed seed).
+CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON'], samplingSize: 1000,
+                       samplingSeed: 1}) YIELD node, score
+WHERE node.id IN $services
+RETURN node.id AS service, score
+ORDER BY score DESC, service
+
+// name: record_correlation
+// purpose: Fold the other alerts into this incident (one incident, not one per alert), count their services as impacted, and mark the ranked shared upstream.
+MATCH (i:Incident {id: $incident_id})
+FOREACH (r IN $alerts |
+  MERGE (other:Alert {id: r.alert})
+  MERGE (i)-[:CORRELATED_WITH]->(other))
+WITH i
+UNWIND $alerts AS r
+MATCH (s:Service {id: r.service})
+MERGE (i)-[x:IMPACTS]->(s)
+ON CREATE SET x.hops = 0, x.via = $origin
+WITH DISTINCT i
+UNWIND $shared AS u
+MATCH (svc:Service {id: u.service})
+MERGE (i)-[x:SHARED_UPSTREAM]->(svc)
+SET x.rank = u.rank, x.betweenness = u.score
+RETURN count(svc) AS shared

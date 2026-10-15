@@ -14,5 +14,29 @@
   "symptom": "latency",
   "at": 1792296000,
   "act": 2
+ },
+ {
+  "id": "alert:checkout-latency-3",
+  "name": "checkout p99 latency above 2s",
+  "service": "svc:checkout",
+  "symptom": "latency",
+  "at": 1792468560,
+  "act": 3
+ },
+ {
+  "id": "alert:refunds-latency-3",
+  "name": "refunds p99 latency above 2s",
+  "service": "svc:refunds",
+  "symptom": "latency",
+  "at": 1792468680,
+  "act": 3
+ },
+ {
+  "id": "alert:subscriptions-latency",
+  "name": "subscriptions p99 latency above 2s",
+  "service": "svc:subscriptions",
+  "symptom": "latency",
+  "at": 1792468800,
+  "act": 3
  }
 ]

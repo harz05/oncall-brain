@@ -35,3 +35,8 @@ def test_gap_in_propagation_is_inconclusive():
 def test_change_on_the_alerting_service_itself():
     assert judge(facts(change_service="svc:checkout", live_path=["svc:checkout"],
                        anomalous={"svc:checkout"})).verdict == "supports"
+
+
+def test_storm_suspect_that_cannot_reach_every_alerting_service_is_refuted():
+    v = judge(facts(storm_unexplained=("svc:refunds", "svc:checkout")))
+    assert v.verdict == "refutes" and "cannot explain the alerts on refunds, checkout" in v.reason

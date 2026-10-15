@@ -1,5 +1,5 @@
 // name: update_facts
-// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).
+// purpose: Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
 OPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)
 WITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts
@@ -14,8 +14,11 @@ WITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status
 LIMIT 1
 OPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)
 OPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)
-OPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)
-WHERE rb.kind = c.kind
+// Suggest the runbook that led memory to this cause, or the one a human confirmed fixed this incident. A runbook
+// that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).
+OPTIONAL MATCH (rb:Runbook {id: h.runbook})
+OPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)
+WITH a, impacts, paged, experts, c, s, author, src, coalesce(rb, fx) AS rb
 RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,
        s.id AS cause_service,
        author.name AS author, collect(DISTINCT src.id) AS sources,

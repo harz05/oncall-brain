@@ -68,8 +68,10 @@ RETURN h.id AS id
 // purpose: What a check needs about one suspect: changed service, change time, rollback, alerting service and time.
 MATCH (i:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis {id: $hypothesis_id})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 MATCH (i)-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
+OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)
 RETURN i.id AS incident, h.status AS status, c.id AS change, c.summary AS summary, c.at AS change_at,
-       c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at
+       c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at,
+       collect(DISTINCT cs.id) AS storm_services
 
 // name: live_paths
 // purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.
@@ -79,6 +81,15 @@ WITH p
 ORDER BY length(p)
 LIMIT 20
 RETURN [n IN nodes(p) | n.id] AS path
+
+// name: storm_unexplained
+// purpose: In an alert storm: which of the other alerting services have no live dependency path to the suspect's service (so the suspect cannot explain their alerts).
+UNWIND $services AS sid
+OPTIONAL MATCH p = (:Service {id: sid})-[:DEPENDS_ON*0..6]->(:Service {id: $target})
+WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
+WITH sid, count(p) AS paths
+WHERE paths = 0
+RETURN sid AS service
 
 // name: any_path
 // purpose: shortestPath ignoring validity, to tell a retired dependency apart from no dependency at all.

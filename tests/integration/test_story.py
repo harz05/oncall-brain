@@ -204,3 +204,22 @@ def test_live_events_drive_a_new_investigation(store, tenant):
     assert o["root_cause"]["change"] == "chg:inv-9"
     reasons = {r["change"]: r["reason"] for r in o["refuted"]}
     assert "no longer depends on cart" in reasons["chg:cart-ttl"]  # the edge retired an hour ago
+
+
+def test_act3_alert_storm_is_correlated_and_only_then_solved(store, tenant):
+    class NoCorrelation(MockProvider):
+        def decide(self, role, board, tools):
+            return super().decide(role, {**board, "storm": 0}, tools)
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[3], MockProvider())
+    corr = next(s for s in run["steps"] if s.tool == "correlate_alerts").data
+    assert {a["service"] for a in corr["alerts"]} == {"svc:checkout", "svc:refunds"}
+    assert corr["shared"][0]["service"] == "svc:payments"  # betweenness: where the dependency paths converge
+    o = run["outcome"]
+    assert o["root_cause"]["change"] == "chg:pg-conn-3" and o["checks_to_culprit"] == 1
+    assert "cannot explain the alerts" in {r["change"]: r["reason"] for r in o["refuted"]}["chg:subs-88"]
+    assert not o["runbook"]  # no runbook led here, so none is suggested
+    reset(store, tenant)
+    assert respond(repo, ACTS[3], NoCorrelation())["outcome"]["root_cause"]["change"] == "chg:subs-88"

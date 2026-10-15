@@ -8,8 +8,16 @@ WITH i, a, o, steps,
      collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,
               at: c.at}) AS hypotheses
 OPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)
+WITH i, a, o, steps, hypotheses,
+     collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls
+OPTIONAL MATCH (other:Alert)
+WHERE other.id <> a.id AND other.at >= a.at - $storm_window AND other.at <= a.at
+WITH i, a, o, steps, hypotheses, recalls, count(other) AS storm
+OPTIONAL MATCH (i)-[su:SHARED_UPSTREAM]->(u:Service)
+WITH i, a, o, steps, hypotheses, recalls, storm, u, su
+ORDER BY su.rank
 RETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,
-       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls
+       steps, hypotheses, recalls, storm, collect(u.id) AS shared_upstream
 
 // name: log_step
 // purpose: Persist each agent step on the incident (queryable agent history; handoffs between roles are steps too).

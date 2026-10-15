@@ -30,6 +30,7 @@ def main() -> None:
         dump("resolve", c.post(f"{base}/incidents/{act1['incident_id']}/resolve",
                                json={"change_id": act1["outcome"]["root_cause"]["change"]}).json())
         dump("act2", c.post(f"{base}/alerts/{ACTS[2]}/respond").json())
+        dump("act3", c.post(f"{base}/alerts/{ACTS[3]}/respond").json())
     finally:
         make_store().drop(TENANT)
     print(f"wrote {len(list(OUT.glob('*.json')))} fixtures to {OUT}")

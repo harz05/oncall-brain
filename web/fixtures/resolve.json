@@ -29,7 +29,7 @@
      "alert_name": "checkout p99 latency above 2s"
     }
    ],
-   "ms": 0.83,
+   "ms": 0.62,
    "readonly": true
   },
   {
@@ -47,7 +47,7 @@
      "service_name": "payments-gw"
     }
    ],
-   "ms": 0.92,
+   "ms": 0.53,
    "readonly": true
   },
   {
@@ -78,7 +78,7 @@
      "successes": 1
     }
    ],
-   "ms": 1.58,
+   "ms": 1.83,
    "readonly": false
   }
  ],

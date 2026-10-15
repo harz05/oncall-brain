@@ -11,6 +11,7 @@ from oncall_brain.domain.models import Decision
 
 RECALL_MIN_SCORE = 3  # cause service still on the live dependency path (2) + same symptom (1)
 WINDOW = 2 * 3600  # a change counts as a suspect if it landed this many seconds before the alert
+STORM_WINDOW = 15 * 60  # alerts this close together are correlated before anyone investigates
 
 
 def _ran(board: dict[str, Any], tool: str, target: str | None = None) -> bool:
@@ -21,14 +22,19 @@ def _call(tool: str, reason: str, **args: Any) -> Decision:
     return Decision(action="call", tool=tool, args=args, reason=reason)
 
 
-def check_order(h: dict[str, Any]) -> tuple:
-    """Memory-derived suspects first, then the closest on the dependency path, then the most recent."""
+def check_order(h: dict[str, Any], shared: list[str] = ()) -> tuple:
+    """Memory-derived suspects first, then (in an alert storm) suspects on the shared upstream in betweenness
+    order, then the closest on the dependency path, then the most recent."""
     hops = h["hops"] if h["hops"] is not None else 99
-    return (h["source"] != "memory", hops, -h["at"])
+    rank = shared.index(h["service"]) if h["service"] in shared else len(shared)
+    return (h["source"] != "memory", rank, hops, -h["at"])
 
 
 def triage(board: dict[str, Any]) -> Decision:
     svc = board["incident"]["service"]
+    if board.get("storm") and not _ran(board, "correlate_alerts"):
+        return _call("correlate_alerts", f"{board['storm']} other alert(s) fired in the last "
+                     f"{STORM_WINDOW // 60} min; find what they share before investigating each one.")
     if not _ran(board, "blast_radius", svc):
         return _call("blast_radius", f"Who is hurt? Walk DEPENDS_ON backwards from {svc}.", service=svc)
     if not _ran(board, "page_on_call", svc):
@@ -45,7 +51,8 @@ def investigator(board: dict[str, Any]) -> Decision:
     if best >= RECALL_MIN_SCORE and not _ran(board, "hypothesize_from_memory"):
         return _call("hypothesize_from_memory",
                      "A past incident matches structurally; test its root cause pattern first.")
-    open_ = sorted((h for h in hyps if h["status"] == "open"), key=check_order)
+    shared = board.get("shared_upstream", [])
+    open_ = sorted((h for h in hyps if h["status"] == "open"), key=lambda h: check_order(h, shared))
     if open_:
         h = open_[0]
         return _call("check_hypothesis", f"Test suspect {h['change_id']} on {h['service']} against the graph.",
