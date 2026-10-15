@@ -352,7 +352,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 ### 3.7 Concurrency and idempotency
 
 - Each FalkorDB query commits atomically, but that does not make concurrent `MERGE`s safe: two agents that `MERGE` the same edge at the same moment can both miss it and both create it. So every agent run (`respond`, `resolve`, `reset`) holds a per-tenant Redis lock (a redis-py `Lock` on the key `oncall_brain:lock:<tenant>`, from `FalkorRepository.lock()`). The lock lives in the same Redis as the graphs, so it works across processes: the API, the MCP server and the scripts. Reads stay concurrent, and different tenants run in parallel. `test_concurrent_responders_do_not_duplicate_work_or_edges` runs four responders at once and finds 5 checks in total and no duplicate edge.
-- Single tool calls through `POST .../tools/{name}` or MCP do not take the lock. A direct write that races an agent run on the same incident could still duplicate an edge.
+- Single write-tool calls through `POST .../tools/{name}` or MCP take the same lock (`services/respond.py::run_tool`); read tools never do. Inside an agent run the lock is already held, so the loop calls the registry directly (the Redis lock is not re-entrant).
 - Every write `MERGE`s on a stable id, so repeating it is harmless:
   - ingest: `load()` runs `ingest_*` on `team:`, `person:`, `svc:`, `chg:` and other ids, so loading twice gives the same graph (tested);
   - `open_incident` on `inc:<alert suffix>`, `add_hypotheses` on `hyp:<incident>:<change>`, `record_evidence` on `ev:...`, `post_update` on `msg:update:<incident>`;
@@ -439,7 +439,7 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 ## 6. What we would revisit as the system grows
 
 1. A reversed `path_suspects` that starts from the `Change.at` index, and a `who_knows` that starts from the service (section 4.1).
-2. Per-incident locks instead of one lock per tenant, and the lock on single write-tool calls too (sections 3.7 and 4.2).
+2. Per-incident locks instead of one lock per tenant (sections 3.7 and 4.2).
 3. Runbook confidence: a refuted memory suggestion now lowers it (`uses` + 1), but it does not decay with age.
 4. Tools register by import side effect: `services/respond.py` imports `services/tools.py` so the `@tool` decorators run. That is simple, but every surface depends on that import. An explicit `register_all()` would be clearer once there are several tool modules.
 5. A "no change, it's capacity" path. The investigator already escalates when every change is refuted, but it does not yet look for non-change causes.

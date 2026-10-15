@@ -77,6 +77,7 @@ Every query the product runs: 54 named, parameterised statements in `src/oncall_
 | `GRAPH.COPY` for resets | `FalkorGraphStore.snapshot` / `restore`, called by `services/seeding.py` | Seeding keeps a `pristine_<tenant>` copy; a demo reset is a server-side graph copy, not a re-seed. |
 | One graph per tenant | `FalkorGraphStore.tenant` -> graph `tenant_<tenant>` | Tenants are isolated graphs in one FalkorDB, so memory and incidents never leak across tenants. |
 | Indexes on `:Label(id)` | `FalkorRepository.ensure_schema`: Team, Person, Service, Change, Alert, Anomaly, Incident, Hypothesis, Evidence, Runbook, Message, Ticket, AgentStep | Every `MERGE` and lookup starts from an id, so each is an index seek before the traversal begins. |
+| Range indexes on `.at` | `FalkorRepository.ensure_schema`: Change, Anomaly | The alert-window filters (`recent_changes`, `anomalies_between`) are index scans, not label scans. |
 
 ## ingest.cypher
 

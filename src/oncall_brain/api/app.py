@@ -202,4 +202,4 @@ def tools() -> list[dict[str, Any]]:
 def call_tool(repo: Repo, name: str, args: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
     if name not in registry.REGISTRY:
         raise HTTPException(404, f"unknown tool {name!r}")
-    return registry.call(name, ToolContext(repo), args or {}).model_dump(mode="json")
+    return respond_svc.run_tool(repo, name, args or {}).model_dump(mode="json")

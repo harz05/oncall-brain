@@ -12,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from oncall_brain.adapters.falkordb.queries import all_queries
-from oncall_brain.adapters.falkordb.repository import INDEXED_LABELS, PREFIX, PRISTINE
+from oncall_brain.adapters.falkordb.repository import INDEXED_LABELS, PREFIX, PRISTINE, TIME_INDEXED
 from oncall_brain.services.seeding import INGEST
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,6 +136,8 @@ def render() -> str:
         "graphs in one FalkorDB, so memory and incidents never leak across tenants. |",
         f"| Indexes on `:Label(id)` | `FalkorRepository.ensure_schema`: {', '.join(INDEXED_LABELS)} | Every "
         "`MERGE` and lookup starts from an id, so each is an index seek before the traversal begins. |",
+        f"| Range indexes on `.at` | `FalkorRepository.ensure_schema`: {', '.join(TIME_INDEXED)} | The alert-window "
+        "filters (`recent_changes`, `anomalies_between`) are index scans, not label scans. |",
     ]
 
     for f in files:

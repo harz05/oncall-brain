@@ -14,7 +14,6 @@ from pydantic_core import to_json
 
 from oncall_brain import wiring
 from oncall_brain.agents import registry
-from oncall_brain.agents.registry import ToolContext
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, GraphStore
 from oncall_brain.services import respond, seeding
@@ -39,7 +38,7 @@ def _repo(store: GraphStore, tenant: str) -> GraphRepository:
 
 def _registry_handler(name: str) -> Handler:
     def run(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
-        out = registry.call(name, ToolContext(_repo(store, tenant)), args)
+        out = respond.run_tool(_repo(store, tenant), name, args)
         return {"summary": out.summary, "data": out.data,
                 "queries": [{"name": q.name, "readonly": q.readonly, "rows": q.row_count, "ms": q.ms,
                              "cypher": q.cypher} for q in out.queries]}

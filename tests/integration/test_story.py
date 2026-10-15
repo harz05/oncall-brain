@@ -223,3 +223,16 @@ def test_act3_alert_storm_is_correlated_and_only_then_solved(store, tenant):
     assert not o["runbook"]  # no runbook led here, so none is suggested
     reset(store, tenant)
     assert respond(repo, ACTS[3], NoCorrelation())["outcome"]["root_cause"]["change"] == "chg:subs-88"
+
+
+def test_write_tools_called_from_outside_take_the_tenant_lock(store, tenant, monkeypatch):
+    from oncall_brain.services.respond import run_tool
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    taken, real = [], repo.lock
+    monkeypatch.setattr(repo, "lock", lambda: taken.append(1) or real())
+    run_tool(repo, "dependency_path", {"from_service": "svc:checkout", "to_service": "svc:payments-gw"})
+    assert taken == []  # reads stay lock-free
+    run_tool(repo, "record_anomaly", {"service": "svc:cart", "kind": "errors", "summary": "x"})
+    assert taken == [1]

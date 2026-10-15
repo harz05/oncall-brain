@@ -16,8 +16,8 @@ the MCP Inspector or any other MCP client can call the tools directly: 20 regist
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
 Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
 the exact Cypher behind every answer and whether it ran read-only (`GRAPH.RO_QUERY`). Read-only tools carry the
-MCP `readOnlyHint` annotation. One exception to know: `who_knows` is marked read-only, but when you pass an
-`incident_id` it also records the top person as `CONSULTED` on that incident.
+MCP `readOnlyHint` annotation. `who_knows` counts as a write tool: with an `incident_id` it records the top
+person as `CONSULTED` on that incident. Write tools take the tenant lock, so they cannot race an agent run.
 
 ## Run it
 

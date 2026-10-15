@@ -342,7 +342,7 @@ class ExpertArgs(BaseModel):
     incident_id: str | None = Field(None, description="If set: record the top expert as CONSULTED on the incident")
 
 
-@tool()
+@tool(writes=True)  # writes CONSULTED when given an incident; a plain question only reads
 def who_knows(ctx: ToolContext, a: ExpertArgs) -> ToolOutput:
     """Company brain: who knows this service, ranked by evidence in the graph (owning team, changes they
     authored, incidents they were paged for), with the evidence counts as the explanation. With an incident,

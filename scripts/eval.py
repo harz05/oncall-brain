@@ -126,7 +126,7 @@ Methods compared, all over the same change log (the anomaly-aware rule also read
 baselines are plain Python over the scenario rows, with no graph traversal:
 
 - **Graph agent**: `services.respond.respond()` with the deterministic planner (`MockProvider`): recall,
-  multi-hop suspects from `path_suspects.cypher`, then `check_hypothesis` on each. Correct iff the change
+  multi-hop suspects from `path_suspects` (investigate.cypher), then `check_hypothesis` on each. Correct iff the change
   it marks SUPPORTED is the planted truth.
 - **Anomaly-aware change log** (`scenarios.anomaly_pick`), the strongest simple rule without the graph we
   found: drop changes rolled back before the alert, keep those whose own service shows an anomaly between
@@ -142,7 +142,7 @@ baselines are plain Python over the scenario rows, with no graph traversal:
   is right mostly when the cause is the alerting service itself, whose name is in the alert name;
   otherwise a decoy wins, by name when it sits on the alerting service (often the rolled-back *b*) or by
   recency on ties (*a*).
-- **Flat change log**: the newest change in the window anywhere (`recent_changes.cypher`, no traversal;
+- **Flat change log**: the newest change in the window anywhere (`recent_changes` in investigate.cypher, no traversal;
   `outcome.baseline_pick`). Always blames *a*, by construction.
 """
 

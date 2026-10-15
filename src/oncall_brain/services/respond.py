@@ -6,7 +6,7 @@ from typing import Any
 from oncall_brain.agents import registry
 from oncall_brain.agents.loop import record, run_role
 from oncall_brain.agents.registry import ToolContext
-from oncall_brain.domain.models import TraceStep
+from oncall_brain.domain.models import ToolOutput, TraceStep
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
 from oncall_brain.ports import GraphRepository, LLMProvider
 
@@ -32,6 +32,15 @@ def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str
         role = run_role(role, repo, incident_id, llm, trace)
     return {"incident_id": incident_id, "alert": out.data, "planner": llm.name, "steps": trace,
             "outcome": outcome(repo, incident_id, trace)}
+
+
+def run_tool(repo: GraphRepository, name: str, args: dict[str, Any]) -> ToolOutput:
+    """One tool call from outside an agent run (HTTP /tools, MCP). Write tools take the tenant lock so they
+    cannot race an agent run; inside respond() the lock is already held, so the loop calls the registry directly."""
+    if name in registry.REGISTRY and registry.REGISTRY[name].writes:
+        with repo.lock():
+            return registry.call(name, ToolContext(repo), args)
+    return registry.call(name, ToolContext(repo), args)
 
 
 def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str, Any]:
