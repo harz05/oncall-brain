@@ -9,6 +9,8 @@ Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthet
 
 <!-- DEMO VIDEO LINK: add after recording -->
 
+![Act 2: the refunds incident solved from act 1's memory, 8 -> 3 investigator calls](docs/img/act2.png)
+
 ## The story the demo tells
 
 **Act 1, 09:30: "checkout p99 latency above 2s".**
@@ -43,6 +45,49 @@ Recall finds act 1 by structure, because payments-gw is on refunds' live depende
 
 The full query catalogue is in [docs/QUERIES.md](docs/QUERIES.md); the data model in [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
 
+### Measured, not just claimed
+
+On 200 generated incidents (random alert service, random cause 0-3 hops upstream, planted decoys of every kind above), from [docs/EVAL.md](docs/EVAL.md):
+
+| method | uses the graph | correct |
+|---|---|---|
+| **On-call Brain** (deterministic planner) | yes | **200/200** |
+| keyword match: change summary vs alert name | no | 59/200 |
+| flat change log: newest change in the window | no | 0/200 (its pick is always a planted decoy) |
+
+A whole incident (three agents, all reads and writes) takes about 70 ms on the deterministic planner; a single tool's queries take 1-7 ms.
+
+## Graph data model
+
+```mermaid
+flowchart LR
+  Team -- OWNS --> Service
+  Person -- MEMBER_OF --> Team
+  Person -- "ON_CALL {start,end}" --> Team
+  Service -- "DEPENDS_ON {valid_from,valid_to}" --> Service
+  Change -- CHANGED --> Service
+  Change -- AUTHORED_BY --> Person
+  Ticket -- REQUESTED --> Change
+  Message -- MENTIONS --> Change
+  Anomaly -- ON --> Service
+  Alert -- FIRED_ON --> Service
+  Incident -- TRIGGERED_BY --> Alert
+  Incident -- "IMPACTS {hops,via}" --> Service
+  Incident -- PAGED --> Person
+  Incident -- HAS_HYPOTHESIS --> Hypothesis
+  Hypothesis -- SUSPECTS --> Change
+  Evidence -- "SUPPORTS / REFUTES" --> Hypothesis
+  Incident -- LOGGED --> AgentStep
+  Incident -- "RECALLS {score}" --> Incident
+  Incident -- CAUSED_BY --> Change
+  Incident -- FIXED_WITH --> Runbook
+  Runbook -- FOR_SERVICE --> Service
+```
+
+- **Episodic memory:** `Incident` + `CAUSED_BY` + its `AgentStep` history. **Semantic:** the org, ownership and dependency facts, with `valid_from`/`valid_to` so the agents use what was true at alert time. **Procedural:** `Runbook` + `FIXED_WITH`, with `uses`/`successes` counts.
+- One graph per tenant (`tenant_<name>`), plus `pristine_<name>` for resets. Every label is indexed on `id`; `Change.at` and `Anomaly.at` have range indexes for the alert-window filters.
+- Every label, property and relationship, with who writes it: [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
+
 ## Quick start (local, no Docker)
 
 Needs Python 3.12+, `make`, and either glibc >= 2.39 (uses the `falkordblite` wheel) or gcc (builds redis and fetches the official FalkorDB module).
@@ -56,12 +101,46 @@ make dev       # API + web UI on http://localhost:8000
 make test      # unit + integration tests (integration tests skip if FalkorDB is not running)
 ```
 
-No LLM key is needed: by default a deterministic planner chooses each step from what the graph says. To use an LLM instead, see `.env.example`.
+No LLM key is needed: by default a deterministic planner chooses each step from what the graph says. To let an LLM choose the tools instead, set `LLM_PROVIDER` (gemini, openai, groq, openrouter, ollama, anthropic) and a key in `.env` (see `.env.example`). If the model picks an unknown tool, invalid arguments or a repeated step, or the API fails, that step falls back to the deterministic planner and the trace says so.
+
+## Using it
+
+- **Web UI** (`make dev`, then http://localhost:8000): click 0 Reset, 1 Act 1, 2 Confirm root cause, 3 Act 2. The trace plays step by step; every card shows why the planner chose that tool and the exact Cypher it ran; clicking a card lights up its evidence in the graph. `?offline=1` replays recorded fixtures without a database.
+- **HTTP API:** `GET /api/tools` lists every tool with its JSON schema; `POST /api/tenants/{tenant}/tools/{name}` runs one. Use-case endpoints: `POST /api/tenants/{t}/reset`, `POST /api/tenants/{t}/alerts/{alert_id}/respond`, `POST /api/tenants/{t}/incidents/{id}/resolve`.
+- **MCP:** the same 14 tools, plus `respond_to_alert` and `reset_tenant`, for any MCP client. Run `make mcp` for stdio, or `python -m oncall_brain.mcp_server --http --port 8001`. For Claude Code: `claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`. Details in [docs/MCP.md](docs/MCP.md).
+- **Company brain** questions, as tools: `who_knows` (who knows a service, ranked by ownership, changes they authored and incidents they were paged for) and `change_story` (trace a change to its ticket, its chat announcement, its author and the incidents it caused).
 
 ## Docker
 
 ```bash
 docker compose up --build    # falkordb/falkordb:v4.22.0 + the app on :8000 (+ FalkorDB Browser on :3000)
+```
+
+## How each track is covered
+
+| Track | What to look at |
+|---|---|
+| 01 Agents That Act on Connected Data | multi-hop `DEPENDS_ON*` suspects with temporal edge filters; `shortestPath` refutations; the planner branches on what each query returns; actions written back (incident, impacts, pages, hypotheses, evidence, status update); tools exposed via MCP; every step's Cypher in the trace |
+| 02 Agent Memory and Coordination | three roles hand off through the shared `Incident` board (no in-process state); `AgentStep` history persisted per incident; episodic + semantic + procedural memory; act 2 recalls act 1; one graph per tenant (`test_tenants_are_isolated`) |
+| 03 Company Brain | changes, tickets, chat, incidents, runbooks and people in one graph; `who_knows` / `change_story`; every status update cites its sources (`CITES` edges); temporal dependencies keep answers current |
+
+## Repo layout
+
+```
+src/oncall_brain/
+  domain/        pure logic: planner, hypothesis verdicts, update templates, models
+  ports/         Protocols: GraphRepository, GraphStore, LLMProvider
+  adapters/      falkordb/ (repository + queries/*.cypher), llm/ (mock, openai_compat, anthropic)
+  services/      use cases: respond, resolve, seeding, the tool implementations, board loader
+  agents/        tool registry and the agent loop
+  api/           FastAPI app (also serves web/)
+  mcp_server/    MCP server generated from the same registry
+  datagen.py     the seeded synthetic company and the planted two-act story
+  scenarios.py   randomised incidents for the eval
+web/             no-build UI (Cytoscape.js from a CDN)
+scripts/         seed, demo, eval, gen_queries_doc, gen_fixtures, FalkorDB runners
+tests/           unit/ (no DB), integration/ (real FalkorDB), cloud/ (reviewer's tests)
+docs/            architecture, data model, queries, eval, MCP, walkthrough, ADRs, AI usage
 ```
 
 ## More
