@@ -15,6 +15,7 @@ PREFIX, PRISTINE = "tenant_", "pristine_"
 # Index every label we MERGE or look up by id. FalkorDB raises if an index already exists; that's fine.
 INDEXED_LABELS = ["Team", "Person", "Service", "Change", "Alert", "Anomaly", "Incident", "Hypothesis",
                   "Evidence", "Runbook", "Message", "Ticket", "AgentStep"]
+TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window filters scan these
 
 
 def _check_tenant(tenant: str) -> str:
@@ -44,10 +45,11 @@ class FalkorRepository:
         return self._run(name, params, readonly=False)
 
     def ensure_schema(self) -> None:
-        for label in INDEXED_LABELS:
+        targets = [(label, "id") for label in INDEXED_LABELS] + [(label, "at") for label in TIME_INDEXED]
+        for label, prop in targets:
             try:
-                # Labels come from the constant list above, never from input.
-                self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
+                # Labels and properties come from the constant lists above, never from input.
+                self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.{prop})")
             except Exception as e:  # already indexed
                 if "already indexed" not in str(e):
                     raise

@@ -310,7 +310,8 @@ def change_story(ctx: ToolContext, a: ChangeArgs) -> ToolOutput:
     r = dict(q.rows[0])
     r["sources"] = [s for s in r["sources"] if s.get("id")]
     nodes = [a.change_id, r["service"], *(s["id"] for s in r["sources"]), *r["incidents"]]
-    edges = [(a.change_id, r["service"], "CHANGED"), *((s["id"], a.change_id, "SOURCE") for s in r["sources"]),
+    edges = [(a.change_id, r["service"], "CHANGED"),
+             *((s["id"], a.change_id, "REQUESTED" if s["kind"] == "Ticket" else "MENTIONS") for s in r["sources"]),
              *((i, a.change_id, "CAUSED_BY") for i in r["incidents"])]
     return ToolOutput(summary=f"{r['summary']} by {r['author']} ({r['team']}); {len(r['sources'])} sources, "
                       f"caused {len(r['incidents'])} incident(s)", data=r, queries=[q],

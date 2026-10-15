@@ -7,7 +7,7 @@ from oncall_brain.agents import registry
 from oncall_brain.agents.loop import record, run_role
 from oncall_brain.agents.registry import ToolContext
 from oncall_brain.domain.models import Highlight, TraceStep
-from oncall_brain.domain.planner import WINDOW
+from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
 from oncall_brain.ports import GraphRepository, LLMProvider
 
 # Importing the module registers the tools.
@@ -59,7 +59,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "refuted": [c for c in checks if c["verdict"] != "supports"],
         "baseline_pick": baseline[0] if baseline else None,
         "baseline_correct": bool(supported and baseline and baseline[0]["change"] == supported[0]["change"]),
-        "memory": {"recalled": [r for r in recalls if r["score"] >= 3],
+        "memory": {"recalled": [r for r in recalls if r["score"] >= RECALL_MIN_SCORE],
                    "suspects": memory[0] if memory else [],
                    "solved_by_memory": bool(supported and memory and any(
                        m["change"] == supported[0]["change"] for m in memory[0]))},
