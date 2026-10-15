@@ -7,23 +7,28 @@ Guards in front of every route: Host allow-list (DNS rebinding), same-origin wri
 Run: uvicorn oncall_brain.api.app:app --port 8000
 """
 
+import json
 import os
+import queue
 import secrets
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Iterator
 from functools import lru_cache
 from pathlib import Path as FsPath
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from oncall_brain.adapters import slack
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.agents import registry
 from oncall_brain.agents.registry import ToolContext
@@ -31,6 +36,7 @@ from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services import respond as respond_svc
 from oncall_brain.services.seeding import TenantLimitReached, reset
+from oncall_brain.services.tools import AlertEvent
 
 WEB_DIR = FsPath(os.environ.get("WEB_DIR") or FsPath(__file__).resolve().parents[3] / "web")
 
@@ -77,14 +83,17 @@ async def _unknown(_: Request, e: ValueError) -> JSONResponse:
     return JSONResponse({"detail": str(e)}, status_code=404)
 
 
-@app.exception_handler(RedisError)
-async def _db_error(_: Request, e: RedisError) -> JSONResponse:
+def _db_detail(e: RedisError) -> str:
     if isinstance(e, RedisConnectionError):  # also covers auth failures
-        return JSONResponse({"detail": f"FalkorDB unavailable: {e}"}, status_code=503)
+        return f"FalkorDB unavailable: {e}"
     # Timeouts and ResponseError (e.g. "GRAPH.COPY failed, could not fork"). First line only, capped: FalkorDB
     # error texts can quote the whole query.
-    msg = (str(e).splitlines() or [""])[0][:160]
-    return JSONResponse({"detail": f"FalkorDB error ({type(e).__name__}): {msg}"}, status_code=503)
+    return f"FalkorDB error ({type(e).__name__}): {(str(e).splitlines() or [''])[0][:160]}"
+
+
+@app.exception_handler(RedisError)
+async def _db_error(_: Request, e: RedisError) -> JSONResponse:
+    return JSONResponse({"detail": _db_detail(e)}, status_code=503)
 
 
 @app.middleware("http")
@@ -138,7 +147,8 @@ def health() -> dict[str, Any]:
         planner, ok = llm().name, True
     except HTTPException as e:
         planner, ok = f"<error: {e.detail}>", False
-    return {"ok": ok, "falkordb": up, "planner": planner, "default_tenant": get_settings().default_tenant}
+    return {"ok": ok, "falkordb": up, "planner": planner, "default_tenant": get_settings().default_tenant,
+            "slack": bool(get_settings().slack_webhook_url)}
 
 
 @app.get("/api/tenants")
@@ -156,17 +166,74 @@ def reset_tenant(tenant: Tenant) -> dict[str, str]:
 
 @app.get("/api/tenants/{tenant}/alerts")
 def alerts(repo: Repo) -> list[dict[str, Any]]:
+    """Every alert, with the incident handling it (if any) and its status: the UI's incident inbox."""
     return repo.read("list_alerts").rows
+
+
+@app.post("/api/tenants/{tenant}/alerts")
+def new_alert(repo: Repo, body: AlertEvent, respond: bool = False) -> dict[str, Any]:
+    """Alert webhook: record an alert on a service (the raise_alert tool). ?respond=true also runs the agents on it
+    and returns the run, like POST .../alerts/{id}/respond."""
+    out = respond_svc.run_tool(repo, "raise_alert", body.model_dump(exclude_none=True))
+    return run_agents(repo, out.data["alert"]) if respond else out.data
+
+
+def run_agents(repo: GraphRepository, alert_id: str, on_step: Callable[[Any], None] | None = None) -> dict[str, Any]:
+    run = respond_svc.respond(repo, alert_id, llm(), on_step)
+    run["slack"] = slack.post(run["outcome"]["update_text"])
+    return run
 
 
 @app.post("/api/tenants/{tenant}/alerts/{alert_id}/respond")
 def respond(repo: Repo, alert_id: str, compare: Literal["memory"] | None = None) -> dict[str, Any]:
     """?compare=memory also replays the same incident on a copy of the pristine graph (no learned memory) and
     returns its counters under "ablation" -- the fair before/after for memory."""
-    run = respond_svc.respond(repo, alert_id, llm())  # FastAPI serialises the TraceStep models inside
+    run = run_agents(repo, alert_id)  # FastAPI serialises the TraceStep models inside
     if compare == "memory":
         run["ablation"] = {"without_memory": respond_svc.without_memory(store(), repo.tenant, alert_id, llm())}
     return run
+
+
+@app.post("/api/tenants/{tenant}/alerts/{alert_id}/respond/stream")
+def respond_stream(repo: Repo, alert_id: str, compare: Literal["memory"] | None = None) -> StreamingResponse:
+    """The same run, streamed while it happens as NDJSON: one {"step": ...} line per agent step as it is recorded,
+    then {"result": ...} (the full run, as /respond returns it), then {"ablation": ...} if ?compare=memory, or
+    {"error": "..."} if the run fails part way."""
+    llm()  # a misconfigured planner is a 503 before the stream starts
+    events: queue.Queue[dict[str, Any] | None] = queue.Queue()
+
+    def work() -> None:
+        try:
+            run = run_agents(repo, alert_id, lambda s: events.put({"step": s}))
+            events.put({"result": run})
+            if compare == "memory":
+                events.put({"ablation": {"without_memory": respond_svc.without_memory(
+                    store(), repo.tenant, alert_id, llm())}})
+        except RedisError as e:
+            events.put({"error": _db_detail(e)})
+        except Exception as e:  # ValueError (unknown alert) and anything else: report it in the stream
+            events.put({"error": str(e) if isinstance(e, ValueError) else f"agent run failed ({type(e).__name__})"})
+        finally:
+            events.put(None)
+
+    def lines() -> Iterator[str]:
+        while (event := events.get()) is not None:
+            yield json.dumps(jsonable_encoder(event)) + "\n"
+
+    # The run finishes (and persists) even if the client goes away; it holds the tenant lock, like /respond.
+    threading.Thread(target=work, daemon=True).start()
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
+@app.get("/api/tenants/{tenant}/incidents/{incident_id}")
+def incident(repo: Repo, incident_id: str) -> dict[str, Any]:
+    """An incident as the graph has it: head (alert, service, status), the latest status update and its steps."""
+    head = repo.read("incident_head", incident_id=incident_id).rows
+    if not head:
+        raise HTTPException(404, f"unknown incident {incident_id!r}")
+    update = repo.read("incident_update", incident_id=incident_id).rows
+    return {**head[0], "update_text": update[0]["text"] if update else None,
+            "steps": repo.read("incident_steps", incident_id=incident_id).rows}
 
 
 class ResolveBody(BaseModel):
@@ -175,7 +242,11 @@ class ResolveBody(BaseModel):
 
 @app.post("/api/tenants/{tenant}/incidents/{incident_id}/resolve")
 def resolve(repo: Repo, incident_id: str, body: ResolveBody) -> dict[str, Any]:
-    return respond_svc.resolve(repo, incident_id, body.change_id)
+    out = respond_svc.resolve(repo, incident_id, body.change_id)
+    update = repo.read("incident_update", incident_id=incident_id).rows  # re-posted with the confirmed cause
+    out["update_text"] = update[0]["text"] if update else None
+    out["slack"] = slack.post(out["update_text"])
+    return out
 
 
 @app.get("/api/tenants/{tenant}/incidents/{incident_id}/steps")

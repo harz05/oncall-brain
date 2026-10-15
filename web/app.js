@@ -1,30 +1,37 @@
-// On-call Brain UI: replays an agent run (RunResult from the API) as a step-by-step trace while lighting up
-// each step's evidence on the service graph. No build step. Every piece of data reaches the DOM as text
-// (see h()), never as HTML.
+// On-call Brain UI. Three views:
+//   Incidents  an inbox; each incident shows the agents working live, then the update the comms agent posted (with
+//              Confirm / Wrong cause), and "Show me why": the graph, every agent step and the Cypher behind it.
+//   Ask        company questions answered from the graph, as a chat.
+//   Connect    how to plug it in: MCP (Claude Code), the alert webhook, Slack, your own data.
+// No build step. Every piece of data reaches the DOM as text (see h()), never as HTML.
 
+import * as G from './graph.js';
+
+const { kindOf, short, names } = G;
 const params = new URLSearchParams(location.search);
-const OFFLINE = params.has('offline'); // ?offline=1 replays web/fixtures (generated from the real code)
-const STEP_MS = Number(params.get('step_ms')) || 750;
-const ACTS = [1, 2, 3]; // one #btn-actN each; the alerts of an act come from GET /alerts
-const COUNT = ['', 'one', 'two', 'three', 'four', 'five'];
-const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-const C = {
-  bg: '#0b1020', svc: '#162033', svcBorder: '#3a4a64', lit: '#1d3b61', text: '#dbe4f0', t1: '#7dd3fc',
-  edge: '#4b5b75', hot: '#fde047', cause: '#fb7a3c', chg: '#f5b041', person: '#2dd4bf', team: '#60a5fa',
-  inc: '#b48cff', rb: '#34d399', refuted: '#6b7689', alert: '#f87171', shared: '#e879f9', sharedBg: '#3f1a47',
+const OFFLINE = params.has('offline'); // ?offline=1 replays web/fixtures (recorded from the real code)
+const STEP_MS = Number(params.get('step_ms')) || 750; // fastest pace at which steps appear (an LLM is slower anyway)
+const ROLES = ['triage', 'investigator', 'comms'];
+const ROLE_JOB = { triage: 'Finds who is hurt and pages on-call', investigator: 'Tests every recent change against the graph',
+  comms: 'Writes the update, with sources' };
+const SCENARIO_NOTE = {
+  1: 'A bad config change hides among four other recent changes. Watch each decoy get ruled out.',
+  2: 'The same kind of failure again. Confirm the first fix and memory solves this one in a few steps.',
+  3: 'Three services alert within four minutes. One shared cause, or three?',
 };
-// Satellite (non-service) node kinds, with the direction (degrees, y down) we prefer to place them from
-// their anchor. Anything else in a highlight (ticket:, msg:, alert:) stays off the graph.
-const SAT_ANGLE = { chg: 90, person: -60, team: -90, inc: -140, rb: 180 };
+const EXAMPLES = ['Who owns kafka?', 'Why was legacy-billing retired?', 'Why was the payments gateway pool lowered?',
+  'How do I roll back a bad deploy on cart?', 'What happened to auth?', 'Who knows payments-gw?'];
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const kindOf = (id) => id.split(':', 1)[0];
-const short = (id) => (id ? id.slice(id.indexOf(':') + 1) : '');
-const names = new Map(); // id -> friendlier graph label learned from step data (people, teams)
-const state = { tenant: '', acts: {}, alerts: {}, cy: null, run: null, busy: false, next: 'btn-reset', skip: false };
-const EXAMPLES = ['Why was the payments gateway pool lowered?', 'Who should I ask about postgres-orders?',
-  'What fixed the checkout latency incident?'];
+const enc = encodeURIComponent;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
+  timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST';
+
+// running: an agent run is streaming; graphOwner: whose picture the graph shows (a run, 'ask', or null)
+const state = { tenant: '', health: null, caption: '', stats: '', alerts: [], runs: [], current: null,
+  view: 'incidents', tab: 'answer', running: false, skip: false, chat: [], graphOwner: null };
 
 // ---------- DOM: strings become text nodes, so API data is never parsed as HTML ----------
 function h(tag, attrs = {}, ...kids) {
@@ -40,18 +47,21 @@ function h(tag, attrs = {}, ...kids) {
 }
 const pathChips = (ids) => h('span', { class: 'path' }, ids.map((id, i) => [i ? h('span', { class: 'arrow' }, '→') : null,
   h('span', { class: 'hop' }, short(id))]));
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const ist = (at) => new Date(at * 1000).toLocaleString('en-GB', {
-  timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST';
+const goto = (view, label) => h('a', { href: '#', class: 'link', onclick: (e) => { e.preventDefault(); showView(view); } }, label);
 
-function status(text, isError = false) {
-  const el = $('status');
+let toastTimer;
+function toast(text, isError = false) {
+  const el = $('toast');
   el.textContent = text;
-  el.title = text; // the line is ellipsized on narrow screens
   el.classList.toggle('error', isError);
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 10000 : 5000);
 }
 
 // ---------- API ----------
+const T = () => `/api/tenants/${enc(state.tenant)}`;
+
 async function api(method, path, body) {
   if (OFFLINE) return fixture(path);
   const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {},
@@ -61,230 +71,315 @@ async function api(method, path, body) {
   return data;
 }
 
+const FIXTURES = [[/\/health$/, 'health'], [/\/alerts$/, 'alerts'], [/\/graph/, 'graph'], [/\/resolve$/, 'resolve'],
+  [/checkout-latency\/respond/, 'act1'], [/refunds-latency\/respond/, 'act2'], [/subscriptions-latency\/respond/, 'act3']];
+
 async function fixture(path) {
-  const p = decodeURIComponent(path).split('?')[0]; // act 2 asks ?compare=memory; its fixture already has it
+  const p = decodeURIComponent(path).split('?')[0];
   if (p.endsWith('/reset')) return { tenant: state.tenant, status: 'restored' };
-  const routes = [[/\/health$/, 'health'], [/\/alerts$/, 'alerts'], [/\/graph/, 'graph'], [/\/resolve$/, 'resolve'],
-    [/checkout-latency\/respond$/, 'act1'], [/refunds-latency\/respond$/, 'act2'],
-    [/subscriptions-latency\/respond$/, 'act3']];
-  const hit = routes.find(([re]) => re.test(p));
-  if (!hit) throw new Error(`no offline fixture for ${p}`);
-  await sleep(300);
-  return (await fetch(new URL(`fixtures/${hit[1]}.json`, import.meta.url))).json();  // works on any static host
-}
-const T = () => `/api/tenants/${encodeURIComponent(state.tenant)}`;
-
-// ---------- graph ----------
-const STYLE = [
-  { selector: 'node', style: { label: 'data(label)', 'font-family': FONT, 'font-size': 16, color: C.text,
-    'text-valign': 'center', 'text-halign': 'center', 'transition-property': 'opacity, background-color, border-color',
-    'transition-duration': 300 } },
-  { selector: 'node.svc', style: { shape: 'round-rectangle', width: 'data(w)', height: 36, 'background-color': C.svc,
-    'border-width': 1.5, 'border-color': C.svcBorder } },
-  { selector: 'node.t1', style: { 'border-width': 2.5, 'border-color': C.t1, 'font-weight': 600 } },
-  { selector: 'node.sat', style: { width: 22, height: 22, 'font-size': 14, 'text-valign': 'bottom', 'text-margin-y': 4,
-    'text-background-color': C.bg, 'text-background-opacity': 0.75, 'text-background-padding': 2, 'border-width': 0 } },
-  { selector: 'node.chg', style: { shape: 'diamond', width: 30, height: 30, 'background-color': C.chg } },
-  { selector: 'node.person', style: { shape: 'ellipse', 'background-color': C.person } },
-  { selector: 'node.team', style: { shape: 'hexagon', width: 27, 'background-color': C.team } },
-  { selector: 'node.inc', style: { shape: 'octagon', 'background-color': C.inc } },
-  { selector: 'node.rb', style: { shape: 'round-rectangle', width: 32, height: 20, 'background-color': C.rb } },
-  { selector: 'edge', style: { width: 1.5, 'line-color': C.edge, 'target-arrow-color': C.edge,
-    'target-arrow-shape': 'triangle', 'arrow-scale': 0.8, 'curve-style': 'bezier',
-    'transition-property': 'opacity, line-color, width', 'transition-duration': 300 } },
-  { selector: 'edge.changed', style: { 'line-color': C.chg, 'target-arrow-color': C.chg, width: 2 } },
-  { selector: 'edge.owns, edge.on_call', style: { 'line-color': C.team, 'target-arrow-color': C.team, 'line-style': 'dotted' } },
-  { selector: 'edge.recalls', style: { 'line-color': C.inc, 'target-arrow-color': C.inc, width: 2.5 } },
-  { selector: 'edge.fixed_with', style: { 'line-color': C.rb, 'target-arrow-color': C.rb, width: 2.5 } },
-  { selector: 'edge.caused_by', style: { 'line-color': C.cause, 'target-arrow-color': C.cause, width: 2.5 } },
-  { selector: 'edge.retired', style: { 'line-style': 'dashed', 'line-color': C.refuted, 'target-arrow-color': C.refuted,
-    opacity: 0.45 } },
-  { selector: '.dim', style: { opacity: 0.12 } },
-  { selector: '.ctx', style: { opacity: 0.5 } },
-  { selector: 'node.svc.touched', style: { 'background-color': C.lit } },
-  { selector: 'edge.dep.touched', style: { width: 2.5, 'line-color': '#7b8db0', 'target-arrow-color': '#7b8db0' } },
-  { selector: 'node.svc.shared', style: { 'background-color': C.sharedBg, 'border-color': C.shared, 'border-width': 2 } },
-  { selector: 'node.alerting', style: { 'border-color': C.alert, 'border-width': 3 } },
-  { selector: 'node.refuted', style: { 'background-color': C.refuted, color: '#8a94a6' } },
-  { selector: 'node.hot', style: { 'border-color': C.hot, 'border-width': 3, 'underlay-color': C.hot,
-    'underlay-opacity': 0.25, 'underlay-padding': 7 } },
-  { selector: 'edge.hot', style: { 'line-color': C.hot, 'target-arrow-color': C.hot, width: 3.5, opacity: 1 } },
-  // Alert storm: the alerting services and the top convergence point keep their colour even while lit (hot).
-  { selector: 'node.storm', style: { 'border-color': C.alert, 'border-width': 3.5, 'underlay-color': C.alert,
-    'underlay-opacity': 0.3, 'underlay-padding': 7 } },
-  { selector: 'node.choke', style: { 'border-width': 3.5, 'underlay-color': C.shared, 'underlay-opacity': 0.35,
-    'underlay-padding': 8 } },
-  { selector: 'node.note', style: { width: 1, height: 1, 'background-opacity': 0, 'border-width': 0, 'underlay-opacity': 0,
-    color: C.shared, 'font-size': 15, 'font-weight': 600, 'text-wrap': 'wrap' } }, // after .hot: only its label shows
-  { selector: 'edge.note-link', style: { width: 1.5, 'line-color': C.shared, 'line-style': 'dotted',
-    'target-arrow-shape': 'none' } },
-  { selector: 'edge.recalls.hot', style: { 'line-color': C.inc, 'target-arrow-color': C.inc, 'underlay-color': C.inc,
-    'underlay-opacity': 0.3, 'underlay-padding': 5 } },
-  { selector: 'node.cause', style: { 'border-color': C.cause, 'border-width': 3.5, 'underlay-color': C.cause,
-    'underlay-opacity': 0.35, 'underlay-padding': 9 } },
-  { selector: 'edge.cause', style: { 'line-color': C.cause, 'target-arrow-color': C.cause, width: 5,
-    'underlay-color': C.cause, 'underlay-opacity': 0.3, 'underlay-padding': 6, opacity: 1 } },
-];
-
-function hudIdle() {
-  $('hud').replaceChildren(h('span', { class: 'muted' }, state.graphCaption || ''));
+  const hit = FIXTURES.find(([re]) => re.test(p));
+  if (!hit) throw new Error(`this needs the live server (no recording of ${p})`);
+  await sleep(200);
+  return (await fetch(new URL(`fixtures/${hit[1]}.json`, import.meta.url))).json(); // works on any static host
 }
 
-function buildGraph(g) {
-  state.cy?.destroy();
-  state.cy = null;
-  if (typeof cytoscape === 'undefined') {
-    $('graph').textContent = 'Graph library did not load (is the CDN reachable?). The trace still works.';
+// An agent run as events: live, the NDJSON lines of /respond/stream as the agents record each step; offline, the
+// recorded run replayed as the same events.
+async function* runEvents(path) {
+  if (OFFLINE) {
+    const { ablation, ...result } = await fixture(path);
+    for (const step of result.steps) yield { step };
+    yield { result };
+    if (ablation) yield { ablation };
     return;
   }
-  const elements = [
-    ...g.nodes.map((n) => ({ group: 'nodes', classes: n.tier === 1 ? 'svc t1' : 'svc',
-      data: { id: n.id, label: n.name, w: n.name.length * 9.5 + 30 } })),
-    ...g.edges.map((e) => ({ group: 'edges', classes: e.live ? 'dep' : 'dep retired',
-      data: { id: `${e.source}>${e.target}>DEPENDS_ON`, source: e.source, target: e.target } })),
-  ];
-  // Callers on the left, dependencies on the right. Built-in breadthfirst (rotated) if dagre did not load.
-  const layout = typeof cytoscapeDagre !== 'undefined'
-    ? { name: 'dagre', rankDir: 'LR', nodeSep: 16, rankSep: 100, padding: 24 }
-    : { name: 'breadthfirst', directed: true, padding: 30, transform: (_, p) => ({ x: p.y * 1.6, y: p.x / 1.6 }) };
-  const retired = g.edges.filter((e) => !e.live).length;
-  state.graphCaption = `Service dependency graph · ${g.nodes.length} services · ${g.edges.length} dependencies`
-    + ` (${retired} retired) · callers left, dependencies right`;
-  hudIdle();
-  state.cy = cytoscape({ container: $('graph'), elements, style: STYLE, layout, minZoom: 0.25, maxZoom: 1.15,
-    boxSelectionEnabled: false, autoungrabify: true });
-}
-
-// Place a satellite next to its anchor, at the first spot (preferred angle first, then fanning out) that does
-// not overlap a node or its label. ponytail: O(nodes) per candidate, fine for the ~60 nodes we ever draw.
-function freeSpot(base, pref, W = 110) {
-  const boxes = state.cy.nodes().map((n) => n.boundingBox({ includeLabels: true }));
-  const UP = 18, DOWN = 38; // satellite icon plus its label underneath (W wide)
-  for (const r of [70, 105, 140, 180, 230]) {
-    for (let k = 0; k < 12; k++) {
-      const a = ((pref + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 30) * Math.PI) / 180;
-      const p = { x: base.x + r * Math.cos(a), y: base.y + r * Math.sin(a) };
-      if (boxes.every((b) => p.x + W / 2 < b.x1 || p.x - W / 2 > b.x2 || p.y + DOWN < b.y1 || p.y - UP > b.y2)) return p;
+  const r = await fetch(path, { method: 'POST' });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(typeof d.detail === 'string' ? d.detail : `${r.status} ${r.statusText}`);
+  }
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buf += value;
+    for (let i; (i = buf.indexOf('\n')) >= 0; buf = buf.slice(i + 1)) {
+      if (buf.slice(0, i).trim()) yield JSON.parse(buf.slice(0, i));
     }
   }
-  return { x: base.x, y: base.y + 70 };
 }
 
-function ensureNode(id, anchorId) {
-  const cy = state.cy;
-  const kind = kindOf(id);
-  if (cy.getElementById(id).nonempty() || !(kind in SAT_ANGLE)) return;
-  const home = state.run?.res.alert.service;
-  const anchor = cy.getElementById(id === state.run?.res.incident_id ? home : anchorId);
-  const base = anchor.nonempty() ? anchor.position() : (cy.getElementById(home).nonempty()
-    ? cy.getElementById(home).position() : { x: 0, y: 0 });
-  cy.add({ group: 'nodes', classes: `sat ${kind}`, data: { id, label: names.get(id) || short(id) },
-    position: freeSpot(base, SAT_ANGLE[kind]) });
+// ---------- runs and incidents ----------
+// A run is one agent response to an alert, kept for this page's lifetime. An incident handled before the page was
+// opened is loaded from the graph instead (GET /incidents/{id}): its update and steps, without the trace details.
+function newRun(alert, alerts, act) {
+  return { alert, alerts, act, home: alert.service, incident: null, steps: [], res: null, ablation: null,
+    resolved: null, done: false, error: null, folded: alerts.length < 2, showAlt: false,
+    touched: G.empty(), cause: G.empty() };
 }
 
-// Turn a highlight {nodes, edges} into graph elements, adding satellites and non-DEPENDS_ON edges on the fly.
-// Satellites without an edge (e.g. who_knows people) sit next to the highlight's first service.
-function elementsFor(hl) {
-  const cy = state.cy;
-  if (!cy || !hl) return null;
-  const has = (id) => cy.getElementById(id).nonempty();
-  const home = (hl.nodes || []).find((id) => kindOf(id) === 'svc' && has(id)) || state.run?.res.alert.service;
-  let eles = cy.collection();
-  for (const [s, t, rel] of hl.edges || []) {
-    if (![s, t].every((id) => has(id) || kindOf(id) in SAT_ANGLE)) continue; // e.g. CORRELATED_WITH an alert: id
-    if (!has(s) && !has(t)) ensureNode(s, home);
-    if (!has(s)) ensureNode(s, t);
-    if (!has(t)) ensureNode(t, s);
-    if (!has(s) || !has(t)) continue;
-    const id = `${s}>${t}>${rel}`;
-    eles = eles.union(has(id) ? cy.getElementById(id)
-      : cy.add({ group: 'edges', classes: `rel ${rel.toLowerCase()}`, data: { id, source: s, target: t } }));
-  }
-  for (const id of hl.nodes || []) {
-    ensureNode(id, home);
-    eles = eles.union(cy.getElementById(id));
-  }
-  return eles.union(eles.connectedNodes());
+function statusOf(run, serverStatus) {
+  if (run?.error) return ['error', 'Failed'];
+  if (run && !run.done) return ['working', 'Investigating'];
+  if (run?.resolved || serverStatus === 'resolved' || run?.status === 'resolved') return ['resolved', 'Resolved'];
+  if (run?.res) return run.res.outcome.root_cause ? ['found', 'Cause found'] : ['human', 'Needs a human'];
+  return ['open', 'Open'];
 }
 
-// Alert storm (correlate_alerts): alert ids are not graph nodes, so the alerting services get the alert style,
-// the shared upstream a tint, and the top convergence point a note. Returns the note to light with the step.
-function markStorm(d) {
-  const cy = state.cy;
-  cy.getElementById(state.run.res.alert.service).addClass('alerting storm');
-  for (const a of d.alerts) cy.getElementById(a.service).addClass('alerting storm');
-  for (const s of d.shared) cy.getElementById(s.service).addClass('shared');
-  const top = d.shared[0] && cy.getElementById(d.shared[0].service);
-  if (!top?.nonempty()) return cy.collection();
-  top.addClass('choke');
-  // It is not where the cause is (that can be further upstream), only the nearest service every alert reaches.
-  const n = new Set([state.run.res.alert.service, ...d.alerts.map((a) => a.service)]).size;
-  const label = `shared by all ${n}\nalerting services`;
-  const note = cy.add({ group: 'nodes', classes: 'sat note', data: { id: 'note:choke', label },
-    position: freeSpot(top.position(), 90, 170) });
-  return note.union(cy.add({ group: 'edges', classes: 'note-link',
-    data: { id: 'note:choke>link', source: note.id(), target: top.id() } }));
-}
-
-// Fade everything except what this run touched (plus one dependency hop of context); brighten `hot`, then zoom to
-// `focus` (default: all the run touched). Works without a run too (company-brain answers before act 1).
-function paint(hot, focus) {
-  const cy = state.cy;
-  if (!cy) return;
-  const touched = state.run?.touched || cy.collection();
-  hot = hot || cy.collection();
-  cy.batch(() => {
-    cy.elements().removeClass('hot ctx touched cause').addClass('dim');
-    const ctx = touched.union(hot).nodes('.svc').connectedEdges('.dep');
-    ctx.union(ctx.connectedNodes()).removeClass('dim').addClass('ctx');
-    touched.removeClass('dim ctx').addClass('touched');
-    state.run?.cause.addClass('cause');
-    hot.removeClass('dim ctx').addClass('hot');
+function scenarios() { // the demo company's scripted alerts, grouped by act; the act's last alert is the one answered
+  const by = new Map();
+  for (const a of state.alerts) if (a.act != null) (by.get(a.act) || by.set(a.act, []).get(a.act)).push(a);
+  return [...by].sort((x, y) => x[0] - y[0]).map(([act, alerts]) => {
+    alerts.sort((x, y) => x.at - y.at);
+    return { act, alerts, trigger: alerts.at(-1) };
   });
-  const target = focus ?? touched; // an empty focus (a handoff) keeps the camera where it is
-  if (target?.nonempty()) {
-    cy.stop(true);
-    cy.animate({ fit: { eles: target, padding: 36 }, duration: 450, easing: 'ease-in-out-cubic' });
+}
+const fired = (sc) => !!sc.trigger.incident || state.runs.some((r) => r.act === sc.act);
+const scenarioTitle = (sc) => (sc.alerts.length > 1 ? `${sc.alerts.length} alerts at once`
+  : `${short(sc.trigger.service)} is ${sc.trigger.symptom === 'latency' ? 'slow' : `showing ${sc.trigger.symptom}`}`);
+
+function inboxItems() {
+  const items = new Map();
+  for (const a of state.alerts) {
+    if (!a.incident) continue;
+    if (!items.has(a.incident)) items.set(a.incident, { incident: a.incident, status: a.status, alerts: [] });
+    items.get(a.incident).alerts.push(a);
   }
+  const rows = [...items.values()];
+  for (const run of state.runs) {
+    const it = run.incident && items.get(run.incident);
+    if (it) it.run = run;
+    else if (run.folded) rows.push({ incident: run.incident, alerts: run.alerts, run });
+    else for (const a of run.alerts) rows.push({ incident: null, alerts: [a], run }); // a storm before correlation
+  }
+  const latest = (it) => Math.max(...it.alerts.map((a) => a.at));
+  return rows.sort((x, y) => latest(y) - latest(x));
 }
 
-// Zoom target for a step: its elements plus one hop of context, unless that hop would shrink labels below ~13px
-// (a hub like checkout touches half the graph); then just the step's own elements. 72 = paint()'s fit padding x2.
-function near(eles) {
-  const cy = state.cy, wide = eles.union(eles.nodes().closedNeighborhood()), bb = wide.boundingBox();
-  return Math.min((cy.width() - 72) / bb.w, (cy.height() - 72) / bb.h) >= 0.8 ? wide : eles;
+// ---------- rendering: inbox, demo alerts, landing ----------
+function renderInbox() {
+  const rows = inboxItems();
+  $('inbox-count').textContent = rows.length ? String(rows.length) : '';
+  $('inbox').replaceChildren(...(rows.length ? rows.map((it) => {
+    const [cls, label] = statusOf(it.run, it.status);
+    const trigger = it.run?.alert || it.alerts.find((a) => `inc:${short(a.id)}` === it.incident) || it.alerts.at(-1);
+    const many = it.alerts.length > 1;
+    const selected = state.current && (state.current === it.run || (it.incident && state.current.incident === it.incident));
+    return h('li', {},
+      h('button', { class: `inbox-item${selected ? ' selected' : ''}`, onclick: () => (it.run ? openRun(it.run) : openStored(it.incident)) },
+        h('span', { class: `dot ${cls}` }),
+        h('span', { class: 'ii-main' },
+          h('span', { class: 'ii-title' }, many ? `${it.alerts.length} alerts → 1 incident` : trigger.name),
+          h('span', { class: 'ii-sub' }, many ? it.alerts.map((a) => short(a.service)).join(', ') : short(trigger.service),
+            ` · ${ist(trigger.at)}`)),
+        h('span', { class: `status-pill ${cls}` }, label)));
+  }) : [h('li', { class: 'inbox-empty' }, h('p', {}, 'No incidents.'),
+    h('p', { class: 'muted small' }, 'Fire a demo alert below, or send one in through the webhook (Connect).'))]));
 }
 
-function resetGraphView() {
-  const cy = state.cy;
-  if (!cy) return;
-  cy.remove('.sat');
-  cy.elements().removeClass('dim ctx touched hot cause refuted alerting storm shared choke');
-  cy.stop(true);
-  cy.animate({ fit: { padding: 30 }, duration: 300 });
+function renderScenarios() {
+  const list = scenarios(), next = list.find((s) => !fired(s));
+  $('scenarios').replaceChildren(...list.map((sc) => {
+    const done = fired(sc);
+    return h('li', { class: `scenario${done ? ' done' : ''}${sc === next ? ' next' : ''}` },
+      h('div', { class: 'sc-text' }, h('b', {}, scenarioTitle(sc)), h('span', { class: 'muted small' }, SCENARIO_NOTE[sc.act] || '')),
+      h('button', { class: sc === next ? 'primary-btn' : 'ghost', disabled: done || state.running,
+        onclick: () => fire(sc.act) }, done ? 'Fired' : 'Fire'));
+  }));
 }
 
-// ---------- trace ----------
+function renderLanding() {
+  const next = scenarios().find((s) => !fired(s));
+  const how = (n, title, text) => h('li', {}, h('span', { class: 'how-n' }, n), h('div', {}, h('b', {}, title), h('p', {}, text)));
+  $('landing').replaceChildren(h('div', { class: 'hero' },
+    h('p', { class: 'eyebrow' }, 'Incident response on a knowledge graph · FalkorDB'),
+    h('h2', {}, 'Your AI on-call teammate'),
+    h('p', { class: 'lede' }, 'When an alert fires, three AI agents work it over your company’s knowledge graph: what '
+      + 'depends on what, who owns it, what changed, and what fixed it last time. You get the likely cause, who to page '
+      + 'and the fix, with sources. Confirm the fix and it remembers.'),
+    h('ol', { class: 'how' },
+      how('1', 'An alert fires', 'From your monitoring through a webhook, or from the demo alerts on the left.'),
+      how('2', 'Agents investigate the graph', 'Triage finds who is hurt and pages on-call. The investigator tests every '
+        + 'recent change against the dependency graph and rules out the decoys. Comms writes the update.'),
+      how('3', 'You confirm, it learns', 'Your call becomes memory in the graph, so the next similar incident is solved '
+        + 'in a few steps.')),
+    next ? h('button', { class: 'cta', disabled: state.running || !state.alerts.length, onclick: () => fire(next.act) },
+      `${next.act === 1 ? 'Fire the first alert' : 'Fire the next alert'}: ${scenarioTitle(next)}`)
+      : h('p', { class: 'muted' }, 'All demo alerts have been handled. Pick one on the left, or reset the demo.'),
+    h('p', { class: 'muted small' }, state.stats ? `Demo company: ${state.stats}, all synthetic. ` : '',
+      goto('ask', 'Ask the company brain'), ' · ', goto('connect', 'Use it from Claude Code or your alerting'))));
+}
+
+// ---------- rendering: one incident ----------
+function renderHead(cur) {
+  const [cls, label] = statusOf(cur, cur.status);
+  $('inc-status').className = `status-pill ${cls}`;
+  $('inc-status').textContent = label;
+  $('inc-title').textContent = cur.alerts.length > 1
+    ? `${cur.alerts.length} alerts: ${cur.alerts.map((a) => short(a.service)).join(', ')}` : cur.alert.name;
+  $('inc-sub').textContent = `${short(cur.home)} · ${ist(cur.alert.at)}${cur.incident ? ` · ${cur.incident}` : ''}`;
+}
+
+function plannerName() {
+  const p = state.health?.planner || '';
+  return /deterministic|mock/i.test(p) ? 'the rule planner' : p.split(' via ')[0];
+}
+
+function renderProgress(cur) {
+  const steps = cur.steps || [];
+  const handed = new Set(steps.filter((s) => s.tool === 'handoff').map((s) => s.role));
+  const working = cur.done ? null : ROLES.find((r) => !handed.has(r));
+  const checks = steps.filter((s) => s.tool === 'check_hypothesis' && s.data);
+  const tiles = ROLES.map((role) => {
+    const mine = steps.filter((s) => s.role === role && s.tool !== 'handoff');
+    const st = handed.has(role) || (cur.done && mine.length) ? 'done' : role === working ? 'working' : 'waiting';
+    let text = st === 'waiting' ? ROLE_JOB[role] : mine.at(-1)?.summary || 'Reading the incident board…';
+    if (role === 'investigator' && checks.length) {
+      const out = checks.filter((s) => s.data.verdict !== 'supports').length;
+      text = `Tested ${plural(checks.length, 'suspect')}, ruled out ${out}. ${st === 'working' ? `Now: ${mine.at(-1)?.summary || ''}` : ''}`;
+    }
+    return h('div', { class: `tile ${st} ${role}` },
+      h('div', { class: 'tile-head' }, h('span', { class: `role ${role}` }, role),
+        h('span', { class: 'tile-state' }, st === 'done' ? '✓ done' : st === 'working' ? 'working…' : 'waiting')),
+      h('p', {}, text));
+  });
+  const last = steps.at(-1);
+  $('progress').replaceChildren(h('div', { class: 'tiles' }, tiles),
+    !cur.done && !cur.stored ? h('p', { class: 'progress-line' },
+      h('span', { class: 'spinner' }), last ? [h('b', {}, `${last.role}: `), last.reason] : 'Opening the incident…',
+      h('span', { class: 'muted' }, ` · steps chosen by ${plannerName()}`),
+      h('button', { class: 'ghost', onclick: () => { state.skip = true; } }, 'Skip animation')) : null,
+    cur.error ? h('p', { class: 'error' }, cur.error) : null);
+}
+
+// The status update, rendered the way it lands in Slack: the comms agent's text, line by line ("Key: value").
+function slackCard(cur) {
+  const text = cur.resolved?.update_text || cur.res?.outcome.update_text || cur.update_text;
+  const head = h('div', { class: 'slack-head' }, h('span', { class: 'logo sm' }),
+    h('b', {}, 'On-call Brain'), h('span', { class: 'app' }, 'APP'), h('span', { class: 'muted' }, ist(cur.alert.at)));
+  if (!text) {
+    return h('div', { class: 'slack pending' }, h('div', { class: 'channel' }, '# incidents'), head,
+      h('p', { class: 'muted' }, cur.done ? 'No update was posted.' : 'The comms agent posts here once the cause is clear…'),
+      cur.done ? null : [h('div', { class: 'skel' }), h('div', { class: 'skel short' })]);
+  }
+  const [first, ...rest] = text.split('\n');
+  const m = first.match(/^\[(.*)\]\s*status:\s*(.*)$/);
+  const lines = rest.map((line) => {
+    const k = line.match(/^([A-Z][\w ()]{1,30}):\s(.*)$/);
+    if (!k) return h('p', {}, line);
+    if (k[1] === 'Sources') return h('p', { class: 'sources' }, h('b', {}, 'Sources: '), k[2].split(', ').map((s) => h('span', { class: 'src' }, s)));
+    return h('p', { class: /cause/i.test(k[1]) ? 'cause-line' : null }, h('b', {}, `${k[1]}: `), k[2]);
+  });
+  const slack = cur.resolved?.slack || cur.res?.slack;
+  return h('div', { class: 'slack' }, h('div', { class: 'channel' }, '# incidents'), head,
+    m ? h('p', { class: 'slack-title' }, h('span', { class: 'siren' }, '●'), h('b', {}, m[1]), ' — ', m[2]) : h('p', {}, first),
+    lines,
+    actions(cur),
+    slack === 'posted' ? h('p', { class: 'slack-note ok' }, '✓ Also posted to your Slack channel')
+      : slack && slack !== 'off' ? h('p', { class: 'slack-note bad' }, `Slack post ${slack}`)
+        : cur.res ? h('p', { class: 'slack-note' }, 'Shown here only. ', goto('connect', 'Connect Slack'), ' to post it to a real channel.') : null);
+}
+
+function actions(cur) {
+  if (cur.stored || !cur.res) return null;
+  const o = cur.res.outcome, rc = o.root_cause;
+  if (cur.resolved) {
+    const d = cur.resolved.data;
+    return h('div', { class: 'learned' }, h('p', {}, h('span', { class: 'pill rb' }, 'saved to memory'), ' ',
+      d ? [`Fix confirmed. Runbook `, h('b', {}, `“${d.title}”`), ` now has ${plural(d.successes, 'success')}.`] : cur.resolved.summary),
+      d?.steps ? h('ol', {}, d.steps.map((s) => h('li', {}, s))) : null);
+  }
+  const alts = [...o.refuted, ...(o.co_causes || [])].filter((r) => r.change !== rc?.change);
+  return h('div', { class: 'actions' },
+    rc ? h('button', { class: 'confirm', disabled: state.running && !cur.done,
+      onclick: () => resolve(cur, rc.change) }, `✓ Confirm: ${short(rc.change)} caused it`)
+      : h('p', { class: 'muted' }, 'No recent change explains this alert, so a human needs to look.'),
+    alts.length ? h('button', { class: 'ghost', onclick: () => { cur.showAlt = !cur.showAlt; renderAnswer(cur); } },
+      rc ? 'Wrong cause?' : 'Pick the cause yourself') : null,
+    cur.showAlt ? h('div', { class: 'alts' },
+      h('p', { class: 'muted small' }, 'Pick the change that really caused it. Your call is written to the graph and becomes memory.'),
+      h('ul', {}, alts.map((r) => h('li', {}, h('span', {}, h('b', {}, short(r.change)), ` on ${short(r.service)} `,
+        h('span', { class: 'pill out' }, r.tag || 'suspect')),
+        h('button', { class: 'ghost', onclick: () => resolve(cur, r.change) }, 'This one'))))) : null);
+}
+
+function sideCards(cur) {
+  if (cur.stored) {
+    return [h('div', { class: 'card' }, h('h3', {}, 'From the graph'),
+      h('p', {}, 'This incident was handled before this page was opened. Its update and every agent step are stored on '
+        + 'the incident in FalkorDB; see them under “Show me why”.'))];
+  }
+  const steps = cur.steps, checks = steps.filter((s) => s.tool === 'check_hypothesis' && s.data);
+  if (!cur.res) {
+    return [h('div', { class: 'card' }, h('h3', {}, 'What the agents can see'),
+      h('p', {}, 'Services and their dependencies (with dates), owners, on-call rotas, every deploy and config change, '
+        + 'anomalies, past incidents and what fixed them, docs, tickets and chat: one FalkorDB graph per company.'),
+      h('p', { class: 'muted small' }, 'Open “Show me why” to watch them walk it.'))];
+  }
+  const o = cur.res.outcome, rc = o.root_cause, mem = o.memory, recalled = mem.recalled[0], wo = cur.ablation?.without_memory;
+  const cards = [];
+  if (o.storm) {
+    const alerts = [...o.storm.alerts.map((a) => a.service), cur.home];
+    cards.push(h('div', { class: 'card storm' }, h('h3', {}, 'Alert storm'),
+      h('p', { class: 'big-line' }, h('b', {}, `${new Set(alerts).size} alerts`), ' → 1 incident'),
+      h('p', {}, 'They share upstream services; the nearest to all of them: ',
+        h('b', {}, o.storm.shared.slice(0, 2).map((s) => short(s.service)).join(', ') || 'none')),
+      h('p', { class: 'muted small' }, 'Without correlating them first, the same agents blame a change that explains only one alert.')));
+  }
+  if (rc) {
+    cards.push(h('div', { class: 'card cause' }, h('h3', {}, 'Why this change'),
+      rc.live_path?.length > 1 ? pathChips(rc.live_path) : null,
+      h('p', {}, rc.reason),
+      h('p', { class: 'muted small' }, `${plural(checks.length, 'suspect')} tested against the graph, `
+        + `${checks.filter((s) => s.data.verdict !== 'supports').length} ruled out (each with its reason, in the update).`),
+      (o.co_causes || []).map((c) => h('p', { class: 'small' }, 'Also contributing: ', h('b', {}, short(c.change)), ` on ${short(c.service)}`))));
+  }
+  const bp = o.baseline_pick, ab = o.anomaly_baseline_pick;
+  if (bp || ab) {
+    const row = (label, pick, ok) => pick && h('li', { class: ok ? 'ok' : 'bad' }, h('span', {}, label),
+      h('b', {}, short(pick.change)), h('span', { class: 'pill' }, ok ? 'same answer' : 'wrong'));
+    cards.push(h('div', { class: 'card nograph' }, h('h3', {}, 'Without the graph'),
+      h('ul', {}, row('Newest change', bp, o.baseline_correct), row('Change log + anomalies', ab, o.anomaly_baseline_correct)),
+      h('p', { class: 'muted small' }, 'What you would blame from a change log and dashboards alone, without walking the dependencies.')));
+  }
+  cards.push(h('div', { class: 'card memory-card' }, h('h3', {}, 'Memory'),
+    recalled ? h('p', {}, 'Recalled ', h('b', {}, `“${recalled.title}”`), ' and its fix ', h('b', {}, `“${recalled.runbook_title}”`), '. ',
+      mem.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory')
+        : h('span', { class: 'muted' }, 'It did not apply here, so the search widened.'))
+      : h('p', { class: 'muted' }, 'No similar past incident on this dependency path.'),
+    wo ? h('div', { class: 'compare' }, h('p', { class: 'muted small' }, 'Same incident, replayed on the graph without this memory:'),
+      h('div', { class: 'nums' },
+        h('div', {}, h('span', { class: 'big' }, h('span', { class: 'before' }, wo.investigator_calls), ' → ', o.investigator_calls),
+          h('span', { class: 'lbl' }, 'investigator steps')),
+        h('div', {}, h('span', { class: 'big' }, h('span', { class: 'before' }, wo.hypotheses_checked), ' → ', o.hypotheses_checked),
+          h('span', { class: 'lbl' }, 'suspects tested'))))
+      : cur.act === 2 && !cur.ablation ? h('p', { class: 'muted small' }, 'Replaying it without memory for comparison…') : null));
+  return cards;
+}
+
+function renderAnswer(cur) {
+  $('answer-main').replaceChildren(slackCard(cur));
+  $('answer-side').replaceChildren(...sideCards(cur));
+}
+
+// ---------- rendering: show me why (trace) ----------
 function learnNames(step) {
   const d = step.data;
-  if (step.tool === 'page_on_call' && d && d.person) {
+  if (step.tool === 'page_on_call' && d?.person) {
     names.set(d.person, d.name);
     names.set(d.team, `${d.team_name} team`);
   }
   if (step.tool === 'who_knows') for (const p of d || []) names.set(p.person, p.name);
-  if (step.tool === 'ask') {
-    for (const r of d?.related || []) if (['person', 'team'].includes(kindOf(r.id))) names.set(r.id, r.name);
-  }
+  if (step.tool === 'ask') for (const r of d?.related || []) if (['person', 'team'].includes(kindOf(r.id))) names.set(r.id, r.name);
 }
 
 function queryBlock(q) {
   return h('div', { class: 'q' },
-    h('div', { class: 'qhead' },
-      h('b', {}, q.name),
-      h('span', { class: `rw ${q.readonly ? 'ro' : 'w'}`, title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' },
-        q.readonly ? 'RO' : 'W'),
+    h('div', { class: 'qhead' }, h('b', {}, q.name),
+      h('span', { class: `rw ${q.readonly ? 'ro' : 'w'}`, title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' }, q.readonly ? 'RO' : 'W'),
       h('span', { class: 'muted' }, `${q.rows.length} rows · ${q.ms} ms`),
-      q.name === 'incident_board' ? h('span', { class: 'tag' }, 'planner reads the shared board') : null),
+      q.name === 'incident_board' ? h('span', { class: 'tag' }, 'the agent reads the shared board') : null),
     h('pre', { class: 'cypher' }, q.cypher),
     h('pre', { class: 'params' }, `params ${JSON.stringify(q.params)}`),
     q.rows.length ? h('details', { class: 'rows' }, h('summary', {}, `rows (${q.rows.length})`),
@@ -292,11 +387,10 @@ function queryBlock(q) {
 }
 
 function cypherList(queries) {
-  const ms = queries.reduce((a, q) => a + q.ms, 0);
-  const rows = queries.reduce((a, q) => a + q.rows.length, 0);
+  if (!queries?.length) return null;
+  const ms = queries.reduce((a, q) => a + q.ms, 0), rows = queries.reduce((a, q) => a + q.rows.length, 0);
   return h('details', { class: 'cypher-list' },
-    h('summary', {}, `Cypher: ${queries.length === 1 ? '1 query' : `${queries.length} queries`}, ${plural(rows, 'row')}, `
-      + `${ms.toFixed(1)} ms`),
+    h('summary', {}, `Cypher: ${plural(queries.length, 'query')}, ${plural(rows, 'row')}, ${ms.toFixed(1)} ms`),
     queries.map(queryBlock));
 }
 
@@ -308,8 +402,7 @@ function stepCard(step, i) {
         h('span', { class: `role ${to}` }, to)),
       h('p', { class: 'why' }, step.reason));
   }
-  const d = step.data;
-  const verdict = step.tool === 'check_hypothesis' && d ? d.verdict : null;
+  const d = step.data, verdict = step.tool === 'check_hypothesis' && d ? d.verdict : null;
   const body = verdict
     ? h('p', { class: 'summary' }, h('span', { class: `verdict ${verdict}` }, verdict.toUpperCase()), ' ',
       verdict === 'supports' ? h('b', {}, short(d.change)) : h('s', {}, short(d.change)), ` on ${short(d.service)}: `,
@@ -317,423 +410,422 @@ function stepCard(step, i) {
       verdict === 'supports' && d.live_path?.length > 1 ? pathChips(d.live_path) : null)
     : h('p', { class: 'summary' }, step.summary);
   return h('li', { class: `card ${step.role}${verdict ? ` v-${verdict}` : ''}`, 'data-i': i, tabindex: 0 },
-    h('div', { class: 'card-head' },
-      h('span', { class: `role ${step.role}` }, step.role),
-      h('code', { class: 'tool' }, step.tool),
+    h('div', { class: 'card-head' }, h('span', { class: `role ${step.role}` }, step.role), h('code', { class: 'tool' }, step.tool),
       h('span', { class: 'seq' }, `#${step.seq}`)),
     body,
     h('p', { class: 'why' }, h('span', { class: 'why-label' }, 'why '), step.reason),
     cypherList(step.queries));
 }
 
-function reveal(i) {
-  const run = state.run, step = run.res.steps[i];
-  learnNames(step);
-  const li = stepCard(step, i);
+function renderTrace(cur) {
+  $('trace').replaceChildren(...(cur.steps || []).map(stepCard));
+  $('trace-count').textContent = cur.steps?.length ? plural(cur.steps.length, 'step') : '';
+  $('btn-skip').hidden = cur.done || !!cur.stored;
+}
+
+function appendTrace(cur, step) {
+  const li = stepCard(step, cur.steps.length - 1);
   $('trace').querySelector('.current')?.classList.remove('current');
   li.classList.add('current');
   $('trace').append(li);
-  li.scrollIntoView({ block: 'nearest', behavior: state.skip ? 'auto' : 'smooth' });
-  $('trace-count').textContent = `${i + 1}/${run.res.steps.length}`; // short: must share 380px with tabs + Skip
-  if (step.role === 'investigator' && step.tool !== 'handoff') run.calls++;
-  if (step.tool === 'check_hypothesis') run.hyps++;
-  renderCounter();
-  let eles = elementsFor(step.highlight); // the server already keeps only strong recalls in the highlight
+  if (state.tab === 'why') li.scrollIntoView({ block: 'nearest', behavior: state.skip ? 'auto' : 'smooth' });
+  $('trace-count').textContent = plural(cur.steps.length, 'step');
+}
+
+function onTraceClick(ev) {
+  if (ev.target.closest('summary, pre, details[open] *')) return; // let people read and expand the Cypher
+  const li = ev.target.closest('li[data-i]'), cur = state.current;
+  if (!li || !cur?.steps) return;
+  $('trace').querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
+  li.classList.add('selected');
+  const eles = cur.steps[Number(li.dataset.i)]?.eles;
+  if (eles && state.graphOwner === cur) G.paint(cur, eles, G.near(eles));
+}
+
+// ---------- the graph's picture of a run ----------
+function hudFor(cur) {
+  $('hud').replaceChildren(...(cur
+    ? [h('span', { class: 'pill alert' }, cur.alerts.length > 1 ? 'ALERTS' : 'ALERT'),
+      h('b', {}, cur.alerts.length > 1 ? cur.alerts.map((a) => short(a.service)).join(', ') : cur.alert.name),
+      h('span', { class: 'muted' }, `${ist(cur.alert.at)}${cur.incident ? ` · ${cur.incident}` : ''}`)]
+    : [h('span', { class: 'muted' }, state.caption)]));
+}
+
+function applyStep(run, step, live) {
+  if (!G.ready()) return;
+  let eles = G.elementsFor(step.highlight, run);
   if (!eles) return;
-  if (step.tool === 'correlate_alerts' && step.data?.alerts.length) eles = eles.union(markStorm(step.data));
+  if (step.tool === 'correlate_alerts' && step.data?.alerts?.length) eles = eles.union(G.markStorm(step.data, run));
   step.eles = eles;
   run.touched = run.touched.union(eles);
   if (step.tool === 'check_hypothesis' && step.data) {
     if (step.data.verdict === 'supports') run.cause = run.cause.union(eles);
-    else state.cy.getElementById(step.data.change).addClass('refuted');
+    else G.mark(step.data.change, 'refuted');
   }
-  // The storm step already spans the alerting services and their shared upstream; one more hop would be most of the graph.
-  paint(eles, step.tool === 'correlate_alerts' ? eles : near(eles));
+  if (live) G.paint(run, eles, step.tool === 'correlate_alerts' ? eles : G.near(eles));
 }
 
-function onTraceClick(ev) {
-  if (ev.target.closest('summary, pre, details[open] *')) return; // let people read/expand Cypher
-  const li = ev.target.closest('li[data-i]');
-  if (!li || !state.run) return;
-  $('trace').querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
-  li.classList.add('selected');
-  const step = state.run.res.steps[Number(li.dataset.i)];
-  if (step?.eles) paint(step.eles, near(step.eles));
+// End on the answer, big enough to read: a storm ends on the alerting services, shared upstream and cause; otherwise
+// the cause path and, if memory solved it, the chain new incident -> recalled incident -> its runbook.
+function finalPaint(run) {
+  const o = run.res.outcome;
+  const memo = o.memory.solved_by_memory ? G.elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
+    [[run.incident, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }, run) : null;
+  if (memo) run.touched = run.touched.union(memo);
+  const learned = run.resolved && G.elementsFor(run.resolved.highlight, run);
+  if (learned) run.touched = run.touched.union(learned);
+  const storm = o.storm ? G.select('.storm, .shared') : null;
+  const focus = storm ? run.cause.union(storm) : run.cause.nonempty() ? run.cause.union(memo || G.empty()) : null;
+  G.paint(run, learned || memo, focus);
 }
 
-// ---------- outcome ----------
-function renderCounter() {
-  const run = state.run, o = run.res.outcome;
-  // Only the same incident replayed on the pristine graph (no act-1 memory) is a fair "memory helps" comparison;
-  // without that ablation the card shows this run's own counts and nothing to compare them with.
-  const wo = run.done ? run.res.ablation?.without_memory : null;
-  const num = (label, now, before) => h('div', { class: 'num' },
-    h('span', { class: 'big' }, before != null ? [h('span', { class: 'before' }, before), h('span', { class: 'arrow' }, '→'), now] : now),
-    h('span', { class: 'lbl' }, label));
-  const ctc = run.done ? o.checks_to_culprit : null; // shown once the replay ends, so it can't spoil it
-  const check = (n) => (n == null ? 'no culprit' : `check ${n}`);
-  const el = h('div', { class: 'card counter', id: 'counter' },
-    h('h3', {}, wo ? `Act ${run.act}: same incident` : `Act ${run.act}`),
-    wo ? h('p', { class: 'ctc' }, 'without → with memory') : null,
-    h('div', { class: 'nums' },
-      num('investigator calls', run.calls, wo?.investigator_calls),
-      num('hypotheses checked', run.hyps, wo?.hypotheses_checked)),
-    ctc != null ? h('p', { class: 'ctc' }, wo ? `culprit on ${check(wo.checks_to_culprit)} → check ${ctc}`
-      : `culprit on check ${ctc} of ${o.hypotheses_checked}`) : null,
-    run.done && o.memory.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory') : null);
-  if (wo) el.title = `Same incident, without memory: ${plural(wo.investigator_calls, 'call')}, culprit on `
-    + `${check(wo.checks_to_culprit)} → with memory: ${plural(o.investigator_calls, 'call')}, check ${ctc}`;
-  const old = $('counter');
-  if (old) old.replaceWith(el);
-  else $('outcome').prepend(el);
+// Rebuild the graph's picture of a run from its steps (switching incidents, or back from Ask).
+function replayGraph(cur) {
+  state.graphOwner = cur;
+  hudFor(cur);
+  if (!G.ready()) return;
+  G.clear(false);
+  if (!cur) return G.paint(null);
+  cur.touched = G.empty();
+  cur.cause = G.empty();
+  G.mark(cur.home, 'alerting');
+  for (const s of cur.steps || []) applyStep(cur, s, false);
+  if (cur.res) finalPaint(cur);
+  else G.paint(cur, null, cur.touched.nonempty() ? cur.touched : G.select(`[id = "${cur.home}"]`));
 }
 
-function intro() {
-  $('outcome').replaceChildren(h('div', { class: 'card intro' },
-    h('h3', {}, 'How to read this demo'),
-    h('ol', {},
-      h('li', {}, 'Triage, investigator and comms agents hand off through one Incident node in FalkorDB; each decision re-reads that board.'),
-      h('li', {}, 'Every suspect change is tested by traversal at alert time; decoys are refuted with the Cypher that refuted them.'),
-      h('li', {}, 'A confirmed fix is written back as a runbook, so the next incident is recalled by graph structure.'))));
+// ---------- views ----------
+function showView(view) {
+  state.view = view;
+  for (const b of document.querySelectorAll('.view-tab')) b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
+  for (const v of ['incidents', 'ask', 'connect']) $(`view-${v}`).hidden = v !== view;
+  if (view === 'connect') renderConnect();
+  if (view === 'ask') renderChat();
+  placeGraph();
 }
 
-function renderOutcome() {
-  const res = state.run.res, o = res.outcome;
-  const rc = o.root_cause, bp = o.baseline_pick, ab = o.anomaly_baseline_pick, mem = o.memory, rb = o.runbook,
-    ex = o.expert;
-  const cites = res.steps.find((s) => s.tool === 'post_update')?.data?.cites || [];
-  const recalled = mem.recalled[0];
-
-  const cause = h('div', { class: 'card cause' },
-    h('h3', {}, 'Root cause'),
-    rc ? [h('p', { class: 'lead' }, h('b', {}, short(rc.change)), ` on ${short(rc.service)}`), pathChips(rc.live_path)]
-      : h('p', {}, 'No suspect was supported by the graph.'),
-    rb || ex ? h('div', { class: 'next' },
-      rb ? h('p', {}, h('span', { class: 'k' }, 'Next action'), rb.steps?.[0] || rb.title,
-        h('span', { class: 'sub' }, `runbook “${rb.title}”`,
-          rb.uses != null ? ` · worked ${rb.successes ?? 0} of ${rb.uses} times` : '')) : null,
-      ex ? h('p', {}, h('span', { class: 'k' }, 'Ask'), h('b', {}, ex.name), ` (${ex.handle}, ${ex.team})`,
-        ex.changes != null ? h('span', { class: 'sub' }, `authored ${plural(ex.changes, 'change')}`) : null) : null)
-      : null,
-    bp ? h('p', { class: `baseline ${o.baseline_correct ? 'ok' : 'bad'}` },
-      'Flat change log would blame: ', h('b', {}, short(bp.change)), ' ',
-      h('span', { class: 'pill' }, o.baseline_correct ? 'same answer' : 'wrong'),
-      h('span', { class: 'sub' }, bp.summary)) : null,
-    ab ? h('p', { class: `baseline ${o.anomaly_baseline_correct ? 'ok' : 'bad'}` },
-      'Change log + anomalies (no graph) would blame: ', h('b', {}, short(ab.change)), ' ',
-      h('span', { class: 'pill' }, o.anomaly_baseline_correct ? 'same answer' : 'wrong'),
-      h('span', { class: 'sub' }, ab.summary)) : null,
-    rc ? [h('p', {}, rc.summary), h('p', { class: 'muted' }, rc.reason)] : null,
-    (o.co_causes || []).map((c) => h('p', { class: 'baseline' }, 'Also contributing: ', h('b', {}, short(c.change)),
-      ` on ${short(c.service)}`, h('span', { class: 'sub' }, c.reason))));
-
-  const ruled = h('div', { class: 'card ruled' },
-    h('h3', {}, `Ruled out (${o.refuted.length})`),
-    o.refuted.length ? h('ul', {}, o.refuted.map((r) => h('li', {},
-      h('s', {}, short(r.change)), ` on ${short(r.service)} `, r.tag ? h('span', { class: 'pill out' }, r.tag) : null,
-      h('span', { class: 'reason sub' }, r.reason))))
-      : h('p', { class: 'muted' }, 'Nothing to rule out: memory went straight to the cause.'));
-
-  const memory = h('div', { class: 'card memory-card' },
-    h('h3', {}, 'Memory'),
-    recalled ? h('p', {}, 'Recalled ', h('b', {}, `“${recalled.title}”`), ` (${recalled.incident}), runbook `,
-      h('b', {}, `“${recalled.runbook_title}”`), '. ',
-      mem.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory')
-        : h('span', { class: 'muted' }, mem.suspects.length ? 'Its suspect was refuted, so the search widened.'
-          : `No change on ${short(recalled.cause_service)} in this window, so the search widened.`))
-      : h('p', { class: 'muted' }, 'No similar past incident on this dependency path.'),
-    h('div', { id: 'learned' }),
-    h('p', {}, h('span', { class: 'k' }, 'Paged '), o.paged.map((p, i) => [i ? ', ' : '', h('b', {}, p.name),
-      ` ${p.handle} (${p.team_name})`])),
-    h('p', {}, h('span', { class: 'k' }, 'Impact '), o.blast_radius.map(short).join(', ') || 'none'),
-    h('p', {}, h('span', { class: 'k' }, 'Also at risk '), o.at_risk.map(short).join(', ') || 'none'));
-
-  const update = h('div', { class: 'card update' },
-    h('h3', {}, 'Status update for #incidents ', h('span', { class: 'h3-note' }, '(stored on the incident)')),
-    h('pre', {}, o.update_text || '(none)'),
-    cites.length ? h('p', {}, h('span', { class: 'k' }, 'Sources '), cites.map((c) => h('span', { class: 'src' }, c))) : null);
-
-  const st = o.storm, alerts = st ? [...st.alerts, { ...res.alert, name: res.alert.alert }] : [];
-  const storm = st && h('div', { class: 'card storm' },
-    h('h3', {}, 'Alert storm'),
-    h('p', { class: 'lead' }, h('b', {}, `${alerts.length} alerts`), ' → 1 incident'),
-    h('span', { class: 'path' }, alerts.sort((a, b) => a.at - b.at).map((a) =>
-      h('span', { class: 'hop alerting', title: `${a.name} · ${ist(a.at)}` }, short(a.service)))),
-    h('p', {}, h('span', { class: 'k' }, 'Shared upstream'), h('span', { class: 'muted' }, 'nearest to all alerts first')),
-    h('ol', { class: 'shared-list' }, st.shared.slice(0, 3).map((s) => h('li', { value: s.rank }, short(s.service)))),
-    state.run.act === 3 ? h('p', { class: 'caption' },
-      'Without correlating the alerts, the same planner blames subs-88: it explains only one alert (see make demo).') : null);
-
-  $('outcome').classList.toggle('has-storm', !!st);
-  $('outcome').replaceChildren(...[h('div', { id: 'counter' }), storm, cause, ruled, memory, update].filter(Boolean));
-  renderCounter();
+function showTab(tab) {
+  state.tab = tab;
+  $('tab-answer').setAttribute('aria-selected', String(tab === 'answer'));
+  $('tab-why').setAttribute('aria-selected', String(tab === 'why'));
+  $('answer-view').hidden = tab !== 'answer';
+  $('why-view').hidden = tab !== 'why';
+  placeGraph();
 }
 
-function renderLearned(r) {
-  const d = r.data;
-  $('learned').replaceChildren(h('div', { class: 'learned' },
-    h('p', {}, h('span', { class: 'pill rb' }, 'saved to memory'), ' ', d ? ['runbook ', h('b', {}, `“${d.title}”`),
-      ` (${d.successes} success${d.successes === 1 ? '' : 'es'})`] : r.summary),
-    d ? h('ol', {}, d.steps.map((s) => h('li', {}, s))) : null));
+// One Cytoscape canvas, moved to wherever it is shown; its picture is rebuilt when its owner changes.
+function placeGraph() {
+  const ask = state.view === 'ask';
+  const slot = ask ? $('ask-graph-slot') : $('why-graph-slot');
+  if ($('graph-wrap').parentElement !== slot) slot.append($('graph-wrap'));
+  if (ask && state.graphOwner !== 'ask') {
+    state.graphOwner = 'ask';
+    hudFor(null);
+    G.clear(false);
+  } else if (!ask && state.tab === 'why' && state.graphOwner !== state.current) replayGraph(state.current);
+  requestAnimationFrame(() => G.refit());
 }
 
-// ---------- company brain (track 03): the registry tools agents and MCP clients use, asked directly ----------
-function showTab(ask) {
-  $('tab-trace').setAttribute('aria-selected', String(!ask));
-  $('tab-ask').setAttribute('aria-selected', String(ask));
-  $('trace').hidden = ask;
-  $('trace-count').hidden = ask;
-  $('ask').hidden = !ask;
-  if (ask) return;
-  if (state.run) paint(); // drop an answer's highlight, back to the run's picture
-  else resetGraphView();
+function showIncident(cur) {
+  state.current = cur;
+  $('landing').hidden = !!cur;
+  $('incident').hidden = !cur;
+  renderAll();
+  if (state.view !== 'incidents') showView('incidents');
+  else placeGraph();
 }
 
-// Pickers: every service in the graph (filled by loadTenant), every change this run looked at (root cause first).
-function fillAsk() {
-  if (OFFLINE) return;
-  const res = state.run?.done ? state.run.res : null, o = res?.outcome;
-  $('ask-svc').value = o?.root_cause?.service || res?.alert.service || state.alerts[1]?.service || $('ask-svc').value;
-  const refuted = new Set(o?.refuted.map((r) => r.change));
-  const ids = res ? [o.root_cause?.change, ...res.steps.flatMap((s) => s.highlight?.nodes || []), o.baseline_pick?.change] : [];
-  const chg = [...new Set(ids)].filter((id) => id && kindOf(id) === 'chg');
-  $('ask-chg').replaceChildren(...(chg.length ? chg.map((id) => h('option', { value: id }, short(id)
-    + (id === o.root_cause?.change ? ' · root cause' : refuted.has(id) ? ' · ruled out' : '')))
-    : [h('option', { value: '' }, 'run an act first')]));
+function renderAll() {
+  renderInbox();
+  renderScenarios();
+  const cur = state.current;
+  if (!cur) return renderLanding();
+  renderHead(cur);
+  renderProgress(cur);
+  renderAnswer(cur);
+  renderTrace(cur);
 }
 
-const whoKnows = (rows) => (rows.length ? h('ol', { class: 'people' }, rows.map((p) => h('li', {},
-  h('div', { class: 'who' }, h('span', {}, h('b', {}, p.name), ' ', h('span', { class: 'muted' }, `${p.handle} · ${p.team}`)),
-    h('span', { class: 'score' }, `score ${p.score}`)),
-  h('div', { class: 'why' }, [p.on_owning_team ? 'on the owning team' : null, `authored ${plural(p.changes, 'change')}`,
-    `paged for ${plural(p.incidents, 'incident')}`].filter(Boolean).join(' · ')))))
-  : h('p', { class: 'muted' }, 'Nobody on record for this service.'));
+function openRun(run) {
+  if (state.current === run) return;
+  showIncident(run);
+}
 
-const changeStory = (c) => [
-  h('p', { class: 'lead' }, h('b', {}, short(c.change)), ` on ${short(c.service)}`,
-    h('span', { class: 'muted' }, ` · ${c.kind}${c.at ? ` · ${ist(c.at)}` : ''}`)),
-  h('p', {}, c.summary),
-  h('p', {}, h('span', { class: 'k' }, 'By'), c.author ? `${c.author} (${c.team})` : 'unknown'),
-  c.sources.length ? h('ul', { class: 'sources' }, c.sources.map((s) => h('li', {},
-    h('span', { class: 'src' }, s.kind === 'Ticket' ? 'ticket' : s.channel || 'chat'), ' ',
-    s.title ? [h('b', {}, s.title), ' '] : null, h('span', { class: 'reason' }, s.text))))
-    : h('p', { class: 'muted' }, 'No ticket or chat message on record.'),
-  h('p', {}, h('span', { class: 'k' }, 'Caused'), c.incidents.map(short).join(', ') || 'no incidents'),
-];
-
-// Free-text question: the answer first, then what it rests on (hits, linked nodes, source ids).
-const kindPill = (kind) => h('span', { class: 'pill kind' }, kind);
-const askAnswer = (d) => [
-  h('p', { class: 'answer' }, d.answer),
-  d.hits?.length ? h('ol', { class: 'hits' }, d.hits.map((x) => h('li', {},
-    h('div', {}, kindPill(x.kind), ' ', h('b', {}, x.title),
-      x.superseded_by ? [' ', h('span', { class: 'pill out' }, `superseded by ${short(x.superseded_by)}`)] : null),
-    h('div', { class: 'reason' }, x.snippet)))) : null,
-  d.related?.length ? [h('p', { class: 'k' }, 'Related'), h('ul', { class: 'hits' }, d.related.map((r) => h('li', {},
-    kindPill(r.kind), ' ', h('b', {}, r.name), r.via ? h('span', { class: 'muted' }, ` · ${r.via}`) : null)))] : null,
-  d.sources?.length ? h('p', {}, h('span', { class: 'k' }, 'Sources'), d.sources.map((s) => h('span', { class: 'src' }, s)))
-    : null,
-];
-
-async function ask(tool, args, render) {
-  const out = $('ask-out');
-  out.replaceChildren(h('p', { class: 'muted' }, 'Querying FalkorDB…'));
+async function openStored(incident) {
   try {
-    const r = await api('POST', `${T()}/tools/${tool}`, args);
-    learnNames({ tool, data: r.data });
-    out.replaceChildren(h('div', { class: 'card brain' },
-      h('div', { class: 'card-head' }, h('span', { class: 'role brain' }, 'brain'), h('code', { class: 'tool' }, tool)),
-      render(r.data), cypherList(r.queries)));
-    const eles = elementsFor(r.highlight);
-    if (eles) paint(eles, near(eles));
+    const d = await api('GET', `${T()}/incidents/${enc(incident)}`);
+    const alerts = state.alerts.filter((a) => a.incident === incident);
+    const alert = { id: d.alert, name: d.alert_name, service: d.service, at: d.at };
+    showIncident({ stored: true, done: true, incident, alert, alerts: alerts.length ? alerts : [alert], home: d.service,
+      status: d.status, update_text: d.update_text, steps: d.steps, touched: G.empty(), cause: G.empty() });
   } catch (e) {
-    out.replaceChildren(h('p', { class: 'error' }, e.message));
+    toast(e.message, true);
   }
 }
 
-// ---------- scenario ----------
-function syncButtons() {
-  const b = state.busy, run = state.run;
-  $('btn-reset').disabled = b;
-  for (const n of ACTS) $(`btn-act${n}`).disabled = b || !state.alerts[n];
-  $('btn-resolve').disabled = b || !(run?.done && run.res.outcome.root_cause && !run.resolved);
-  for (const el of document.querySelectorAll('.controls .step')) el.classList.toggle('primary', !b && el.id === state.next);
-  if (OFFLINE) return;
-  $('ask-go').disabled = b;
-  $('ask-who').disabled = b || !$('ask-svc').value;
-  $('ask-why').disabled = b || !$('ask-chg').value;
+// ---------- actions ----------
+async function refreshAlerts() {
+  if (OFFLINE) return; // the recording does not change; runs carry their own status
+  try {
+    state.alerts = await api('GET', `${T()}/alerts`);
+  } catch { /* keep the old list; the next action reports a real outage */ }
+  renderAll();
 }
 
-async function busy(fn) {
-  state.busy = true;
-  syncButtons();
+function setRunning(on) {
+  state.running = on;
+  $('btn-reset').disabled = on;
+  renderScenarios();
+  if (!state.current) renderLanding();
+}
+
+async function fire(act) {
+  if (state.running) return;
+  const sc = scenarios().find((s) => s.act === act);
+  if (!sc) return;
+  const run = newRun(sc.trigger, sc.alerts, act);
+  state.runs.push(run);
+  state.skip = false;
+  setRunning(true);
+  showIncident(run);
+  showTab('answer');
+  replayGraph(run);
+  let last = 0;
   try {
-    await fn();
+    for await (const ev of runEvents(`${T()}/alerts/${enc(sc.trigger.id)}/respond/stream${act === 2 ? '?compare=memory' : ''}`)) {
+      if (ev.step) {
+        if (!state.skip) await sleep(Math.max(0, last + STEP_MS - performance.now()));
+        last = performance.now();
+        onStep(run, ev.step);
+      } else if (ev.result) onResult(run, ev.result);
+      else if (ev.ablation) {
+        run.ablation = ev.ablation;
+        if (state.current === run) renderAnswer(run);
+      } else if (ev.error) throw new Error(ev.error);
+    }
+    if (!run.done) throw new Error('the agent run ended without a result');
   } catch (e) {
-    status(e.message, true);
+    run.error = e.message;
+    run.done = true;
+    toast(`Agent run failed: ${e.message}`, true);
   } finally {
-    state.busy = false;
-    syncButtons();
+    setRunning(false);
+    await refreshAlerts();
   }
 }
 
-async function loadTenant() {
-  const alerts = await api('GET', `${T()}/alerts`);
-  state.acts = {};
-  state.alerts = {};
-  for (const a of [...alerts].sort((x, y) => x.at - y.at)) (state.acts[a.act] ||= []).push(a);
-  for (const [act, group] of Object.entries(state.acts)) {
-    const a = state.alerts[act] = group.at(-1); // the act's last alert to fire is the one the agents respond to
-    const btn = $(`btn-act${act}`);
-    if (!btn) continue;
-    btn.replaceChildren(btn.querySelector('b'), ` Act ${act}: ${group.length > 1
-      ? `${COUNT[group.length] || group.length} alerts at once`
-      : `${short(a.service)} is ${a.symptom === 'latency' ? 'slow' : a.symptom}`}`);
-    btn.title = group.map((x) => x.name).join('\n');
-  }
-  const g = await api('GET', `${T()}/graph`);
-  buildGraph(g);
-  if (!OFFLINE) $('ask-svc').replaceChildren(...[...g.nodes].sort((a, b) => a.name.localeCompare(b.name))
-    .map((n) => h('option', { value: n.id }, n.name)));
-  fillAsk();
+function onStep(run, step) {
+  run.steps.push(step);
+  learnNames(step);
+  if (step.tool === 'open_incident' && step.data?.incident) run.incident = step.data.incident;
+  if (step.tool === 'correlate_alerts') run.folded = true;
+  if (state.graphOwner === run) applyStep(run, step, true);
+  renderInbox();
+  if (state.current !== run) return;
+  renderHead(run);
+  renderProgress(run);
+  appendTrace(run, step);
+  if (step.tool === 'post_update') renderAnswer(run);
 }
 
-function clearRun() {
-  state.run = null;
-  $('trace').replaceChildren();
-  $('trace-count').textContent = '';
-  hudIdle();
-  intro();
-  resetGraphView();
-  fillAsk();
+function onResult(run, res) {
+  run.res = res;
+  run.incident = res.incident_id;
+  run.done = true;
+  run.folded = true;
+  if (state.graphOwner === run) finalPaint(run);
+  if (state.current === run) renderAll();
+  const rc = res.outcome.root_cause;
+  toast(rc ? `Cause found: ${short(rc.change)} on ${short(rc.service)}. Confirm it to save the fix to memory.`
+    : 'No change explains this alert; the update asks a human to look.');
+}
+
+async function resolve(cur, change) {
+  try {
+    const r = await api('POST', `${T()}/incidents/${enc(cur.incident)}/resolve`, { change_id: change });
+    cur.resolved = r;
+    cur.showAlt = false;
+    if (r.data) names.set(r.data.runbook, 'runbook');
+    if (state.graphOwner === cur) finalPaint(cur);
+    toast(r.summary);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  await refreshAlerts();
 }
 
 async function doReset() {
-  const r = await api('POST', `${T()}/reset`);
-  names.clear();
-  await loadTenant();
-  clearRun();
-  state.next = 'btn-act1';
-  status(r.status === 'seeded' ? 'Seeded the synthetic company graph.' : 'Graph restored from the pristine copy (GRAPH.COPY).');
+  if (state.running) return;
+  try {
+    const r = await api('POST', `${T()}/reset`);
+    names.clear();
+    Object.assign(state, { runs: [], chat: [], graphOwner: null });
+    await loadTenant();
+    showIncident(null);
+    toast(r.status === 'seeded' ? 'Loaded the demo company into FalkorDB.' : 'Demo reset: the graph was restored from its pristine copy (GRAPH.COPY).');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
-async function doAct(act) {
-  const alert = state.alerts[act];
-  status(`Agents are working on “${alert.name}”…`);
-  // Act 2 also replays the same alert on the pristine graph (no act-1 memory): the response's `ablation`.
-  const res = await api('POST', `${T()}/alerts/${encodeURIComponent(alert.id)}/respond${act === 2 ? '?compare=memory' : ''}`);
-  clearRun();
-  showTab(false);
-  const cy = state.cy;
-  state.run = { res, act, calls: 0, hyps: 0, done: false, resolved: false,
-    touched: cy ? cy.collection() : null, cause: cy ? cy.collection() : null };
-  cy?.getElementById(res.alert.service).addClass('alerting');
-  const group = state.acts[act] || [];
-  $('hud').replaceChildren(...(group.length > 1
-    ? [h('span', { class: 'pill alert' }, 'ALERTS'), h('b', {}, `${group.length} alerts in `
-      + `${plural(Math.round((group.at(-1).at - group[0].at) / 60), 'minute')}: ${group.map((a) => short(a.service)).join(', ')}`),
-      h('span', { class: 'muted' }, `${ist(res.alert.at)} · ${res.incident_id}`)]
-    : [h('span', { class: 'pill alert' }, 'ALERT'), h('b', {}, res.alert.alert),
-      h('span', { class: 'muted' }, `${short(res.alert.service)} · ${ist(res.alert.at)} · ${res.incident_id}`)]));
-  $('outcome').replaceChildren();
-  renderCounter();
-  status(`Act ${act}: replaying ${res.steps.length} agent steps (planner: ${res.planner}).`);
-  state.skip = false;
-  $('btn-skip').hidden = false;
-  for (let i = 0; i < res.steps.length; i++) {
-    reveal(i);
-    if (!state.skip) await sleep(res.steps[i].tool === 'handoff' ? STEP_MS * 0.7 : STEP_MS);
-  }
-  $('btn-skip').hidden = true;
-  state.run.done = true;
-  const o = res.outcome;
-  renderOutcome();
-  fillAsk();
-  // Memory moment: draw new incident -> recalled incident -> its runbook (the chain the recall query walked).
-  const memo = o.memory.solved_by_memory ? elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
-    [[res.incident_id, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }) : null;
-  if (memo) state.run.touched = state.run.touched.union(memo);
-  // End on the answer, big enough to read: the whole run spans most of the graph (labels ~10px at 1080p). A storm
-  // ends on the alerting services, shared upstream and cause; otherwise the cause path and the memory chain.
-  const cause = state.run.cause, storm = o.storm && state.cy ? state.cy.$('.storm, .shared') : null;
-  paint(memo, storm ? cause.union(storm) : cause?.nonempty() ? (memo ? cause.union(memo) : cause) : null);
-  state.next = o.root_cause ? 'btn-resolve' : 'btn-reset';
-  status(o.root_cause ? `Act ${act} done: ${short(o.root_cause.change)} on ${short(o.root_cause.service)} in `
-    + `${o.investigator_calls} investigator calls. Confirm it to save the fix to memory.` : `Act ${act} done: no root cause.`);
+// ---------- ask the brain ----------
+function brainMessage(m) {
+  if (m.pending) return h('div', { class: 'msg brain' }, h('p', { class: 'muted' }, h('span', { class: 'spinner' }), 'Searching the graph…'));
+  if (m.error) return h('div', { class: 'msg brain' }, h('p', { class: 'error' }, m.error));
+  const d = m.data;
+  return h('div', { class: 'msg brain' },
+    h('p', { class: 'answer' }, d.answer),
+    d.hits?.length ? [h('p', { class: 'k' }, 'Sources'), h('ol', { class: 'hits' }, d.hits.map((x) => h('li', {},
+      h('div', {}, h('span', { class: 'pill kind' }, x.kind), ' ', h('b', {}, x.title),
+        x.superseded_by ? [' ', h('span', { class: 'pill out' }, `superseded by ${short(x.superseded_by)}`)] : null),
+      h('div', { class: 'reason' }, x.snippet))))] : null,
+    d.related?.length ? [h('p', { class: 'k' }, 'Linked in the graph'), h('div', { class: 'chips' }, d.related.map((r) =>
+      h('span', { class: 'chip-static' }, h('span', { class: 'pill kind' }, r.kind), ' ', r.name)))] : null,
+    cypherList(m.queries));
 }
 
-async function doResolve() {
-  const run = state.run, change = run.res.outcome.root_cause.change;
-  const r = await api('POST', `${T()}/incidents/${encodeURIComponent(run.res.incident_id)}/resolve`, { change_id: change });
-  run.resolved = true;
-  if (r.data) names.set(r.data.runbook, 'runbook');
-  renderLearned(r);
-  const eles = elementsFor(r.highlight);
-  if (eles) {
-    run.touched = run.touched.union(eles);
-    paint(eles, near(eles));
+function renderChat() {
+  const log = $('chat-log');
+  if (!state.chat.length) {
+    log.replaceChildren(h('div', { class: 'chat-empty' },
+      h('h2', {}, 'Ask the company brain'),
+      h('p', { class: 'muted' }, 'Answers come from the same graph the agents use: services, owners, on-call, changes, '
+        + 'past incidents, docs, tickets and chat. Every answer cites its sources. No LLM writes it: it is assembled '
+        + 'from graph facts and quoted text.'),
+      OFFLINE ? h('p', { class: 'note' }, 'This page is a recorded replay, so questions need the live server '
+        + '(run make dev and open it without ?offline=1). Questions it answers, for example:') : null,
+      h('div', { class: 'chips' }, EXAMPLES.map((q) => h('button', { class: 'chip-btn', disabled: OFFLINE, onclick: () => askQ(q) }, q)))));
+    return;
   }
-  state.next = state.alerts[run.act + 1] ? `btn-act${run.act + 1}` : 'btn-reset';
-  status(r.summary);
+  log.replaceChildren(...state.chat.map((m) => (m.who === 'you' ? h('div', { class: 'msg you' }, m.text) : brainMessage(m))));
+  log.scrollTop = log.scrollHeight;
+}
+
+async function askQ(q) {
+  if (!q || state.asking || OFFLINE) return;
+  state.asking = true;
+  $('ask-go').disabled = true;
+  const m = { who: 'brain', pending: true };
+  state.chat.push({ who: 'you', text: q }, m);
+  renderChat();
+  try {
+    const r = await api('POST', `${T()}/tools/ask`, { question: q });
+    Object.assign(m, { pending: false, data: r.data, queries: r.queries });
+    learnNames({ tool: 'ask', data: r.data });
+    if (state.view === 'ask' && G.ready()) {
+      state.graphOwner = 'ask';
+      G.clear(false);
+      const eles = G.elementsFor(r.highlight, null);
+      G.paint(null, eles, eles?.nonempty() ? G.near(eles) : null);
+    }
+  } catch (e) {
+    Object.assign(m, { pending: false, error: e.message });
+  } finally {
+    state.asking = false;
+    $('ask-go').disabled = false;
+    renderChat();
+  }
+}
+
+// ---------- connect ----------
+function renderConnect() {
+  const origin = OFFLINE ? 'http://localhost:8000' : location.origin;
+  const code = (text) => h('pre', { class: 'code' }, text);
+  const card = (title, ...kids) => h('div', { class: 'card connect-card' }, h('h3', {}, title), ...kids);
+  $('connect').replaceChildren(
+    h('div', { class: 'connect-intro' }, h('h2', {}, 'Plug it into your stack'),
+      h('p', { class: 'muted' }, 'Every agent tool is defined once and exposed three ways: to the agents, over MCP, and over HTTP.')),
+    h('div', { class: 'connect-grid' },
+      card('Use it from Claude Code (MCP)',
+        h('p', {}, 'The same graph tools the agents use (blast radius, dependency paths, suspects, who knows, ask…) plus '
+          + '“respond to alert”, for any MCP client.'),
+        code('claude mcp add --transport stdio oncall-brain -- \\\n  <venv>/bin/python -m oncall_brain.mcp_server'),
+        h('p', { class: 'muted small' }, 'Then ask Claude: “checkout is slow. Use oncall-brain to find out why.” '
+          + 'Over HTTP instead: python -m oncall_brain.mcp_server --http --port 8001')),
+      card('Send alerts in (webhook)',
+        h('p', {}, 'Point your alerting tool at this endpoint (map its payload to service, symptom and name). With '
+          + 'respond=true the agents start on it right away.'),
+        code(`curl -X POST '${origin}${T()}/alerts?respond=true' \\\n  -H 'content-type: application/json' \\\n`
+          + `  -d '{"service": "svc:checkout", "symptom": "latency",\n       "name": "checkout p99 latency above 2s"}'`),
+        h('p', { class: 'muted small' }, 'symptom is latency, errors or saturation. New alerts show up in the inbox.')),
+      card('Post updates to Slack',
+        state.health?.slack ? h('p', { class: 'ok-line' }, '✓ Connected: every status update is also posted to your channel.')
+          : h('p', {}, 'Not connected. Create an incoming webhook in Slack (Apps → Incoming Webhooks), then add it to .env '
+            + 'and restart:'),
+        state.health?.slack ? null : code('SLACK_WEBHOOK_URL=https://hooks.slack.com/services/…')),
+      card('Bring your own data',
+        h('p', {}, `This demo runs on a synthetic company (${state.stats || 'services, teams, people, changes'}). Real `
+          + 'systems feed the same graph as things happen, through write tools on MCP and HTTP:'),
+        h('ul', { class: 'small' },
+          h('li', {}, h('code', {}, 'record_change'), ' from CI/CD (deploys, config changes)'),
+          h('li', {}, h('code', {}, 'record_anomaly'), ' and ', h('code', {}, 'raise_alert'), ' from monitoring'),
+          h('li', {}, h('code', {}, 'add_dependency'), ' / ', h('code', {}, 'retire_dependency'), ' from the service catalog')),
+        h('p', { class: 'muted small' }, 'Every write is an idempotent MERGE, so replays and retries are safe.')),
+      card('Who decides each step',
+        h('p', {}, 'Now: ', h('b', {}, plannerName()), '. Set LLM_PROVIDER (anthropic, openai, gemini, groq, ollama…) and a key '
+          + 'in .env to let a model choose the tools; without one, rules choose each step from what the graph returns. '
+          + 'Either way, every fact comes from a Cypher query.')),
+      card('Each company is its own graph',
+        h('p', {}, 'One FalkorDB graph per tenant: memory, incidents and knowledge never mix between companies. This page '
+          + 'shows tenant ', h('b', {}, state.tenant), '; add ?tenant=<name> to the URL and Reset demo to try another.'))));
+}
+
+// ---------- startup ----------
+async function loadTenant() {
+  state.alerts = await api('GET', `${T()}/alerts`);
+  const g = await api('GET', `${T()}/graph`);
+  state.caption = G.build($('graph'), g);
+  state.stats = `${g.nodes.length} services, ${new Set(g.nodes.map((n) => n.team)).size} teams, ${g.edges.length} dependencies`;
+  state.graphOwner = null;
+  hudFor(null);
 }
 
 async function init() {
-  $('btn-reset').onclick = () => busy(doReset);
-  for (const n of ACTS) $(`btn-act${n}`).onclick = () => busy(() => doAct(n));
-  $('btn-resolve').onclick = () => busy(doResolve);
+  for (const b of document.querySelectorAll('.view-tab')) b.onclick = () => showView(b.dataset.view);
+  $('tab-answer').onclick = () => showTab('answer');
+  $('tab-why').onclick = () => showTab('why');
+  $('btn-reset').onclick = doReset;
   $('btn-skip').onclick = () => { state.skip = true; };
   $('trace').addEventListener('click', onTraceClick);
   $('trace').addEventListener('keydown', (e) => { if (e.key === 'Enter') onTraceClick(e); });
-  $('tab-trace').onclick = () => showTab(false);
-  $('tab-ask').onclick = () => showTab(true);
-  if (OFFLINE) {
-    $('ask').replaceChildren(h('div', { class: 'card note' },
-      h('p', {}, 'Ask the brain runs live Cypher against FalkorDB, so it needs the live API: start the server and open '
-        + 'this page without ?offline=1. Questions it answers, for example:'),
-      h('ul', { class: 'examples' }, EXAMPLES.map((q) => h('li', {}, q)))));
-  } else {
-    $('ask-q').placeholder = EXAMPLES[0];
-    $('ask-form').onsubmit = (e) => {
-      e.preventDefault(); // the native form gives Enter-to-ask; never navigate
-      busy(() => ask('ask', { question: $('ask-q').value.trim() }, askAnswer));
-    };
-    $('ask-who').onclick = () => busy(() => ask('who_knows', { service: $('ask-svc').value }, whoKnows));
-    $('ask-why').onclick = () => busy(() => ask('change_story', { change_id: $('ask-chg').value }, changeStory));
-  }
-  intro();
-  syncButtons();
+  $('ask-form').onsubmit = (e) => {
+    e.preventDefault(); // the native form gives Enter-to-ask; never navigate
+    const q = $('ask-q').value.trim();
+    $('ask-q').value = '';
+    askQ(q);
+  };
+  if (OFFLINE) $('ask-q').disabled = $('ask-go').disabled = true;
+  placeGraph();
+  showIncident(null);
   try {
-    const hl = await api('GET', '/api/health');
+    const hl = state.health = await api('GET', '/api/health');
     const tenant = params.get('tenant');
     state.tenant = tenant && /^[a-z0-9_]{1,40}$/.test(tenant) ? tenant : hl.default_tenant;
-    $('tenant').textContent = `tenant: ${state.tenant}`;
+    $('tenant').textContent = `company: ${state.tenant}`;
     if (OFFLINE) { // a recording, not a connection: no green dot
       $('db').textContent = 'recorded replay';
       $('db').title = 'Replaying runs recorded from the real code (web/fixtures); no FalkorDB behind this page';
     } else {
       $('db').textContent = hl.falkordb ? 'FalkorDB' : 'FalkorDB down';
-      $('db').title = hl.falkordb ? 'FalkorDB connected' : 'FalkorDB unreachable';
       $('db').classList.add(hl.falkordb ? 'ok' : 'bad');
     }
-    $('planner').textContent = /deterministic|mock/i.test(hl.planner)
-      ? 'deterministic planner: rules choose each step from what the graph returns' : `LLM planner: ${hl.planner}`;
+    $('planner').textContent = /deterministic|mock/i.test(hl.planner) ? 'planner: rules' : `planner: ${plannerName()}`;
+    $('planner').title = hl.planner;
   } catch (e) {
-    if (!OFFLINE) {  // no backend (e.g. a static host): replay the recorded fixtures instead
+    if (!OFFLINE) { // no backend (e.g. a static host): replay the recorded runs instead
       params.set('offline', '1');
       location.search = params.toString();
       return;
     }
-    status(`Could not load the recorded fixtures (${e.message}).`, true);
+    toast(`Could not load the recordings (${e.message}).`, true);
     return;
   }
-  await busy(async () => {
-    try {
-      await loadTenant();
-      status('Ready. Reset the demo, then run act 1.');
-    } catch (e) {
-      status(`${e.message}. Press “Reset demo” to seed tenant ${state.tenant}.`, true);
-    }
-  });
+  try {
+    await loadTenant();
+  } catch (e) {
+    toast(`${e.message}. Press “Reset demo” to load the demo company.`, true);
+  }
+  renderAll();
 }
 
 init();

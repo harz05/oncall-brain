@@ -4,7 +4,7 @@ resolve an incident (the human-confirmed fix that becomes memory)."""
 from typing import Any
 
 from oncall_brain.agents import registry
-from oncall_brain.agents.loop import record, run_role
+from oncall_brain.agents.loop import OnStep, record, run_role
 from oncall_brain.agents.registry import ToolContext
 from oncall_brain.domain.models import ToolOutput, TraceStep
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, WINDOW
@@ -14,12 +14,13 @@ from oncall_brain.ports import GraphRepository, GraphStore, LLMProvider
 from oncall_brain.services import tools as _tools  # noqa: F401
 
 
-def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str, Any]:
+def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None = None) -> dict[str, Any]:
+    """on_step is called with each step as it is recorded, so a caller can stream the run while it happens."""
     with repo.lock():  # one agent run per tenant at a time (see FalkorRepository.lock)
-        return _respond(repo, alert_id, llm)
+        return _respond(repo, alert_id, llm, on_step)
 
 
-def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str, Any]:
+def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None) -> dict[str, Any]:
     trace: list[TraceStep] = []
     # Another responder may already have folded this alert into its incident (an alert storm): join that incident.
     joined = (repo.read("open_incident_for_alert", alert_id=alert_id).rows or [None])[0]
@@ -31,10 +32,10 @@ def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider) -> dict[str
     record(repo, incident_id, trace,
            TraceStep(seq=1, role="triage", tool="open_incident", reason="An alert fired; open the shared board.",
                      summary=out.summary, writes=True, queries=out.queries, highlight=out.highlight,
-                     data=out.data), alert_id)
+                     data=out.data), alert_id, on_step)
     role: str | None = "triage"
     while role:
-        role = run_role(role, repo, incident_id, llm, trace)
+        role = run_role(role, repo, incident_id, llm, trace, on_step)
     return {"incident_id": incident_id, "alert": out.data, "planner": llm.name, "steps": trace,
             "joined": {"alert": asked, "incident": incident_id} if joined else None,
             "outcome": outcome(repo, incident_id, trace)}

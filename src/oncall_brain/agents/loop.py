@@ -4,6 +4,8 @@ Every step is returned in the trace AND persisted as an AgentStep node on the in
 decision (by this role or the next one) sees it. Handoffs between roles are steps too.
 """
 
+from collections.abc import Callable
+
 from pydantic import ValidationError
 
 from oncall_brain.agents import registry
@@ -16,20 +18,25 @@ from oncall_brain.services.board import load_board
 MAX_STEPS_PER_ROLE = 40
 NEXT_ROLE = {"triage": "investigator", "investigator": "comms", "comms": None}
 
+OnStep = Callable[[TraceStep], None]  # called with each step as soon as it is recorded (the UI's live stream)
+
 
 def _target(args: dict) -> str:
     return str(args.get("service") or args.get("hypothesis_id") or args.get("incident_id") or "")
 
 
-def record(repo: GraphRepository, incident_id: str, trace: list[TraceStep], step: TraceStep, target: str) -> None:
+def record(repo: GraphRepository, incident_id: str, trace: list[TraceStep], step: TraceStep, target: str,
+           on_step: OnStep | None = None) -> None:
     trace.append(step)
     repo.write("log_step", incident_id=incident_id, role=step.role, tool=step.tool, target=target,
                reason=step.reason, summary=step.summary, rows=sum(q.row_count for q in step.queries),
                ms=round(sum(q.ms for q in step.queries), 2), writes=step.writes)
+    if on_step:
+        on_step(step)
 
 
 def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvider,
-             trace: list[TraceStep]) -> str | None:
+             trace: list[TraceStep], on_step: OnStep | None = None) -> str | None:
     """Run one role until it is done. Returns the role it hands off to (or None)."""
     ctx = ToolContext(repo)
     specs = registry.specs(agents_only=True)
@@ -37,7 +44,7 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
         board, board_q = load_board(repo, incident_id)
         d = llm.decide(role, board, specs)
         if d.action == "done":
-            return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q)
+            return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q, on_step)
         try:
             out, tool, args = _call(ctx, d, incident_id)
         except (KeyError, ValueError, ValidationError) as e:
@@ -45,17 +52,17 @@ def run_role(role: str, repo: GraphRepository, incident_id: str, llm: LLMProvide
             # deterministic planner pick this step instead, and say so in the trace.
             d = next_decision(role, board)
             if d.action == "done":
-                return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q)
+                return _handoff(repo, incident_id, trace, role, d.handoff_to, d.reason, board_q, on_step)
             d = d.model_copy(update={"reason": f"fallback after tool error ({e}): {d.reason}"})
             out, tool, args = _call(ctx, d, incident_id)
         record(repo, incident_id, trace,
                TraceStep(seq=len(trace) + 1, role=role, tool=d.tool, reason=d.reason, summary=out.summary,
                          writes=tool.writes, queries=[board_q, *out.queries], highlight=out.highlight,
-                         data=out.data), _target(args))
+                         data=out.data), _target(args), on_step)
     # Out of budget: hand the board on rather than fail the incident; the next role works with what exists.
     board, board_q = load_board(repo, incident_id)
     return _handoff(repo, incident_id, trace, role, NEXT_ROLE[role],
-                    f"step budget ({MAX_STEPS_PER_ROLE}) used up; handing on what the board has", board_q)
+                    f"step budget ({MAX_STEPS_PER_ROLE}) used up; handing on what the board has", board_q, on_step)
 
 
 def _call(ctx: ToolContext, d: Decision, incident_id: str):
@@ -68,9 +75,9 @@ def _call(ctx: ToolContext, d: Decision, incident_id: str):
     return registry.call(d.tool, ctx, args), tool, args
 
 
-def _handoff(repo, incident_id, trace, role, nxt, reason, board_q) -> str | None:
+def _handoff(repo, incident_id, trace, role, nxt, reason, board_q, on_step=None) -> str | None:
     record(repo, incident_id, trace,
            TraceStep(seq=len(trace) + 1, role=role, tool="handoff", reason=reason,
                      summary=f"{role} hands off to {nxt or 'human'}", writes=True, queries=[board_q]),
-           nxt or "human")
+           nxt or "human", on_step)
     return nxt

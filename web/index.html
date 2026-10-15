@@ -17,74 +17,112 @@
       <span class="logo" aria-hidden="true"></span>
       <div>
         <h1>On-call Brain</h1>
-        <p class="tagline">Incident agents that reason over a FalkorDB graph and remember what fixed things</p>
+        <p class="tagline">Your AI on-call teammate</p>
       </div>
     </div>
+    <nav class="views" aria-label="Views">
+      <button class="view-tab" data-view="incidents" aria-current="page">Incidents</button>
+      <button class="view-tab" data-view="ask">Ask the brain</button>
+      <button class="view-tab" data-view="connect">Connect</button>
+    </nav>
     <div class="meta">
-      <span class="chip" id="tenant" title="Each tenant is its own FalkorDB graph">tenant: …</span>
       <span class="chip" id="db" title="FalkorDB connection">FalkorDB …</span>
       <span class="chip planner" id="planner">planner …</span>
+      <span class="chip" id="tenant" title="Each company (tenant) is its own FalkorDB graph">…</span>
+      <button id="btn-reset" class="ghost" title="Restore the demo company to its starting state">Reset demo</button>
     </div>
   </header>
 
-  <nav class="controls" aria-label="Demo scenario">
-    <button id="btn-reset" class="step"><b>0</b> Reset demo</button>
-    <button id="btn-act1" class="step" disabled><b>1</b> Act 1</button>
-    <button id="btn-resolve" class="step" disabled><b>2</b> Confirm root cause → save to memory</button>
-    <button id="btn-act2" class="step" disabled><b>3</b> Act 2</button>
-    <button id="btn-act3" class="step" disabled><b>4</b> Act 3</button>
-    <span id="status" class="status" role="status"></span>
-  </nav>
+  <main>
+    <!-- ======================= Incidents ======================= -->
+    <section id="view-incidents" class="view incidents">
+      <aside class="inbox-panel">
+        <div class="panel-head"><h2>Incidents</h2><span id="inbox-count" class="muted"></span></div>
+        <ul id="inbox" class="inbox" aria-label="Incidents"></ul>
+        <div class="story">
+          <h3>Demo alerts</h3>
+          <p class="muted small">A synthetic company. Fire them in order; each one runs the agents live.</p>
+          <ol id="scenarios" class="scenarios"></ol>
+        </div>
+      </aside>
 
-  <main class="layout">
-    <section class="stage">
-      <div class="graph-wrap">
-        <div id="graph" aria-label="Service dependency graph"></div>
-        <div class="hud" id="hud"></div>
-        <ul class="legend" aria-label="Legend">
-          <li><i class="lg svc"></i>service</li>
-          <li><i class="lg t1"></i>tier-1</li>
-          <li><i class="lg alerting"></i>alerting</li>
-          <li><i class="lg shared"></i>shared upstream</li>
-          <li><i class="lg chg"></i>change</li>
-          <li><i class="lg person"></i>person</li>
-          <li><i class="lg team"></i>team</li>
-          <li><i class="lg inc"></i>incident</li>
-          <li><i class="lg rb"></i>runbook</li>
-          <li><i class="ln retired"></i>retired dependency</li>
-          <li><i class="ln cause"></i>root-cause path</li>
-          <li><i class="ln memory"></i>memory link</li>
-        </ul>
+      <div class="incident-main">
+        <div id="landing" class="landing"></div>
+
+        <div id="incident" class="incident" hidden>
+          <div class="incident-head">
+            <div class="incident-title">
+              <span id="inc-status" class="status-pill"></span>
+              <h2 id="inc-title"></h2>
+              <span id="inc-sub" class="muted"></span>
+            </div>
+            <div class="seg" role="tablist" aria-label="Incident view">
+              <button id="tab-answer" role="tab" aria-selected="true">Answer</button>
+              <button id="tab-why" role="tab" aria-selected="false" title="The graph, every agent step and its Cypher">Show me why</button>
+            </div>
+          </div>
+
+          <div id="answer-view" class="answer-view" role="tabpanel" aria-labelledby="tab-answer">
+            <div id="progress" class="progress" aria-live="polite"></div>
+            <div class="answer-grid">
+              <div id="answer-main" class="answer-main"></div>
+              <div id="answer-side" class="answer-side"></div>
+            </div>
+          </div>
+
+          <div id="why-view" class="why-view" role="tabpanel" aria-labelledby="tab-why" hidden>
+            <div class="why-graph" id="why-graph-slot"></div>
+            <aside class="trace-panel">
+              <div class="trace-head">
+                <h3>Agent steps</h3>
+                <span id="trace-count" class="muted"></span>
+                <button id="btn-skip" class="ghost" hidden title="Show the remaining steps at once">Skip animation</button>
+              </div>
+              <ol id="trace" class="trace"></ol>
+            </aside>
+          </div>
+        </div>
       </div>
-      <div class="outcome" id="outcome"></div>
     </section>
 
-    <aside class="trace-panel">
-      <div class="trace-head">
-        <div class="tabs" role="tablist">
-          <button id="tab-trace" class="tab" role="tab" aria-selected="true" aria-controls="trace">Agent trace</button>
-          <button id="tab-ask" class="tab" role="tab" aria-selected="false" aria-controls="ask"
-                  title="Company brain: ask a question, who knows a service, where a change came from">Ask the brain</button>
-        </div>
-        <span id="trace-count" class="muted" title="steps revealed"></span>
-        <button id="btn-skip" class="ghost" hidden title="Skip animation">Skip</button>
+    <!-- ======================= Ask the brain ======================= -->
+    <section id="view-ask" class="view ask-view" hidden>
+      <div class="chat">
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+        <form id="ask-form" class="chat-input">
+          <input id="ask-q" type="text" required maxlength="300" autocomplete="off"
+                 placeholder="Ask about services, owners, decisions, past incidents…" aria-label="Ask the company brain">
+          <button id="ask-go" class="primary-btn">Ask</button>
+        </form>
       </div>
-      <ol id="trace" class="trace" role="tabpanel" aria-labelledby="tab-trace"></ol>
-      <div id="ask" class="ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
-        <div class="card ask-form">
-          <form id="ask-form" class="ask-row">
-            <input id="ask-q" type="text" required maxlength="300" autocomplete="off" aria-label="Ask the company brain a question">
-            <button id="ask-go" class="ghost">Ask</button>
-          </form>
-          <p class="k quick">Quick actions</p>
-          <label for="ask-svc">Who knows this service?</label>
-          <div class="ask-row"><select id="ask-svc"></select><button id="ask-who" class="ghost" disabled>Ask</button></div>
-          <label for="ask-chg">Why did this change?</label>
-          <div class="ask-row"><select id="ask-chg"></select><button id="ask-why" class="ghost" disabled>Ask</button></div>
-        </div>
-        <div id="ask-out"></div>
-      </div>
-    </aside>
+      <div class="ask-graph" id="ask-graph-slot"></div>
+    </section>
+
+    <!-- ======================= Connect ======================= -->
+    <section id="view-connect" class="view connect-view" hidden>
+      <div id="connect" class="connect"></div>
+    </section>
+
+    <!-- The one graph canvas; moved between "Show me why" and "Ask the brain". -->
+    <div id="graph-wrap" class="graph-wrap">
+      <div class="hud" id="hud"></div>
+      <div id="graph" aria-label="Service dependency graph"></div>
+      <ul class="legend" aria-label="Legend">
+        <li><i class="lg t1"></i>tier-1 service</li>
+        <li><i class="lg alerting"></i>alerting</li>
+        <li><i class="lg shared"></i>shared upstream</li>
+        <li><i class="lg chg"></i>change</li>
+        <li><i class="lg person"></i>person</li>
+        <li><i class="lg team"></i>team</li>
+        <li><i class="lg inc"></i>incident</li>
+        <li><i class="lg rb"></i>runbook</li>
+        <li><i class="ln retired"></i>retired dependency</li>
+        <li><i class="ln cause"></i>root-cause path</li>
+        <li><i class="ln memory"></i>memory link</li>
+      </ul>
+    </div>
   </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

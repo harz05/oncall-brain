@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     api_token: str = _secret()  # when set, /api/* except /api/health needs "Authorization: Bearer <token>"
     max_tenants: int = 20  # most tenant graphs a reset may create (~5 MB each)
 
+    # Optional: post each status update to Slack through an incoming webhook (adapters/slack.py).
+    slack_webhook_url: str = _secret()
+
     def hosts(self) -> list[str]:
         return LOCAL_HOSTS + [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
