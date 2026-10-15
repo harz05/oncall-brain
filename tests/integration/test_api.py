@@ -65,3 +65,10 @@ def test_graph_tools_and_errors(api):
     bad = c.post(f"{base}/tools/dependency_path", json={})
     assert bad.status_code == 422 and isinstance(bad.json()["detail"], str)
     assert c.get("/api/health").json()["falkordb"] is True
+
+
+def test_index_serves_the_web_ui(api):
+    c, _ = api
+    r = c.get("/")
+    assert r.status_code == 200 and "/web/app.js" in r.text
+    assert c.get("/web/app.js").status_code == 200

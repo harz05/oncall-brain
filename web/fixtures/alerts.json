@@ -1,0 +1,18 @@
+[
+ {
+  "id": "alert:checkout-latency",
+  "name": "checkout p99 latency above 2s",
+  "service": "svc:checkout",
+  "symptom": "latency",
+  "at": 1792036800,
+  "act": 1
+ },
+ {
+  "id": "alert:refunds-latency",
+  "name": "refunds p99 latency above 2s",
+  "service": "svc:refunds",
+  "symptom": "latency",
+  "at": 1792296000,
+  "act": 2
+ }
+]

@@ -35,6 +35,11 @@ def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str
     return out.model_dump()
 
 
+def out_service(trace: list[TraceStep]) -> str | None:
+    """The alerting service (from the open_incident step)."""
+    return next((s.data["service"] for s in trace if s.tool == "open_incident"), None)
+
+
 def _data(trace: list[TraceStep], tool: str, role: str | None = None) -> list[Any]:
     return [s.data for s in trace if s.tool == tool and (role is None or s.role == role) and s.data]
 
@@ -63,9 +68,9 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
                    "suspects": memory[0] if memory else [],
                    "solved_by_memory": bool(supported and memory and any(
                        m["change"] == supported[0]["change"] for m in memory[0]))},
-        "paged": _data(trace, "page_on_call"),
+        "paged": list({p["person"]: p for p in _data(trace, "page_on_call")}.values()),
         "blast_radius": sorted(direct),
-        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct),
+        "at_risk": sorted({r["service"] for r in at_risk_rows} - direct - {out_service(trace)}),
         "update_text": updates[0]["text"] if updates else None,
         "investigator_calls": len(investigator),
         "hypotheses_checked": len(checks),

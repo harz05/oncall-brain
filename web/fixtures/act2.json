@@ -1,0 +1,2373 @@
+{
+ "incident_id": "inc:refunds-latency",
+ "alert": {
+  "incident": "inc:refunds-latency",
+  "status": "open",
+  "service": "svc:refunds",
+  "at": 1792296000,
+  "symptom": "latency",
+  "alert": "refunds p99 latency above 2s"
+ },
+ "planner": "deterministic planner",
+ "steps": [
+  {
+   "seq": 1,
+   "role": "triage",
+   "tool": "open_incident",
+   "reason": "An alert fired; open the shared board.",
+   "summary": "Opened inc:refunds-latency for 'refunds p99 latency above 2s' on svc:refunds",
+   "writes": true,
+   "queries": [
+    {
+     "name": "open_incident",
+     "cypher": "// purpose: Open the incident for an alert (idempotent). The incident is the shared board every agent reads and writes.\nMATCH (a:Alert {id: $alert_id})-[:FIRED_ON]->(s:Service)\nMERGE (i:Incident {id: $incident_id})\nON CREATE SET i.status = 'open', i.opened_at = a.at, i.symptom = a.symptom, i.title = a.name\nMERGE (i)-[:TRIGGERED_BY]->(a)\nMERGE (i)-[:IMPACTS {hops: 0}]->(s)\nRETURN i.id AS incident, i.status AS status, s.id AS service, a.at AS at, a.symptom AS symptom, a.name AS alert",
+     "params": {
+      "alert_id": "alert:refunds-latency",
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.63,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:refunds"
+    ],
+    "edges": []
+   },
+   "data": {
+    "incident": "inc:refunds-latency",
+    "status": "open",
+    "service": "svc:refunds",
+    "at": 1792296000,
+    "symptom": "latency",
+    "alert": "refunds p99 latency above 2s"
+   }
+  },
+  {
+   "seq": 2,
+   "role": "triage",
+   "tool": "blast_radius",
+   "reason": "Who is hurt? Walk DEPENDS_ON backwards from svc:refunds.",
+   "summary": "3 services depend on svc:refunds (3 tier-1)",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": null,
+         "change_id": null,
+         "hops": null,
+         "id": null,
+         "service": null,
+         "source": null,
+         "status": null
+        }
+       ],
+       "recalls": [
+        {
+         "incident": null,
+         "score": null,
+         "cause_service": null
+        }
+       ]
+      }
+     ],
+     "ms": 0.73,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.28,
+     "readonly": true
+    },
+    {
+     "name": "blast_radius",
+     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH p = (caller:Service)-[:DEPENDS_ON*1..6]->(:Service {id: $service})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH caller, p\nORDER BY length(p)\nWITH caller, collect(p)[0] AS p\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path\nORDER BY hops, service",
+     "params": {
+      "service": "svc:refunds",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "service": "svc:api-gateway",
+       "tier": 1,
+       "hops": 1,
+       "team": "Platform",
+       "path": [
+        "svc:api-gateway",
+        "svc:refunds"
+       ]
+      },
+      {
+       "service": "svc:mobile-bff",
+       "tier": 1,
+       "hops": 2,
+       "team": "Storefront",
+       "path": [
+        "svc:mobile-bff",
+        "svc:api-gateway",
+        "svc:refunds"
+       ]
+      },
+      {
+       "service": "svc:web-frontend",
+       "tier": 1,
+       "hops": 2,
+       "team": "Storefront",
+       "path": [
+        "svc:web-frontend",
+        "svc:api-gateway",
+        "svc:refunds"
+       ]
+      }
+     ],
+     "ms": 0.4,
+     "readonly": true
+    },
+    {
+     "name": "record_impacts",
+     "cypher": "// purpose: Write impacted / at-risk services onto the incident board.\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (s:Service {id: r.service})\nMERGE (i)-[x:IMPACTS]->(s)\nON CREATE SET x.hops = r.hops, x.via = $via",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "via": "svc:refunds",
+      "rows": [
+       {
+        "service": "svc:api-gateway",
+        "hops": 1
+       },
+       {
+        "service": "svc:mobile-bff",
+        "hops": 2
+       },
+       {
+        "service": "svc:web-frontend",
+        "hops": 2
+       }
+      ]
+     },
+     "rows": [],
+     "ms": 0.27,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:refunds",
+     "svc:api-gateway",
+     "svc:mobile-bff",
+     "svc:web-frontend"
+    ],
+    "edges": [
+     [
+      "svc:api-gateway",
+      "svc:refunds",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:mobile-bff",
+      "svc:api-gateway",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:api-gateway",
+      "svc:refunds",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:web-frontend",
+      "svc:api-gateway",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:api-gateway",
+      "svc:refunds",
+      "DEPENDS_ON"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "service": "svc:api-gateway",
+     "tier": 1,
+     "hops": 1,
+     "team": "Platform",
+     "path": [
+      "svc:api-gateway",
+      "svc:refunds"
+     ]
+    },
+    {
+     "service": "svc:mobile-bff",
+     "tier": 1,
+     "hops": 2,
+     "team": "Storefront",
+     "path": [
+      "svc:mobile-bff",
+      "svc:api-gateway",
+      "svc:refunds"
+     ]
+    },
+    {
+     "service": "svc:web-frontend",
+     "tier": 1,
+     "hops": 2,
+     "team": "Storefront",
+     "path": [
+      "svc:web-frontend",
+      "svc:api-gateway",
+      "svc:refunds"
+     ]
+    }
+   ]
+  },
+  {
+   "seq": 3,
+   "role": "triage",
+   "tool": "page_on_call",
+   "reason": "Find and page whoever is on call for svc:refunds right now.",
+   "summary": "Paged Bram Nakamura (@bram, Payments) for svc:refunds",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": null,
+         "change_id": null,
+         "hops": null,
+         "id": null,
+         "service": null,
+         "source": null,
+         "status": null
+        }
+       ],
+       "recalls": [
+        {
+         "incident": null,
+         "score": null,
+         "cause_service": null
+        }
+       ]
+      }
+     ],
+     "ms": 0.72,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.25,
+     "readonly": true
+    },
+    {
+     "name": "on_call_for",
+     "cypher": "// purpose: Who is on call at $at for the team that owns $service (rotation edges carry start/end).\nMATCH (s:Service {id: $service})<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)\nWHERE oc.start <= $at AND oc.end > $at\nRETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name AS team_name",
+     "params": {
+      "service": "svc:refunds",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "person": "person:bram-nakamura",
+       "name": "Bram Nakamura",
+       "handle": "@bram",
+       "team": "team:payments",
+       "team_name": "Payments"
+      }
+     ],
+     "ms": 0.27,
+     "readonly": true
+    },
+    {
+     "name": "record_page",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "person": "person:bram-nakamura",
+      "at": 1792296000,
+      "service": "svc:refunds"
+     },
+     "rows": [],
+     "ms": 0.24,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:refunds",
+     "team:payments",
+     "person:bram-nakamura"
+    ],
+    "edges": [
+     [
+      "team:payments",
+      "svc:refunds",
+      "OWNS"
+     ],
+     [
+      "person:bram-nakamura",
+      "team:payments",
+      "ON_CALL"
+     ]
+    ]
+   },
+   "data": {
+    "person": "person:bram-nakamura",
+    "name": "Bram Nakamura",
+    "handle": "@bram",
+    "team": "team:payments",
+    "team_name": "Payments"
+   }
+  },
+  {
+   "seq": 4,
+   "role": "triage",
+   "tool": "handoff",
+   "reason": "Impact and owner known; hand the board to the investigator.",
+   "summary": "triage hands off to investigator",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": null,
+         "change_id": null,
+         "hops": null,
+         "id": null,
+         "service": null,
+         "source": null,
+         "status": null
+        }
+       ],
+       "recalls": [
+        {
+         "incident": null,
+         "score": null,
+         "cause_service": null
+        }
+       ]
+      }
+     ],
+     "ms": 0.59,
+     "readonly": true
+    }
+   ],
+   "highlight": {
+    "nodes": [],
+    "edges": []
+   },
+   "data": null
+  },
+  {
+   "seq": 5,
+   "role": "investigator",
+   "tool": "recall_similar",
+   "reason": "Have we seen this before? Recall resolved incidents with the same shape.",
+   "summary": "Recalled inc:checkout-latency 'checkout p99 latency above 2s' (cause on svc:payments-gw)",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": null,
+         "change_id": null,
+         "hops": null,
+         "id": null,
+         "service": null,
+         "source": null,
+         "status": null
+        }
+       ],
+       "recalls": [
+        {
+         "incident": null,
+         "score": null,
+         "cause_service": null
+        }
+       ]
+      }
+     ],
+     "ms": 0.72,
+     "readonly": true
+    },
+    {
+     "name": "recall_similar",
+     "cypher": "// purpose: Episodic recall by structure, not text: resolved incidents whose root-cause service is on the alerting service's live dependency path. Same symptom scores higher.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (past:Incident {status: 'resolved'})-[:CAUSED_BY]->(c:Change)-[:CHANGED]->(cs:Service)\nWHERE past.opened_at < a.at AND past.id <> i.id\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nWITH past, c, cs, a, min(length(p)) AS hops\nOPTIONAL MATCH (past)-[:FIXED_WITH]->(rb:Runbook)\nRETURN past.id AS incident, past.title AS title, past.symptom AS symptom, cs.id AS cause_service,\n       c.kind AS cause_kind, c.id AS cause_change, hops, rb.id AS runbook, rb.title AS runbook_title,\n       2 + CASE WHEN past.symptom = a.symptom THEN 1 ELSE 0 END AS score\nORDER BY score DESC, past.opened_at DESC\nLIMIT 5",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:checkout-latency",
+       "title": "checkout p99 latency above 2s",
+       "symptom": "latency",
+       "cause_service": "svc:payments-gw",
+       "cause_kind": "config",
+       "cause_change": "chg:pgw-pool-1",
+       "hops": 2,
+       "runbook": "rb:payments-gw:config",
+       "runbook_title": "Revert the config change on payments-gw",
+       "score": 3
+      },
+      {
+       "incident": "inc:1003",
+       "title": "redis-cache degraded",
+       "symptom": "errors",
+       "cause_service": "svc:redis-cache",
+       "cause_kind": "deploy",
+       "cause_change": "chg:hist-3",
+       "hops": 3,
+       "runbook": "rb:hist-3",
+       "runbook_title": "Recover redis-cache",
+       "score": 2
+      },
+      {
+       "incident": "inc:0877",
+       "title": "Refunds failing with 500s",
+       "symptom": "errors",
+       "cause_service": "svc:postgres-orders",
+       "cause_kind": "config",
+       "cause_change": "chg:pg-disk",
+       "hops": 1,
+       "runbook": "rb:pg-disk",
+       "runbook_title": "Expand postgres-orders volume",
+       "score": 2
+      },
+      {
+       "incident": "inc:1000",
+       "title": "kafka degraded",
+       "symptom": "errors",
+       "cause_service": "svc:kafka",
+       "cause_kind": "config",
+       "cause_change": "chg:hist-0",
+       "hops": 3,
+       "runbook": "rb:hist-0",
+       "runbook_title": "Recover kafka",
+       "score": 2
+      }
+     ],
+     "ms": 0.71,
+     "readonly": true
+    },
+    {
+     "name": "record_recalls",
+     "cypher": "// purpose: Link the incident to the past incidents it recalled (memory the planner reads back).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (past:Incident {id: r.incident})\nMERGE (i)-[x:RECALLS]->(past)\nON CREATE SET x.score = r.score, x.cause_service = r.cause_service",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "rows": [
+       {
+        "incident": "inc:checkout-latency",
+        "title": "checkout p99 latency above 2s",
+        "symptom": "latency",
+        "cause_service": "svc:payments-gw",
+        "cause_kind": "config",
+        "cause_change": "chg:pgw-pool-1",
+        "hops": 2,
+        "runbook": "rb:payments-gw:config",
+        "runbook_title": "Revert the config change on payments-gw",
+        "score": 3
+       },
+       {
+        "incident": "inc:1003",
+        "title": "redis-cache degraded",
+        "symptom": "errors",
+        "cause_service": "svc:redis-cache",
+        "cause_kind": "deploy",
+        "cause_change": "chg:hist-3",
+        "hops": 3,
+        "runbook": "rb:hist-3",
+        "runbook_title": "Recover redis-cache",
+        "score": 2
+       },
+       {
+        "incident": "inc:0877",
+        "title": "Refunds failing with 500s",
+        "symptom": "errors",
+        "cause_service": "svc:postgres-orders",
+        "cause_kind": "config",
+        "cause_change": "chg:pg-disk",
+        "hops": 1,
+        "runbook": "rb:pg-disk",
+        "runbook_title": "Expand postgres-orders volume",
+        "score": 2
+       },
+       {
+        "incident": "inc:1000",
+        "title": "kafka degraded",
+        "symptom": "errors",
+        "cause_service": "svc:kafka",
+        "cause_kind": "config",
+        "cause_change": "chg:hist-0",
+        "hops": 3,
+        "runbook": "rb:hist-0",
+        "runbook_title": "Recover kafka",
+        "score": 2
+       }
+      ]
+     },
+     "rows": [],
+     "ms": 0.42,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "inc:checkout-latency",
+     "inc:1003",
+     "inc:0877",
+     "inc:1000",
+     "svc:payments-gw",
+     "svc:redis-cache",
+     "svc:postgres-orders",
+     "svc:kafka"
+    ],
+    "edges": [
+     [
+      "inc:refunds-latency",
+      "inc:checkout-latency",
+      "RECALLS"
+     ],
+     [
+      "inc:refunds-latency",
+      "inc:1003",
+      "RECALLS"
+     ],
+     [
+      "inc:refunds-latency",
+      "inc:0877",
+      "RECALLS"
+     ],
+     [
+      "inc:refunds-latency",
+      "inc:1000",
+      "RECALLS"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "incident": "inc:checkout-latency",
+     "title": "checkout p99 latency above 2s",
+     "symptom": "latency",
+     "cause_service": "svc:payments-gw",
+     "cause_kind": "config",
+     "cause_change": "chg:pgw-pool-1",
+     "hops": 2,
+     "runbook": "rb:payments-gw:config",
+     "runbook_title": "Revert the config change on payments-gw",
+     "score": 3
+    },
+    {
+     "incident": "inc:1003",
+     "title": "redis-cache degraded",
+     "symptom": "errors",
+     "cause_service": "svc:redis-cache",
+     "cause_kind": "deploy",
+     "cause_change": "chg:hist-3",
+     "hops": 3,
+     "runbook": "rb:hist-3",
+     "runbook_title": "Recover redis-cache",
+     "score": 2
+    },
+    {
+     "incident": "inc:0877",
+     "title": "Refunds failing with 500s",
+     "symptom": "errors",
+     "cause_service": "svc:postgres-orders",
+     "cause_kind": "config",
+     "cause_change": "chg:pg-disk",
+     "hops": 1,
+     "runbook": "rb:pg-disk",
+     "runbook_title": "Expand postgres-orders volume",
+     "score": 2
+    },
+    {
+     "incident": "inc:1000",
+     "title": "kafka degraded",
+     "symptom": "errors",
+     "cause_service": "svc:kafka",
+     "cause_kind": "config",
+     "cause_change": "chg:hist-0",
+     "hops": 3,
+     "runbook": "rb:hist-0",
+     "runbook_title": "Recover kafka",
+     "score": 2
+    }
+   ]
+  },
+  {
+   "seq": 6,
+   "role": "investigator",
+   "tool": "hypothesize_from_memory",
+   "reason": "A past incident matches structurally; test its root cause pattern first.",
+   "summary": "Memory points at chg:pgw-pool-2",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": null,
+         "change_id": null,
+         "hops": null,
+         "id": null,
+         "service": null,
+         "source": null,
+         "status": null
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 0.72,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.24,
+     "readonly": true
+    },
+    {
+     "name": "memory_suspects",
+     "cypher": "// purpose: Procedural shortcut: changes in the alert window on services that caused the recalled incidents.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nMATCH (i)-[x:RECALLS]->(past:Incident)-[:CAUSED_BY]->(:Change)-[:CHANGED]->(cs:Service)\nWHERE x.score >= $min_score\nMATCH (c:Change)-[:CHANGED]->(cs)\nWHERE c.at >= a.at - $window AND c.at <= a.at\nMATCH p = (o)-[:DEPENDS_ON*0..6]->(cs)\nWHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))\nRETURN c.id AS change, cs.id AS service, c.kind AS kind, c.at AS at, min(length(p)) AS hops,\n       collect(DISTINCT past.id) AS recalled",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "window": 7200,
+      "min_score": 3
+     },
+     "rows": [
+      {
+       "change": "chg:pgw-pool-2",
+       "service": "svc:payments-gw",
+       "kind": "config",
+       "at": 1792294200,
+       "hops": 2,
+       "recalled": [
+        "inc:checkout-latency"
+       ]
+      }
+     ],
+     "ms": 0.48,
+     "readonly": true
+    },
+    {
+     "name": "add_hypotheses",
+     "cypher": "// purpose: Put suspects on the board as open Hypothesis nodes (idempotent per incident + change).\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: r.change})\nMERGE (h:Hypothesis {id: r.id})\nON CREATE SET h.status = 'open', h.source = r.source, h.hops = r.hops, h.created_at = $at\nMERGE (i)-[:HAS_HYPOTHESIS]->(h)\nMERGE (h)-[:SUSPECTS]->(c)\nRETURN h.id AS id",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "rows": [
+       {
+        "id": "hyp:refunds-latency:pgw-pool-2",
+        "change": "chg:pgw-pool-2",
+        "source": "memory",
+        "hops": 2
+       }
+      ],
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "id": "hyp:refunds-latency:pgw-pool-2"
+      }
+     ],
+     "ms": 0.49,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "chg:pgw-pool-2",
+     "svc:payments-gw"
+    ],
+    "edges": [
+     [
+      "chg:pgw-pool-2",
+      "svc:payments-gw",
+      "CHANGED"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "change": "chg:pgw-pool-2",
+     "service": "svc:payments-gw",
+     "kind": "config",
+     "at": 1792294200,
+     "hops": 2,
+     "recalled": [
+      "inc:checkout-latency"
+     ]
+    }
+   ]
+  },
+  {
+   "seq": 7,
+   "role": "investigator",
+   "tool": "check_hypothesis",
+   "reason": "Test suspect chg:pgw-pool-2 on svc:payments-gw against the graph.",
+   "summary": "SUPPORTS chg:pgw-pool-2: anomaly propagates payments-gw -> payments -> refunds",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "open"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 0.8,
+     "readonly": true
+    },
+    {
+     "name": "hypothesis_facts",
+     "cypher": "// purpose: What a check needs about one suspect: changed service, change time, rollback, alerting service and time.\nMATCH (i:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis {id: $hypothesis_id})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nMATCH (i)-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, h.status AS status, c.id AS change, c.summary AS summary, c.at AS change_at,\n       c.rolled_back_at AS rolled_back_at, s.id AS service, o.id AS origin, a.at AS at",
+     "params": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "change": "chg:pgw-pool-2",
+       "summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+       "change_at": 1792294200,
+       "rolled_back_at": null,
+       "service": "svc:payments-gw",
+       "origin": "svc:refunds",
+       "at": 1792296000
+      }
+     ],
+     "ms": 0.43,
+     "readonly": true
+    },
+    {
+     "name": "live_path",
+     "cypher": "// purpose: Shortest dependency path from the alerting service to a suspect's service, using only edges valid at alert time.\nMATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH p\nORDER BY length(p)\nLIMIT 1\nRETURN [n IN nodes(p) | n.id] AS path",
+     "params": {
+      "origin": "svc:refunds",
+      "target": "svc:payments-gw",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "path": [
+        "svc:refunds",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      }
+     ],
+     "ms": 0.39,
+     "readonly": true
+    },
+    {
+     "name": "anomalies_between",
+     "cypher": "// purpose: Which of the given services showed an anomaly between the change and the alert.\nUNWIND $services AS sid\nMATCH (x:Anomaly)-[:ON]->(s:Service {id: sid})\nWHERE x.at >= $since AND x.at <= $until\nRETURN s.id AS service, min(x.at) AS first_at, collect(x.summary)[0] AS summary",
+     "params": {
+      "services": [
+       "svc:refunds",
+       "svc:payments",
+       "svc:payments-gw"
+      ],
+      "since": 1792294200,
+      "until": 1792296000
+     },
+     "rows": [
+      {
+       "service": "svc:payments",
+       "first_at": 1792294380,
+       "summary": "p99 3.8s calling payments-gw"
+      },
+      {
+       "service": "svc:payments-gw",
+       "first_at": 1792294320,
+       "summary": "connection pool exhausted, 140 waiters"
+      },
+      {
+       "service": "svc:refunds",
+       "first_at": 1792294500,
+       "summary": "p99 4.4s on POST /refunds"
+      }
+     ],
+     "ms": 0.41,
+     "readonly": true
+    },
+    {
+     "name": "record_evidence",
+     "cypher": "// purpose: Attach a check's verdict as an Evidence node (SUPPORTS / REFUTES the hypothesis) and update the hypothesis status.\nMATCH (h:Hypothesis {id: $hypothesis_id})\nMERGE (e:Evidence {id: $evidence_id})\nSET e.verdict = $verdict, e.reason = $reason, e.path = $path, e.at = $at\nSET h.status = CASE $verdict WHEN 'supports' THEN 'supported' WHEN 'refutes' THEN 'refuted' ELSE 'inconclusive' END\nFOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))\nFOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))\nRETURN h.id AS hypothesis, h.status AS status",
+     "params": {
+      "hypothesis_id": "hyp:refunds-latency:pgw-pool-2",
+      "evidence_id": "ev:refunds-latency:pgw-pool-2",
+      "verdict": "supports",
+      "reason": "anomaly propagates payments-gw -> payments -> refunds",
+      "path": [
+       "svc:refunds",
+       "svc:payments",
+       "svc:payments-gw"
+      ],
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "hypothesis": "hyp:refunds-latency:pgw-pool-2",
+       "status": "supported"
+      }
+     ],
+     "ms": 0.5,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:refunds",
+     "svc:payments",
+     "svc:payments-gw",
+     "chg:pgw-pool-2"
+    ],
+    "edges": [
+     [
+      "svc:refunds",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "chg:pgw-pool-2",
+      "svc:payments-gw",
+      "CHANGED"
+     ]
+    ]
+   },
+   "data": {
+    "change": "chg:pgw-pool-2",
+    "service": "svc:payments-gw",
+    "summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+    "verdict": "supports",
+    "reason": "anomaly propagates payments-gw -> payments -> refunds",
+    "live_path": [
+     "svc:refunds",
+     "svc:payments",
+     "svc:payments-gw"
+    ],
+    "retired_path": []
+   }
+  },
+  {
+   "seq": 8,
+   "role": "investigator",
+   "tool": "handoff",
+   "reason": "Root cause supported: chg:pgw-pool-2 on svc:payments-gw; others refuted.",
+   "summary": "investigator hands off to comms",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.37,
+     "readonly": true
+    }
+   ],
+   "highlight": {
+    "nodes": [],
+    "edges": []
+   },
+   "data": null
+  },
+  {
+   "seq": 9,
+   "role": "comms",
+   "tool": "page_on_call",
+   "reason": "The culprit lives in svc:payments-gw; page its owning team too.",
+   "summary": "Paged Bram Nakamura (@bram, Payments) for svc:payments-gw",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.41,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.52,
+     "readonly": true
+    },
+    {
+     "name": "on_call_for",
+     "cypher": "// purpose: Who is on call at $at for the team that owns $service (rotation edges carry start/end).\nMATCH (s:Service {id: $service})<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)\nWHERE oc.start <= $at AND oc.end > $at\nRETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name AS team_name",
+     "params": {
+      "service": "svc:payments-gw",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "person": "person:bram-nakamura",
+       "name": "Bram Nakamura",
+       "handle": "@bram",
+       "team": "team:payments",
+       "team_name": "Payments"
+      }
+     ],
+     "ms": 0.48,
+     "readonly": true
+    },
+    {
+     "name": "record_page",
+     "cypher": "// purpose: Record that the incident paged this person (an action taken because of what the graph showed).\nMATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})\nMERGE (i)-[pg:PAGED]->(p)\nON CREATE SET pg.at = $at, pg.for_service = $service",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "person": "person:bram-nakamura",
+      "at": 1792296000,
+      "service": "svc:payments-gw"
+     },
+     "rows": [],
+     "ms": 0.31,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:payments-gw",
+     "team:payments",
+     "person:bram-nakamura"
+    ],
+    "edges": [
+     [
+      "team:payments",
+      "svc:payments-gw",
+      "OWNS"
+     ],
+     [
+      "person:bram-nakamura",
+      "team:payments",
+      "ON_CALL"
+     ]
+    ]
+   },
+   "data": {
+    "person": "person:bram-nakamura",
+    "name": "Bram Nakamura",
+    "handle": "@bram",
+    "team": "team:payments",
+    "team_name": "Payments"
+   }
+  },
+  {
+   "seq": 10,
+   "role": "comms",
+   "tool": "blast_radius",
+   "reason": "Who else depends on svc:payments-gw? Warn them before they page us.",
+   "summary": "7 services depend on svc:payments-gw (5 tier-1)",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.02,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.52,
+     "readonly": true
+    },
+    {
+     "name": "blast_radius",
+     "cypher": "// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.\nMATCH p = (caller:Service)-[:DEPENDS_ON*1..6]->(:Service {id: $service})\nWHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))\nWITH caller, p\nORDER BY length(p)\nWITH caller, collect(p)[0] AS p\nMATCH (t:Team)-[:OWNS]->(caller)\nRETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path\nORDER BY hops, service",
+     "params": {
+      "service": "svc:payments-gw",
+      "at": 1792296000
+     },
+     "rows": [
+      {
+       "service": "svc:payments",
+       "tier": 1,
+       "hops": 1,
+       "team": "Payments",
+       "path": [
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:checkout",
+       "tier": 1,
+       "hops": 2,
+       "team": "Checkout",
+       "path": [
+        "svc:checkout",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:refunds",
+       "tier": 2,
+       "hops": 2,
+       "team": "Payments",
+       "path": [
+        "svc:refunds",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:subscriptions",
+       "tier": 2,
+       "hops": 2,
+       "team": "Payments",
+       "path": [
+        "svc:subscriptions",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:api-gateway",
+       "tier": 1,
+       "hops": 3,
+       "team": "Platform",
+       "path": [
+        "svc:api-gateway",
+        "svc:checkout",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:mobile-bff",
+       "tier": 1,
+       "hops": 4,
+       "team": "Storefront",
+       "path": [
+        "svc:mobile-bff",
+        "svc:api-gateway",
+        "svc:checkout",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      },
+      {
+       "service": "svc:web-frontend",
+       "tier": 1,
+       "hops": 4,
+       "team": "Storefront",
+       "path": [
+        "svc:web-frontend",
+        "svc:api-gateway",
+        "svc:checkout",
+        "svc:payments",
+        "svc:payments-gw"
+       ]
+      }
+     ],
+     "ms": 0.79,
+     "readonly": true
+    },
+    {
+     "name": "record_impacts",
+     "cypher": "// purpose: Write impacted / at-risk services onto the incident board.\nUNWIND $rows AS r\nMATCH (i:Incident {id: $incident_id}), (s:Service {id: r.service})\nMERGE (i)-[x:IMPACTS]->(s)\nON CREATE SET x.hops = r.hops, x.via = $via",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "via": "svc:payments-gw",
+      "rows": [
+       {
+        "service": "svc:payments",
+        "hops": 1
+       },
+       {
+        "service": "svc:checkout",
+        "hops": 2
+       },
+       {
+        "service": "svc:refunds",
+        "hops": 2
+       },
+       {
+        "service": "svc:subscriptions",
+        "hops": 2
+       },
+       {
+        "service": "svc:api-gateway",
+        "hops": 3
+       },
+       {
+        "service": "svc:mobile-bff",
+        "hops": 4
+       },
+       {
+        "service": "svc:web-frontend",
+        "hops": 4
+       }
+      ]
+     },
+     "rows": [],
+     "ms": 0.46,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "svc:payments-gw",
+     "svc:payments",
+     "svc:checkout",
+     "svc:refunds",
+     "svc:subscriptions",
+     "svc:api-gateway",
+     "svc:mobile-bff",
+     "svc:web-frontend"
+    ],
+    "edges": [
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:refunds",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:subscriptions",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:api-gateway",
+      "svc:checkout",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:mobile-bff",
+      "svc:api-gateway",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:api-gateway",
+      "svc:checkout",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:web-frontend",
+      "svc:api-gateway",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:api-gateway",
+      "svc:checkout",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:checkout",
+      "svc:payments",
+      "DEPENDS_ON"
+     ],
+     [
+      "svc:payments",
+      "svc:payments-gw",
+      "DEPENDS_ON"
+     ]
+    ]
+   },
+   "data": [
+    {
+     "service": "svc:payments",
+     "tier": 1,
+     "hops": 1,
+     "team": "Payments",
+     "path": [
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:checkout",
+     "tier": 1,
+     "hops": 2,
+     "team": "Checkout",
+     "path": [
+      "svc:checkout",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:refunds",
+     "tier": 2,
+     "hops": 2,
+     "team": "Payments",
+     "path": [
+      "svc:refunds",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:subscriptions",
+     "tier": 2,
+     "hops": 2,
+     "team": "Payments",
+     "path": [
+      "svc:subscriptions",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:api-gateway",
+     "tier": 1,
+     "hops": 3,
+     "team": "Platform",
+     "path": [
+      "svc:api-gateway",
+      "svc:checkout",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:mobile-bff",
+     "tier": 1,
+     "hops": 4,
+     "team": "Storefront",
+     "path": [
+      "svc:mobile-bff",
+      "svc:api-gateway",
+      "svc:checkout",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    },
+    {
+     "service": "svc:web-frontend",
+     "tier": 1,
+     "hops": 4,
+     "team": "Storefront",
+     "path": [
+      "svc:web-frontend",
+      "svc:api-gateway",
+      "svc:checkout",
+      "svc:payments",
+      "svc:payments-gw"
+     ]
+    }
+   ]
+  },
+  {
+   "seq": 11,
+   "role": "comms",
+   "tool": "post_update",
+   "reason": "Write the status update with owners, cause and sources.",
+   "summary": "Posted status update to #incidents",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "blast_radius"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 0.83,
+     "readonly": true
+    },
+    {
+     "name": "incident_head",
+     "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "incident": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "alert_name": "refunds p99 latency above 2s"
+      }
+     ],
+     "ms": 0.37,
+     "readonly": true
+    },
+    {
+     "name": "update_facts",
+     "cypher": "// purpose: Facts for the status update: impact, who was paged, the supported cause with its author and sources (ticket, chat).\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)\nOPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)\nWITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts\nOPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)\nWITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis {status: 'supported'})-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nOPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)\nOPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)\nOPTIONAL MATCH (rb:Runbook)-[:FOR_SERVICE]->(s)\nWHERE rb.kind = c.kind\nRETURN a.name AS alert, impacts, paged, c.id AS change, c.summary AS change_summary, s.id AS cause_service,\n       author.name AS author, collect(DISTINCT src.id) AS sources,\n       collect(DISTINCT {id: rb.id, title: rb.title, successes: rb.successes}) AS runbooks",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "alert": "refunds p99 latency above 2s",
+       "impacts": [
+        {
+         "service": "svc:api-gateway",
+         "via": "svc:refunds"
+        },
+        {
+         "service": "svc:subscriptions",
+         "via": "svc:payments-gw"
+        },
+        {
+         "service": "svc:refunds",
+         "via": null
+        },
+        {
+         "service": "svc:payments",
+         "via": "svc:payments-gw"
+        },
+        {
+         "service": "svc:checkout",
+         "via": "svc:payments-gw"
+        },
+        {
+         "service": "svc:mobile-bff",
+         "via": "svc:refunds"
+        },
+        {
+         "service": "svc:web-frontend",
+         "via": "svc:refunds"
+        }
+       ],
+       "paged": [
+        {
+         "handle": "@bram",
+         "name": "Bram Nakamura",
+         "team": "Payments"
+        }
+       ],
+       "change": "chg:pgw-pool-2",
+       "change_summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+       "cause_service": "svc:payments-gw",
+       "author": "Quinn Tanaka",
+       "sources": [
+        "ticket:CR-902"
+       ],
+       "runbooks": [
+        {
+         "id": "rb:payments-gw:config",
+         "successes": 1,
+         "title": "Revert the config change on payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.55,
+     "readonly": true
+    },
+    {
+     "name": "refuted_hypotheses",
+     "cypher": "// purpose: Suspects the agents ruled out, with the reason recorded on their Evidence.\nMATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nMATCH (e:Evidence)-[:REFUTES]->(h)\nRETURN c.id AS change, s.id AS service, c.summary AS summary, e.reason AS reason, h.source AS source",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [],
+     "ms": 0.66,
+     "readonly": true
+    },
+    {
+     "name": "post_update",
+     "cypher": "// purpose: Post the status update on the incident and link it to every node it cites.\nMATCH (i:Incident {id: $incident_id})\nMERGE (m:Message {id: $message_id})\nSET m.kind = 'status_update', m.channel = '#incidents', m.text = $text, m.at = $at\nMERGE (i)-[:HAS_UPDATE]->(m)\nWITH m\nUNWIND $cites AS cid\nMATCH (n {id: cid})\nMERGE (m)-[:CITES]->(n)\nRETURN count(n) AS cited",
+     "params": {
+      "incident_id": "inc:refunds-latency",
+      "message_id": "msg:update:inc:refunds-latency",
+      "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+      "at": 1792296000,
+      "cites": [
+       "chg:pgw-pool-2",
+       "ticket:CR-902",
+       "rb:payments-gw:config"
+      ]
+     },
+     "rows": [
+      {
+       "cited": 3
+      }
+     ],
+     "ms": 0.71,
+     "readonly": false
+    }
+   ],
+   "highlight": {
+    "nodes": [
+     "chg:pgw-pool-2",
+     "ticket:CR-902",
+     "rb:payments-gw:config"
+    ],
+    "edges": []
+   },
+   "data": {
+    "text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+    "cites": [
+     "chg:pgw-pool-2",
+     "ticket:CR-902",
+     "rb:payments-gw:config"
+    ]
+   }
+  },
+  {
+   "seq": 12,
+   "role": "comms",
+   "tool": "handoff",
+   "reason": "Update posted; waiting for a human to confirm the fix.",
+   "summary": "comms hands off to human",
+   "writes": true,
+   "queries": [
+    {
+     "name": "incident_board",
+     "cypher": "// purpose: Everything the planner looks at, read fresh from the graph before every decision: steps already taken, hypotheses and their status, recalled memory.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nOPTIONAL MATCH (i)-[:LOGGED]->(st:AgentStep)\nWITH i, a, o, collect({tool: st.tool, target: st.target, role: st.role}) AS steps\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)\nWITH i, a, o, steps,\n     collect({id: h.id, change_id: c.id, service: s.id, status: h.status, source: h.source, hops: h.hops,\n              at: c.at}) AS hypotheses\nOPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)\nRETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       steps, hypotheses, collect({incident: past.id, score: x.score, cause_service: x.cause_service}) AS recalls",
+     "params": {
+      "incident_id": "inc:refunds-latency"
+     },
+     "rows": [
+      {
+       "id": "inc:refunds-latency",
+       "status": "open",
+       "service": "svc:refunds",
+       "alert": "alert:refunds-latency",
+       "at": 1792296000,
+       "symptom": "latency",
+       "steps": [
+        {
+         "role": "triage",
+         "target": "alert:refunds-latency",
+         "tool": "open_incident"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "triage",
+         "target": "svc:refunds",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "triage",
+         "target": "investigator",
+         "tool": "handoff"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "recall_similar"
+        },
+        {
+         "role": "investigator",
+         "target": "inc:refunds-latency",
+         "tool": "hypothesize_from_memory"
+        },
+        {
+         "role": "investigator",
+         "target": "hyp:refunds-latency:pgw-pool-2",
+         "tool": "check_hypothesis"
+        },
+        {
+         "role": "investigator",
+         "target": "comms",
+         "tool": "handoff"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "page_on_call"
+        },
+        {
+         "role": "comms",
+         "target": "svc:payments-gw",
+         "tool": "blast_radius"
+        },
+        {
+         "role": "comms",
+         "target": "inc:refunds-latency",
+         "tool": "post_update"
+        }
+       ],
+       "hypotheses": [
+        {
+         "at": 1792294200,
+         "change_id": "chg:pgw-pool-2",
+         "hops": 2,
+         "id": "hyp:refunds-latency:pgw-pool-2",
+         "service": "svc:payments-gw",
+         "source": "memory",
+         "status": "supported"
+        }
+       ],
+       "recalls": [
+        {
+         "incident": "inc:1003",
+         "score": 2,
+         "cause_service": "svc:redis-cache"
+        },
+        {
+         "incident": "inc:1000",
+         "score": 2,
+         "cause_service": "svc:kafka"
+        },
+        {
+         "incident": "inc:0877",
+         "score": 2,
+         "cause_service": "svc:postgres-orders"
+        },
+        {
+         "incident": "inc:checkout-latency",
+         "score": 3,
+         "cause_service": "svc:payments-gw"
+        }
+       ]
+      }
+     ],
+     "ms": 1.41,
+     "readonly": true
+    }
+   ],
+   "highlight": {
+    "nodes": [],
+    "edges": []
+   },
+   "data": null
+  }
+ ],
+ "outcome": {
+  "root_cause": {
+   "change": "chg:pgw-pool-2",
+   "service": "svc:payments-gw",
+   "summary": "Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed)",
+   "verdict": "supports",
+   "reason": "anomaly propagates payments-gw -> payments -> refunds",
+   "live_path": [
+    "svc:refunds",
+    "svc:payments",
+    "svc:payments-gw"
+   ],
+   "retired_path": []
+  },
+  "refuted": [],
+  "baseline_pick": {
+   "change": "chg:notif-77",
+   "service": "svc:notifications",
+   "kind": "deploy",
+   "at": 1792295280,
+   "summary": "Deploy notifications v7.7.0"
+  },
+  "baseline_correct": false,
+  "memory": {
+   "recalled": [
+    {
+     "incident": "inc:checkout-latency",
+     "title": "checkout p99 latency above 2s",
+     "symptom": "latency",
+     "cause_service": "svc:payments-gw",
+     "cause_kind": "config",
+     "cause_change": "chg:pgw-pool-1",
+     "hops": 2,
+     "runbook": "rb:payments-gw:config",
+     "runbook_title": "Revert the config change on payments-gw",
+     "score": 3
+    }
+   ],
+   "suspects": [
+    {
+     "change": "chg:pgw-pool-2",
+     "service": "svc:payments-gw",
+     "kind": "config",
+     "at": 1792294200,
+     "hops": 2,
+     "recalled": [
+      "inc:checkout-latency"
+     ]
+    }
+   ],
+   "solved_by_memory": true
+  },
+  "paged": [
+   {
+    "person": "person:bram-nakamura",
+    "name": "Bram Nakamura",
+    "handle": "@bram",
+    "team": "team:payments",
+    "team_name": "Payments"
+   },
+   {
+    "person": "person:bram-nakamura",
+    "name": "Bram Nakamura",
+    "handle": "@bram",
+    "team": "team:payments",
+    "team_name": "Payments"
+   }
+  ],
+  "blast_radius": [
+   "svc:api-gateway",
+   "svc:mobile-bff",
+   "svc:web-frontend"
+  ],
+  "at_risk": [
+   "svc:checkout",
+   "svc:payments",
+   "svc:refunds",
+   "svc:subscriptions"
+  ],
+  "update_text": "[refunds p99 latency above 2s] status: cause identified, fix pending\nImpact: api-gateway, mobile-bff, refunds, web-frontend\nLikely cause: Config rollout 2026.10.18: payments-gw max_connections 200 -> 25 (template default regressed) (payments-gw, by Quinn Tanaka).\nPaged: @bram (Payments)\nAlso at risk: checkout, payments, subscriptions\nRunbook: Revert the config change on payments-gw (worked 1x)\nSources: ticket:CR-902",
+  "investigator_calls": 3,
+  "hypotheses_checked": 1,
+  "highlight": {
+   "nodes": [
+    "svc:refunds",
+    "svc:payments",
+    "svc:payments-gw",
+    "chg:pgw-pool-2"
+   ],
+   "edges": [
+    [
+     "svc:refunds",
+     "svc:payments",
+     "DEPENDS_ON"
+    ],
+    [
+     "svc:payments",
+     "svc:payments-gw",
+     "DEPENDS_ON"
+    ],
+    [
+     "chg:pgw-pool-2",
+     "svc:payments-gw",
+     "CHANGED"
+    ]
+   ]
+  }
+ }
+}

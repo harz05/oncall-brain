@@ -1,0 +1,6 @@
+{
+ "ok": true,
+ "falkordb": true,
+ "planner": "deterministic planner",
+ "default_tenant": "acme"
+}

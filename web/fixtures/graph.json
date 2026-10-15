@@ -1,0 +1,351 @@
+{
+ "nodes": [
+  {
+   "id": "svc:web-frontend",
+   "name": "web-frontend",
+   "tier": 1,
+   "team": "Storefront"
+  },
+  {
+   "id": "svc:postgres-orders",
+   "name": "postgres-orders",
+   "tier": 1,
+   "team": "Platform"
+  },
+  {
+   "id": "svc:inventory",
+   "name": "inventory",
+   "tier": 2,
+   "team": "Fulfilment"
+  },
+  {
+   "id": "svc:pricing",
+   "name": "pricing",
+   "tier": 2,
+   "team": "Checkout"
+  },
+  {
+   "id": "svc:analytics",
+   "name": "analytics",
+   "tier": 2,
+   "team": "Data"
+  },
+  {
+   "id": "svc:warehouse-sync",
+   "name": "warehouse-sync",
+   "tier": 2,
+   "team": "Fulfilment"
+  },
+  {
+   "id": "svc:notifications",
+   "name": "notifications",
+   "tier": 2,
+   "team": "Platform"
+  },
+  {
+   "id": "svc:fraud-check",
+   "name": "fraud-check",
+   "tier": 2,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:auth",
+   "name": "auth",
+   "tier": 1,
+   "team": "Platform"
+  },
+  {
+   "id": "svc:redis-cache",
+   "name": "redis-cache",
+   "tier": 2,
+   "team": "Platform"
+  },
+  {
+   "id": "svc:api-gateway",
+   "name": "api-gateway",
+   "tier": 1,
+   "team": "Platform"
+  },
+  {
+   "id": "svc:mobile-bff",
+   "name": "mobile-bff",
+   "tier": 1,
+   "team": "Storefront"
+  },
+  {
+   "id": "svc:payments",
+   "name": "payments",
+   "tier": 1,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:cart",
+   "name": "cart",
+   "tier": 1,
+   "team": "Checkout"
+  },
+  {
+   "id": "svc:subscriptions",
+   "name": "subscriptions",
+   "tier": 2,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:shipping",
+   "name": "shipping",
+   "tier": 2,
+   "team": "Fulfilment"
+  },
+  {
+   "id": "svc:reporting",
+   "name": "reporting",
+   "tier": 2,
+   "team": "Data"
+  },
+  {
+   "id": "svc:checkout",
+   "name": "checkout",
+   "tier": 1,
+   "team": "Checkout"
+  },
+  {
+   "id": "svc:recommendations",
+   "name": "recommendations",
+   "tier": 2,
+   "team": "Storefront"
+  },
+  {
+   "id": "svc:legacy-billing",
+   "name": "legacy-billing",
+   "tier": 2,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:refunds",
+   "name": "refunds",
+   "tier": 2,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:promotions",
+   "name": "promotions",
+   "tier": 2,
+   "team": "Checkout"
+  },
+  {
+   "id": "svc:payments-gw",
+   "name": "payments-gw",
+   "tier": 1,
+   "team": "Payments"
+  },
+  {
+   "id": "svc:search",
+   "name": "search",
+   "tier": 2,
+   "team": "Storefront"
+  },
+  {
+   "id": "svc:kafka",
+   "name": "kafka",
+   "tier": 1,
+   "team": "Platform"
+  }
+ ],
+ "edges": [
+  {
+   "source": "svc:web-frontend",
+   "target": "svc:api-gateway",
+   "live": true
+  },
+  {
+   "source": "svc:inventory",
+   "target": "svc:postgres-orders",
+   "live": true
+  },
+  {
+   "source": "svc:inventory",
+   "target": "svc:warehouse-sync",
+   "live": true
+  },
+  {
+   "source": "svc:pricing",
+   "target": "svc:redis-cache",
+   "live": true
+  },
+  {
+   "source": "svc:pricing",
+   "target": "svc:promotions",
+   "live": true
+  },
+  {
+   "source": "svc:analytics",
+   "target": "svc:kafka",
+   "live": true
+  },
+  {
+   "source": "svc:notifications",
+   "target": "svc:kafka",
+   "live": true
+  },
+  {
+   "source": "svc:fraud-check",
+   "target": "svc:redis-cache",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:auth",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:subscriptions",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:refunds",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:cart",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:checkout",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:recommendations",
+   "live": true
+  },
+  {
+   "source": "svc:api-gateway",
+   "target": "svc:search",
+   "live": true
+  },
+  {
+   "source": "svc:mobile-bff",
+   "target": "svc:api-gateway",
+   "live": true
+  },
+  {
+   "source": "svc:payments",
+   "target": "svc:postgres-orders",
+   "live": true
+  },
+  {
+   "source": "svc:payments",
+   "target": "svc:fraud-check",
+   "live": true
+  },
+  {
+   "source": "svc:payments",
+   "target": "svc:payments-gw",
+   "live": true
+  },
+  {
+   "source": "svc:cart",
+   "target": "svc:redis-cache",
+   "live": true
+  },
+  {
+   "source": "svc:cart",
+   "target": "svc:pricing",
+   "live": true
+  },
+  {
+   "source": "svc:subscriptions",
+   "target": "svc:payments",
+   "live": true
+  },
+  {
+   "source": "svc:shipping",
+   "target": "svc:notifications",
+   "live": true
+  },
+  {
+   "source": "svc:shipping",
+   "target": "svc:inventory",
+   "live": true
+  },
+  {
+   "source": "svc:reporting",
+   "target": "svc:analytics",
+   "live": true
+  },
+  {
+   "source": "svc:reporting",
+   "target": "svc:postgres-orders",
+   "live": true
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:auth",
+   "live": true
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:inventory",
+   "live": true
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:legacy-billing",
+   "live": false
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:payments",
+   "live": true
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:pricing",
+   "live": true
+  },
+  {
+   "source": "svc:checkout",
+   "target": "svc:cart",
+   "live": true
+  },
+  {
+   "source": "svc:recommendations",
+   "target": "svc:analytics",
+   "live": true
+  },
+  {
+   "source": "svc:recommendations",
+   "target": "svc:redis-cache",
+   "live": true
+  },
+  {
+   "source": "svc:legacy-billing",
+   "target": "svc:postgres-orders",
+   "live": true
+  },
+  {
+   "source": "svc:refunds",
+   "target": "svc:postgres-orders",
+   "live": true
+  },
+  {
+   "source": "svc:refunds",
+   "target": "svc:payments",
+   "live": true
+  },
+  {
+   "source": "svc:payments-gw",
+   "target": "svc:kafka",
+   "live": true
+  },
+  {
+   "source": "svc:search",
+   "target": "svc:redis-cache",
+   "live": true
+  }
+ ]
+}

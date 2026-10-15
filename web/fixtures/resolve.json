@@ -1,0 +1,104 @@
+{
+ "summary": "Resolved inc:checkout-latency; runbook 'Revert the config change on payments-gw' now has 1 success(es)",
+ "data": {
+  "incident": "inc:checkout-latency",
+  "runbook": "rb:payments-gw:config",
+  "title": "Revert the config change on payments-gw",
+  "steps": [
+   "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+   "Watch checkout p99 recover within 10 minutes",
+   "Add a guard: alert on payments-gw saturation before callers time out"
+  ],
+  "successes": 1
+ },
+ "queries": [
+  {
+   "name": "incident_head",
+   "cypher": "// purpose: The incident's alerting service, alert time and status.\nMATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)\nRETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.at AS at, a.symptom AS symptom,\n       a.name AS alert_name",
+   "params": {
+    "incident_id": "inc:checkout-latency"
+   },
+   "rows": [
+    {
+     "incident": "inc:checkout-latency",
+     "status": "open",
+     "service": "svc:checkout",
+     "alert": "alert:checkout-latency",
+     "at": 1792036800,
+     "symptom": "latency",
+     "alert_name": "checkout p99 latency above 2s"
+    }
+   ],
+   "ms": 0.5,
+   "readonly": true
+  },
+  {
+   "name": "change_info",
+   "cypher": "// purpose: One change and the service it touched.\nMATCH (c:Change {id: $change_id})-[:CHANGED]->(s:Service)\nRETURN c.id AS change, c.kind AS kind, c.summary AS summary, s.id AS service, s.name AS service_name",
+   "params": {
+    "change_id": "chg:pgw-pool-1"
+   },
+   "rows": [
+    {
+     "change": "chg:pgw-pool-1",
+     "kind": "config",
+     "summary": "Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)",
+     "service": "svc:payments-gw",
+     "service_name": "payments-gw"
+    }
+   ],
+   "ms": 0.6,
+   "readonly": true
+  },
+  {
+   "name": "resolve_incident",
+   "cypher": "// purpose: A human-confirmed fix becomes memory: CAUSED_BY (episodic) and a Runbook for (service, change kind) whose success count grows (procedural).\nMATCH (i:Incident {id: $incident_id}), (c:Change {id: $change_id})-[:CHANGED]->(s:Service)\nWHERE i.status <> 'resolved'\nSET i.status = 'resolved', i.resolved_at = $at\nMERGE (i)-[:CAUSED_BY]->(c)\nMERGE (rb:Runbook {id: $runbook_id})\nON CREATE SET rb.title = $title, rb.steps = $steps, rb.kind = c.kind, rb.uses = 0, rb.successes = 0,\n              rb.learned_from = i.id\nSET rb.uses = rb.uses + 1, rb.successes = rb.successes + 1\nMERGE (rb)-[:FOR_SERVICE]->(s)\nMERGE (i)-[:FIXED_WITH]->(rb)\nWITH i, c, rb\nOPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c)\nFOREACH (x IN CASE WHEN h IS NULL THEN [] ELSE [h] END | SET x.status = 'confirmed')\nRETURN i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps, rb.successes AS successes",
+   "params": {
+    "incident_id": "inc:checkout-latency",
+    "change_id": "chg:pgw-pool-1",
+    "at": 1792040400,
+    "runbook_id": "rb:payments-gw:config",
+    "title": "Revert the config change on payments-gw",
+    "steps": [
+     "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+     "Watch checkout p99 recover within 10 minutes",
+     "Add a guard: alert on payments-gw saturation before callers time out"
+    ]
+   },
+   "rows": [
+    {
+     "incident": "inc:checkout-latency",
+     "runbook": "rb:payments-gw:config",
+     "title": "Revert the config change on payments-gw",
+     "steps": [
+      "Revert the config change on payments-gw (last time: Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup))",
+      "Watch checkout p99 recover within 10 minutes",
+      "Add a guard: alert on payments-gw saturation before callers time out"
+     ],
+     "successes": 1
+    }
+   ],
+   "ms": 1.13,
+   "readonly": false
+  }
+ ],
+ "highlight": {
+  "nodes": [
+   "inc:checkout-latency",
+   "chg:pgw-pool-1",
+   "rb:payments-gw:config"
+  ],
+  "edges": [
+   [
+    "inc:checkout-latency",
+    "chg:pgw-pool-1",
+    "CAUSED_BY"
+   ],
+   [
+    "inc:checkout-latency",
+    "rb:payments-gw:config",
+    "FIXED_WITH"
+   ]
+  ]
+ }
+}

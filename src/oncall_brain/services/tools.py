@@ -128,8 +128,8 @@ def recall_similar(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     strong = [r for r in q.rows if r["score"] >= RECALL_MIN_SCORE]
     summary = (f"Recalled {strong[0]['incident']} '{strong[0]['title']}' (cause on {strong[0]['cause_service']})"
                if strong else f"{len(q.rows)} past incidents touch this path, none with the same symptom")
-    hl = Highlight(nodes=[r["incident"] for r in q.rows] + [r["cause_service"] for r in q.rows],
-                   edges=[(a.incident_id, r["incident"], "RECALLS") for r in q.rows])
+    hl = Highlight(nodes=[r["incident"] for r in strong] + [r["cause_service"] for r in strong],
+                   edges=[(a.incident_id, r["incident"], "RECALLS") for r in strong])
     return ToolOutput(summary=summary, data=q.rows, queries=qs, highlight=hl)
 
 

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>On-call Brain</title>
+  <link rel="stylesheet" href="/web/style.css">
+  <!-- Pinned CDN builds (verified 200). Order matters: cytoscape-dagre registers itself on window.cytoscape. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+  <script type="module" src="/web/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>On-call Brain</h1>
+        <p class="tagline">Incident agents that reason over a FalkorDB graph and remember what fixed things</p>
+      </div>
+    </div>
+    <div class="meta">
+      <span class="chip" id="tenant" title="Each tenant is its own FalkorDB graph">tenant: …</span>
+      <span class="chip" id="db" title="FalkorDB connection">FalkorDB …</span>
+      <span class="chip planner" id="planner">planner …</span>
+    </div>
+  </header>
+
+  <nav class="controls" aria-label="Demo scenario">
+    <button id="btn-reset" class="step"><b>0</b> Reset demo</button>
+    <button id="btn-act1" class="step" disabled><b>1</b> Act 1</button>
+    <button id="btn-resolve" class="step" disabled><b>2</b> Confirm root cause → save to memory</button>
+    <button id="btn-act2" class="step" disabled><b>3</b> Act 2</button>
+    <span id="status" class="status" role="status"></span>
+  </nav>
+
+  <main class="layout">
+    <section class="stage">
+      <div class="graph-wrap">
+        <div id="graph" aria-label="Service dependency graph"></div>
+        <div class="hud" id="hud"></div>
+        <ul class="legend" aria-label="Legend">
+          <li><i class="lg svc"></i>service</li>
+          <li><i class="lg t1"></i>tier-1</li>
+          <li><i class="lg chg"></i>change</li>
+          <li><i class="lg person"></i>person</li>
+          <li><i class="lg team"></i>team</li>
+          <li><i class="lg inc"></i>incident</li>
+          <li><i class="lg rb"></i>runbook</li>
+          <li><i class="ln retired"></i>retired dependency</li>
+          <li><i class="ln cause"></i>root-cause path</li>
+          <li><i class="ln memory"></i>memory link</li>
+        </ul>
+      </div>
+      <div class="outcome" id="outcome"></div>
+    </section>
+
+    <aside class="trace-panel">
+      <div class="trace-head">
+        <h2>Agent trace</h2>
+        <span id="trace-count" class="muted"></span>
+        <button id="btn-skip" class="ghost" hidden>Skip animation</button>
+      </div>
+      <ol id="trace" class="trace"></ol>
+    </aside>
+  </main>
+</body>
+</html>
