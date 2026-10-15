@@ -186,20 +186,22 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         raise ValueError(f"unknown hypothesis {a.hypothesis_id!r}")
     f = fq.rows[0]
     qs = [fq]
-    live = ctx.repo.read("live_path", origin=f["origin"], target=f["service"], at=f["at"])
+    live = ctx.repo.read("live_paths", origin=f["origin"], target=f["service"], at=f["at"])
     qs.append(live)
-    live_path = live.rows[0]["path"] if live.rows else []
+    paths = [r["path"] for r in live.rows]
     any_path: list[str] = []
-    if not live_path:
+    if not paths:
         anyq = ctx.repo.read("any_path", origin=f["origin"], target=f["service"])
         qs.append(anyq)
         any_path = anyq.rows[0]["path"] if anyq.rows else []
     anomalous: set[str] = set()
-    if live_path or any_path:
-        an = ctx.repo.read("anomalies_between", services=live_path or [f["service"]], since=f["change_at"],
-                           until=f["at"])
+    if paths or any_path:
+        on_paths = sorted({s for p in paths for s in p}) or [f["service"]]
+        an = ctx.repo.read("anomalies_between", services=on_paths, since=f["change_at"], until=f["at"])
         qs.append(an)
         anomalous = {r["service"] for r in an.rows}
+    # The symptom may have travelled any live path; judge the one it lit up most (shortest on ties).
+    live_path = min(paths, key=lambda p: (sum(s not in anomalous for s in p[1:-1]), len(p))) if paths else []
     facts = CheckFacts(
         change_service=f["service"], alert_service=f["origin"],
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],

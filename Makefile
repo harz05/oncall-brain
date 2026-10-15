@@ -48,7 +48,7 @@ demo:
 	$(E) python -m scripts.demo --tenant demo
 
 eval:
-	$(E) python -m scripts.eval --n 30
+	$(E) python -m scripts.eval --n 200
 
 docs:
 	$(E) python -m scripts.gen_queries_doc

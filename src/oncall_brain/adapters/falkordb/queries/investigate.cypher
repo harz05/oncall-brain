@@ -78,6 +78,15 @@ ORDER BY length(p)
 LIMIT 1
 RETURN [n IN nodes(p) | n.id] AS path
 
+// name: live_paths
+// purpose: Up to 20 live dependency paths (edges valid at alert time) from the alerting service to a suspect's service, shortest first; the check picks the one the anomaly actually travelled.
+MATCH p = (:Service {id: $origin})-[:DEPENDS_ON*0..6]->(:Service {id: $target})
+WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at))
+WITH p
+ORDER BY length(p)
+LIMIT 20
+RETURN [n IN nodes(p) | n.id] AS path
+
 // name: any_path
 // purpose: shortestPath ignoring validity, to tell a retired dependency apart from no dependency at all.
 MATCH (o:Service {id: $origin}), (t:Service {id: $target})
