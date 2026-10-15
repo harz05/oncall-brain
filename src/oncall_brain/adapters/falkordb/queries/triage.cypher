@@ -42,3 +42,4 @@ RETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name 
 MATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})
 MERGE (i)-[pg:PAGED]->(p)
 ON CREATE SET pg.at = $at, pg.for_service = $service
+RETURN pg.for_service AS first_for

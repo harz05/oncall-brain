@@ -106,10 +106,13 @@ def page_on_call(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
     if not q.rows:
         return ToolOutput(summary=f"Nobody on call for {a.service}", data=[], queries=qs)
     r = q.rows[0]
+    summary = f"Paged {r['name']} ({r['handle']}, {r['team_name']}) for {a.service}"
     if head:
-        qs.append(ctx.repo.write("record_page", incident_id=a.incident_id, person=r["person"], at=at,
-                                 service=a.service))
-    return ToolOutput(summary=f"Paged {r['name']} ({r['handle']}, {r['team_name']}) for {a.service}", data=r,
+        pq = ctx.repo.write("record_page", incident_id=a.incident_id, person=r["person"], at=at, service=a.service)
+        qs.append(pq)
+        if pq.rows and pq.rows[0]["first_for"] != a.service:  # same person already engaged for another service
+            summary = f"{r['name']} ({r['handle']}, {r['team_name']}) owns {a.service} too; already engaged"
+    return ToolOutput(summary=summary, data=r,
                       queries=qs, highlight=Highlight(nodes=[a.service, r["team"], r["person"]],
                                                       edges=[(r["team"], a.service, "OWNS"),
                                                              (r["person"], r["team"], "ON_CALL")]))
@@ -273,6 +276,43 @@ def incident_board(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     board, q = load_board(ctx.repo, a.incident_id)
     return ToolOutput(summary=f"{len(board['steps'])} steps, {len(board['hypotheses'])} hypotheses", data=board,
                       queries=[q])
+
+
+class ChangeArgs(BaseModel):
+    change_id: str = Field(description="Change id, e.g. chg:pgw-pool-1")
+
+
+class ServiceIdArgs(BaseModel):
+    service: str = Field(description="Service id, e.g. svc:payments-gw")
+
+
+@tool()
+def who_knows(ctx: ToolContext, a: ServiceIdArgs) -> ToolOutput:
+    """Company brain: who knows this service, ranked by evidence in the graph (owning team, changes they
+    authored, incidents they were paged for), with the evidence counts as the explanation."""
+    q = ctx.repo.read("who_knows", service=a.service)
+    hl = Highlight(nodes=[a.service] + [r["person"] for r in q.rows])
+    top = q.rows[0] if q.rows else None
+    summary = (f"{top['name']} ({top['team']}): {top['changes']} changes, {top['incidents']} incidents"
+               + (", on the owning team" if top["on_owning_team"] else "")) if top else "nobody on record"
+    return ToolOutput(summary=summary, data=q.rows, queries=[q], highlight=hl)
+
+
+@tool()
+def change_story(ctx: ToolContext, a: ChangeArgs) -> ToolOutput:
+    """Company brain: trace a change to its sources (ticket, chat), its author and team, and the incidents
+    it caused."""
+    q = ctx.repo.read("change_story", change_id=a.change_id)
+    if not q.rows:
+        raise ValueError(f"unknown change {a.change_id!r}")
+    r = dict(q.rows[0])
+    r["sources"] = [s for s in r["sources"] if s.get("id")]
+    nodes = [a.change_id, r["service"], *(s["id"] for s in r["sources"]), *r["incidents"]]
+    edges = [(a.change_id, r["service"], "CHANGED"), *((s["id"], a.change_id, "SOURCE") for s in r["sources"]),
+             *((i, a.change_id, "CAUSED_BY") for i in r["incidents"])]
+    return ToolOutput(summary=f"{r['summary']} by {r['author']} ({r['team']}); {len(r['sources'])} sources, "
+                      f"caused {len(r['incidents'])} incident(s)", data=r, queries=[q],
+                      highlight=Highlight(nodes=nodes, edges=edges))
 
 
 @tool()

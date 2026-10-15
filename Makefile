@@ -8,7 +8,7 @@ E := [ -f $(ENV_SH) ] && . $(ENV_SH); \
 TENANT ?= acme
 PORT ?= 8000
 
-.PHONY: setup falkordb-bin db db-stop seed dev mcp test test-unit lint demo docs snapshot
+.PHONY: setup falkordb-bin db db-stop seed dev mcp test test-unit lint demo eval docs snapshot
 
 setup:
 	$(E) if command -v uv >/dev/null; then uv venv -q --allow-existing --python 3.12 $$VIRTUAL_ENV && uv pip install -q --python $$VIRTUAL_ENV/bin/python -e ".[dev]"; \
@@ -42,10 +42,13 @@ test-unit:
 	$(E) pytest -q tests/unit
 
 lint:
-	$(E) ruff check src scripts tests data
+	$(E) ruff check src scripts tests
 
 demo:
-	$(E) python -m scripts.demo --tenant demo_$$(date +%s)
+	$(E) python -m scripts.demo --tenant demo
+
+eval:
+	$(E) python -m scripts.eval --n 30
 
 docs:
 	$(E) python -m scripts.gen_queries_doc

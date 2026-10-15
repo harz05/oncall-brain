@@ -80,3 +80,16 @@ def test_tenants_are_isolated(store, tenant):
         assert not store.tenant(other).read("incident_head", incident_id="inc:checkout-latency").rows
     finally:
         store.drop(other)
+
+
+def test_company_brain_who_knows_and_change_sources(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    experts = call("who_knows", ctx, {"service": "svc:payments-gw"}).data
+    assert experts[0]["on_owning_team"] and experts[0]["changes"] >= 1
+    assert experts == sorted(experts, key=lambda r: -r["score"])
+    story = call("change_story", ctx, {"change_id": "chg:pgw-pool-1"}).data
+    assert {s["id"] for s in story["sources"]} == {"ticket:CR-881", "msg:pay-deploys-1"}
+    assert story["team"] == "Payments"
