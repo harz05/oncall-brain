@@ -32,7 +32,7 @@ Ports are published on 127.0.0.1 only. Put a reverse proxy (Caddy, nginx) with T
 
 ## Option C: a static replay on GitHub Pages (no backend)
 
-`.github/workflows/pages.yml` publishes `web/` on every push to main (enable once: Settings -> Pages -> Source: GitHub Actions). With no API behind it, the UI notices and replays the recorded runs in `web/fixtures/` (regenerate them with `python -m scripts.gen_fixtures` after changing the agents). Everything except the Ask tab and live resets works. `.github/workflows/ci.yml` runs lint, the query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on every push.
+`.github/workflows/pages.yml` publishes `web/` on every push to main (enable once: Settings -> Pages -> Source: GitHub Actions). With no API behind it, the UI notices and replays the recorded runs in `web/fixtures/` (regenerate them with `python -m scripts.gen_fixtures` after changing the agents; act 2's recording includes the same-incident memory comparison). The header then shows a "recorded replay" chip instead of a FalkorDB connection chip. Everything except the Ask tab (it lists example questions instead) and live resets works. `.github/workflows/ci.yml` runs lint, the query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on every push.
 
 ## Settings that matter in public
 

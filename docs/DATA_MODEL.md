@@ -26,8 +26,13 @@ flowchart LR
   Change -->|AUTHORED_BY| Person
   Ticket -->|REQUESTED| Change
   Ticket -->|AUTHORED_BY| Person
-  Message -->|MENTIONS| Change
+  Ticket -->|"MENTIONS (services, changes, docs)"| Doc
+  Message -->|"MENTIONS (services, changes, incidents, docs, tickets)"| Change
   Message -->|AUTHORED_BY| Person
+  Doc -->|"MENTIONS (services, changes, incidents)"| Service
+  Doc -->|DECIDES| Service
+  Doc -->|SUPERSEDES| Doc
+  Doc -->|AUTHORED_BY| Person
   Alert -->|FIRED_ON| Service
   Anomaly -->|ON| Service
   Incident -->|TRIGGERED_BY| Alert
@@ -45,24 +50,21 @@ flowchart LR
   Runbook -->|FOR_SERVICE| Service
   Incident -->|LOGGED| AgentStep
   Incident -->|HAS_UPDATE| Message
-  Message -->|CITES| Change
-  Message -->|CITES| Ticket
-  Message -->|CITES| Runbook
-  Message -->|CITES| Person
+  Message -->|"CITES (change, ticket, chat, doc, runbook, person)"| Change
   Meta["Meta (version, seed)"]
 
   classDef semantic fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b45
   classDef episodic fill:#fdecea,stroke:#b5523b,color:#45201a
   classDef procedural fill:#e6f4ea,stroke:#3d8b5a,color:#173a24
-  class Team,Person,Service,Change,Ticket,Alert,Anomaly semantic
+  class Team,Person,Service,Change,Ticket,Doc,Alert,Anomaly semantic
   class Incident,Hypothesis,Evidence,AgentStep,Message episodic
   class Runbook procedural
 ```
 
 Blue nodes hold semantic facts about the company, red nodes hold episodic memory of incidents, and the green node
-holds procedural memory. `Message` is drawn red because the status updates the agents post are episodic. Seeded chat
-messages are semantic source material. `Meta` is not memory: it is one unconnected node that fingerprints the seed
-data.
+holds procedural memory. `Message` is drawn red because the status updates the agents write are episodic. Seeded chat
+messages are semantic source material, like `Doc` and `Ticket`. `Meta` is not memory: it is one unconnected node that
+fingerprints the seed data.
 
 ## Nodes
 
@@ -75,17 +77,18 @@ semantic facts current after seeding.
 | Label | Key properties | Meaning | Written by |
 |---|---|---|---|
 | `Team` | `id`, `name` | An engineering team that owns services and has an on-call rotation. | seed `ingest_teams` |
-| `Person` | `id`, `name`, `handle` (`@first.last`, e.g. `@sana.brandt`) | An engineer. All names are fake. | seed `ingest_people` |
+| `Person` | `id`, `name`, `handle` (`@first.last`, e.g. `@sana.brandt`) | An engineer. All names are fake, and no two people share a first name. | seed `ingest_people` |
 | `Service` | `id`, `name`, `tier` (1 = customer-facing critical, 2 = other) | A deployable service. | seed `ingest_services` |
 | `Change` | `id`, `kind` (`deploy` / `config`), `summary`, `at`, `version` (deploys only), `rolled_back_at` (if rolled back) | A deploy or a config change to one service. Changes are the suspects in an investigation. | seed `ingest_changes`; `record_change` → `record_change` (re-recording an id corrects it: the old `CHANGED` / `AUTHORED_BY` edges are dropped) |
 | `Alert` | `id`, `name`, `symptom` (`latency` / `errors` / `saturation`), `at`, `act` (story act 1, 2 or 3; seeded alerts only) | A monitoring alert that fired on a service. It is what starts an investigation. | seed `ingest_alerts`; `raise_alert` → `raise_alert` |
 | `Anomaly` | `id`, `kind` (`latency` / `errors` / `saturation`), `summary`, `at` | A monitoring signal on a service. Checks use it to see whether a symptom travelled along a dependency path. | seed `ingest_anomalies`; `record_anomaly` → `record_anomaly` |
 | `Incident` | `id`, `title`, `symptom`, `status` (`open` / `resolved`), `opened_at`, `resolved_at` | The shared board that every agent role reads and writes. Past incidents are already resolved. | seed `ingest_incidents` (history); `open_incident` → `open_incident`; `resolve_incident` → `resolve_incident` sets `status`, `resolved_at` |
-| `Hypothesis` | `id`, `status` (see below), `source` (`dependency-path` / `recent-anywhere` / `memory`, or `human` when a human confirmed a change no agent suspected), `hops`, `created_at`, `runbook` (memory suspects only: the runbook that suggested it), `explained` (list of alerting service ids the change can reach: the alert's own service, plus in a storm each other folded alerting service with a live path to it; empty without a live path), `onset` (time of the first anomaly on the change's own service after the change; unset if none), `note` (co-causes only: why it is still needed, e.g. "also needed: it alone explains refunds") | "Change X caused this incident", together with where the suspicion came from. Status: `open` → `supported` / `refuted` / `inconclusive` after its check. When several are supported, `conclude` keeps one leading `supported` cause; another becomes `outranked` if the leader explains every alerting service it explains, else `co-cause`. `confirmed` is set only by a human, and then every other `supported` or `co-cause` suspect becomes `outranked`. A later re-check never changes `confirmed`. | `propose_hypotheses`, `hypothesize_from_memory` → `add_hypotheses`; status, `explained`, `onset` from `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked`, `record_co_causes` (`note`); `resolve_incident` (creates it if no agent suspected the change) |
-| `Evidence` | `id`, `verdict` (`supports` / `refutes` / `inconclusive` / `outranked`), `reason`, `path` (service ids the check walked), `at`, `explained` (as on the hypothesis, at check time) | The result of one check on a hypothesis, together with the path that justifies it. An outranked hypothesis gets a separate `outranked` Evidence node that `REFUTES` it, with the reason; the check's own `SUPPORTS` evidence stays, so a human can still confirm it. A human confirmation adds a `supports` node with reason "confirmed by a human". | `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked`; `resolve_incident` |
+| `Hypothesis` | `id`, `status` (see below), `source` (`dependency-path` / `recent-anywhere` / `memory`, or `human` when a human confirmed a change no agent suspected), `hops`, `created_at`, `runbook` (memory suspects only: the runbook that suggested it), `explained` (list of alerting service ids the change can reach: the alert's own service, plus in a storm each other folded alerting service with a live path to it; empty without a live path), `onset` (time of the first anomaly on the change's own service after the change; unset if none), `gaps` (services in the middle of the judged path with no anomaly on record: a possible monitoring gap; empty for a complete chain), `note` (co-causes only: why it is still needed, e.g. "also needed: it alone explains refunds") | "Change X caused this incident", together with where the suspicion came from. Status: `open` → `supported` / `refuted` after its check (a check never leaves it undecided: a silent middle hop gives a weaker `supported` with `gaps` set, ranked after complete chains). When several are supported, `conclude` keeps one leading `supported` cause; another becomes `outranked` if the leader explains every alerting service it explains, else `co-cause`. `confirmed` is set only by a human, and then every other `supported` or `co-cause` suspect becomes `outranked`. A later re-check never changes `confirmed`. | `propose_hypotheses`, `hypothesize_from_memory` → `add_hypotheses`; status, `explained`, `onset`, `gaps` from `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked`, `record_co_causes` (`note`); `resolve_incident` (creates it if no agent suspected the change) |
+| `Evidence` | `id`, `verdict` (`supports` / `refutes` / `outranked`), `reason` (the full explanation), `tag` (a few words for the status update's "Ruled out:" line: `rolled back`, `dependency retired`, `no dependency path`, `no anomaly after it`, `supported` / `supported, with a monitoring gap`, `outranked`, `a human confirmed another cause`), `path` (service ids the check walked), `at`, `explained` (as on the hypothesis, at check time) | The result of one check on a hypothesis, together with the path that justifies it. An outranked hypothesis gets a separate `outranked` Evidence node that `REFUTES` it, with the reason; the check's own `SUPPORTS` evidence stays, so a human can still confirm it. A human confirmation adds a `supports` node with reason "confirmed by a human". | `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked`; `resolve_incident` |
 | `Runbook` | `id`, `title`, `steps` (list), `kind` (change kind it fixes), `uses`, `successes`, `learned_from` (learned runbooks only) | A fix procedure for one service and one kind of change. Its confidence is `successes / uses`. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` (learns, or adds 1 to `uses` and `successes`); `check_hypothesis` → `record_evidence` adds 1 to `uses` when the runbook's suggestion is refuted (once, on open → refuted) |
-| `Message` | `id`, `kind` (`chat` / `status_update`), `channel`, `text`, `at` | Seeded chat that announced a change, or a status update the comms agent posted. | seed `ingest_messages` (chat); `post_update` → `post_update` (status updates) |
-| `Ticket` | `id`, `title`, `text`, `at` | A change-request ticket, which a status update can cite as a source. | seed `ingest_tickets` |
+| `Message` | `id`, `kind` (`chat` / `status_update`), `channel`, `text`, `at` | Seeded chat (change announcements, design debates, `#incidents` wrap-ups), or the status update the comms agent wrote for #incidents. The update is stored on the incident; nothing is sent to a chat tool. `text` is full-text indexed, so `ask` finds both. | seed `ingest_messages` (chat); `post_update` → `post_update` (status updates) |
+| `Ticket` | `id`, `title`, `text`, `at` | A change request or other work item (`CR-881`, `PAY-412`, `PLAT-233`, ...), which a status update can cite and `ask` can find (`title` and `text` are full-text indexed). | seed `ingest_tickets` |
+| `Doc` | `id`, `kind` (`postmortem` / `design` / `decision` / `runbook`), `title`, `text`, `at` | A written page: a postmortem, a design note, a decision record (ADR) or a runbook page. Company-brain source material; `title` and `text` are full-text indexed for `ask`. Not the same as `Runbook`, which is procedural memory the agents act on. | seed `ingest_docs`, `ingest_doc_links` |
 | `AgentStep` | `id`, `seq`, `role` (`triage` / `investigator` / `comms`), `tool` (tool name or `handoff`), `target`, `reason`, `summary`, `rows`, `ms`, `writes` | One step of one agent: what it did, why, and what it cost. Handoffs between roles are steps too. | agent loop (`agents/loop.record`) → `log_step` |
 | `Meta` | `id` (always `meta`), `version` (fingerprint of the generated data), `seed` | Which generator built this graph. `reset()` restores the pristine copy only if its `version` matches the current generator run with this `seed`, else it re-seeds with the same seed. | seed `ingest_meta` |
 
@@ -98,9 +101,11 @@ semantic facts current after seeding.
 | `(Team)-[:OWNS]->(Service)` | | Ownership. | seed `ingest_services` |
 | `(Service)-[:DEPENDS_ON]->(Service)` | `valid_from`, `valid_to` (absent = still live) | The caller calls the callee during that window. A pair has at most one live edge: `add_dependency` creates a new edge only if none is live, so a dependency that is retired and later re-added gets a new edge with its own window. Adding a live one again only moves its `valid_from` earlier, if the new time is earlier. | seed `ingest_depends_on` (`MERGE` on `valid_from`); `add_dependency` → `add_dependency`; `retire_dependency` → `retire_dependency` (sets `valid_to` on the live edge) |
 | `(Change)-[:CHANGED]->(Service)` | | The service the change touched. | seed `ingest_changes`; `record_change` → `record_change` |
-| `(Change\|Ticket\|Message)-[:AUTHORED_BY]->(Person)` | | Who made the change, filed the ticket or wrote the chat message. | seed `ingest_changes`, `ingest_tickets`, `ingest_messages`; `record_change` (if an author is given) |
+| `(Change\|Ticket\|Message\|Doc)-[:AUTHORED_BY]->(Person)` | | Who made the change, filed the ticket, wrote the chat message or the doc. `who_knows` counts the docs, tickets and chat someone wrote that mention or decide a service (at most 3 points, so writing about a service never outweighs hands-on evidence). | seed `ingest_changes`, `ingest_tickets`, `ingest_messages`, `ingest_docs`; `record_change` (if an author is given) |
 | `(Ticket)-[:REQUESTED]->(Change)` | | The change request behind a change. | seed `ingest_tickets` |
-| `(Message)-[:MENTIONS]->(Change)` | | A chat message that announced a change. | seed `ingest_messages` |
+| `(Doc)-[:MENTIONS]->(Service\|Change\|Incident)`, `(Ticket)-[:MENTIONS]->(Service\|Change\|Doc)`, `(Message)-[:MENTIONS]->(Service\|Change\|Incident\|Doc\|Ticket)` | | What a doc, ticket or chat message talks about (a chat message that announced a change `MENTIONS` it). `ask` expands search hits along these edges; `change_story` lists every doc and chat that mentions a change. | seed `ingest_docs`, `ingest_tickets`, `ingest_messages` (each mention is looked up per label, so the id indexes are used) |
+| `(Doc)-[:DECIDES]->(Service)` | | The doc is the decision of record for that service (a design note or decision record). `ask` says so in its answer, and `who_knows` counts it. | seed `ingest_docs` |
+| `(Doc)-[:SUPERSEDES]->(Doc)` | | The newer doc replaces the older one (e.g. ADR-011 Kafka retention of 7 days supersedes ADR-006). `ask` ranks a superseded doc below its replacement and flags it. | seed `ingest_doc_links` (after every doc exists) |
 | `(Alert)-[:FIRED_ON]->(Service)` | | Where the alert fired. | seed `ingest_alerts`; `raise_alert` → `raise_alert` |
 | `(Anomaly)-[:ON]->(Service)` | | Where the anomaly was seen. | seed `ingest_anomalies`; `record_anomaly` → `record_anomaly` |
 | `(Runbook)-[:FOR_SERVICE]->(Service)` | | The service the runbook fixes. Together with `Runbook.kind`, it says which changes the runbook is for. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` |
@@ -112,13 +117,13 @@ semantic facts current after seeding.
 | `(Incident)-[:CONSULTED]->(Person)` | `for_service`, `score` | The person comms will ask about the culprit service: the top `who_knows` answer. The status update names them in its "Ask:" line. | `who_knows` (with an `incident_id`) → `record_consult` |
 | `(Incident)-[:HAS_HYPOTHESIS]->(Hypothesis)` | | A suspect on the board. | `add_hypotheses` |
 | `(Hypothesis)-[:SUSPECTS]->(Change)` | | The change the hypothesis blames. | `add_hypotheses` |
-| `(Evidence)-[:SUPPORTS]->(Hypothesis)` / `(Evidence)-[:REFUTES]->(Hypothesis)` | | The verdict of a check. An `inconclusive` verdict only sets the hypothesis status and writes no edge. An outranked hypothesis also gets a `REFUTES` edge from its separate `outranked` Evidence node; its check's `SUPPORTS` edge is kept. A co-cause gets no new edge (its `note` says why it stays). | `check_hypothesis` → `record_evidence` (`FOREACH` picks the edge); `conclude` → `record_outranked`; `resolve_incident` |
+| `(Evidence)-[:SUPPORTS]->(Hypothesis)` / `(Evidence)-[:REFUTES]->(Hypothesis)` | | The verdict of a check: every check writes exactly one of the two edges (verdicts are supports or refutes). An outranked hypothesis also gets a `REFUTES` edge from its separate `outranked` Evidence node; its check's `SUPPORTS` edge is kept. A co-cause gets no new edge (its `note` says why it stays). | `check_hypothesis` → `record_evidence` (`FOREACH` picks the edge); `conclude` → `record_outranked`; `resolve_incident` |
 | `(Incident)-[:RECALLS]->(Incident)` | `score`, `cause_service` | Episodic recall. The score is 2 when the past incident's root-cause service is on this alert's live dependency path, plus 1 for the same symptom. The planner acts on a score of 3 or more. | `recall_similar` → `record_recalls` |
 | `(Incident)-[:CAUSED_BY]->(Change)` | | The human-confirmed root cause (also the incident's `confirmed` hypothesis). | seed `ingest_incidents`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:FIXED_WITH]->(Runbook)` | | The runbook that fixed the incident. | seed `ingest_incidents`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:LOGGED]->(AgentStep)` | | The incident's agent history, in `seq` order. | agent loop → `log_step` |
-| `(Incident)-[:HAS_UPDATE]->(Message)` | | The status update posted for the incident. | `post_update` → `post_update` |
-| `(Message)-[:CITES]->(Change\|Ticket\|Message\|Runbook\|Person)` | | Every claim in a status update links to its source node, including the person it says to ask. A rewrite drops stale citations. | `post_update` → `post_update` |
+| `(Incident)-[:HAS_UPDATE]->(Message)` | | The status update written for the incident (stored here; not sent anywhere). | `post_update` → `post_update` |
+| `(Message)-[:CITES]->(Change\|Ticket\|Message\|Doc\|Runbook\|Person)` | | Every claim in a status update links to its source node, including the person it says to ask (act 1 cites `chg:pgw-pool-1`, `ticket:CR-881`, `msg:pay-deploys-1`, `doc:cost-review-pgw` and `person:sana-brandt`). A rewrite drops stale citations. | `post_update` → `post_update` |
 
 ## Ids
 
@@ -136,8 +141,9 @@ Ids are stable and human-readable, so writes can `MERGE` on them and a trace can
 | Hypothesis | `hyp:<incident slug>:<change slug>` (one per incident and change, also when `resolve_incident` creates it) | `hyp:checkout-latency:pgw-pool-1` |
 | Evidence | `ev:<incident slug>:<change slug>` for the check (a re-check overwrites it); `...:outranked` for `conclude`'s outranked verdict; `...:human` both for the "confirmed by a human" support and for the refutation of a suspect a human's confirmation outranked | `ev:checkout-latency:pgw-pool-1`, `ev:subscriptions-latency:subs-88:outranked`, `ev:checkout-latency:cart-310:human`, `ev:checkout-latency:pgw-pool-1:human` |
 | Runbook | `rb:<slug>` seeded, `rb:<service>:<change kind>` learned | `rb:pg-disk`, `rb:payments-gw:config` |
-| Message | `msg:<slug>` chat, `msg:update:<incident id>` status update | `msg:pay-deploys-1`, `msg:update:inc:checkout-latency` |
-| Ticket | `ticket:<key>` | `ticket:CR-881` |
+| Message | `msg:<slug>` story chat, `msg:chat-<nnn>` corpus chat, `msg:update:<incident id>` status update | `msg:pay-deploys-1`, `msg:chat-008`, `msg:update:inc:checkout-latency` |
+| Ticket | `ticket:<key>` | `ticket:CR-881`, `ticket:PAY-412` |
+| Doc | `doc:<slug>`; a past incident's postmortem is `doc:pm-<incident number>` | `doc:cost-review-pgw`, `doc:adr-012`, `doc:pm-0911` |
 | AgentStep | `<incident id>#<seq>` | `inc:refunds-latency#7` |
 | Meta | `meta` (one per graph) | `meta` |
 
@@ -145,12 +151,18 @@ Ids are stable and human-readable, so writes can `MERGE` on them and a trace can
 
 `FalkorRepository.ensure_schema` (run by every seed) creates one range index per label on `id`:
 `CREATE INDEX FOR (n:<Label>) ON (n.id)` for Team, Person, Service, Change, Alert, Anomaly, Incident, Hypothesis,
-Evidence, Runbook, Message, Ticket and AgentStep (`repository.INDEXED_LABELS`). The single `Meta` node is not indexed.
-The agent's queries anchor on an id first, for example `(:Incident {id: $incident_id})` or
+Evidence, Runbook, Message, Ticket, Doc and AgentStep (`repository.INDEXED_LABELS`). The single `Meta` node is not
+indexed. The agent's queries anchor on an id first, for example `(:Incident {id: $incident_id})` or
 `(:Service {id: $service})`. The index finds the start node, and the traversal then runs over adjacency.
 
 It also creates range indexes on `Change.at` and `Anomaly.at` (`repository.TIME_INDEXED`) for the alert-window
 filters. `recent_changes` and `anomalies_between` pass literal `$since` / `$until` bounds, so they use them.
+
+And it creates three FalkorDB full-text indexes (`repository.FULLTEXT`): `CREATE FULLTEXT INDEX FOR (n:Doc) ON
+(n.title, n.text)`, the same for `Ticket`, and `Message` on `text`. `search_knowledge` queries each with
+`db.idx.fulltext.queryNodes(<label>, $query)`. The caller's question is reduced to content words (stopwords dropped,
+only `[a-z0-9]` kept, at most 12, joined with `|`), so nothing the user types reaches the index's query syntax.
+`GRAPH.COPY` carries these indexes, so a reset keeps them (`test_fulltext_index_is_idempotent_survives_reset_and_scenarios_still_load`).
 
 There are no uniqueness constraints, by design. Idempotency comes from `MERGE` on a stable id in every write
 statement, so re-loading, re-running a tool or replaying an act updates nodes instead of duplicating them. All writes
@@ -165,7 +177,7 @@ writer.
 | Memory kind | In the graph | Written | Read |
 |---|---|---|---|
 | **Episodic**: what happened | `Incident` with `TRIGGERED_BY`, `CORRELATED_WITH`, `SHARED_UPSTREAM`, `IMPACTS`, `PAGED`, `CONSULTED`, `HAS_HYPOTHESIS` → `Hypothesis` ← `SUPPORTS`/`REFUTES` `Evidence`, `CAUSED_BY` → `Change`, `HAS_UPDATE`, and the `LOGGED` → `AgentStep` history; `RECALLS` links incidents to each other | by the agents during the incident, and by `resolve_incident` when a human confirms the cause | `recall_similar` finds past incidents by structure: their cause service is on today's live dependency path. Text similarity is not used. `incident_board` replays the board for the planner. |
-| **Semantic**: how the company works | `Team`, `Person`, `Service`, `MEMBER_OF`, `OWNS`, `DEPENDS_ON {valid_from, valid_to}`, `ON_CALL {start, end}`, `Change` + `CHANGED` / `AUTHORED_BY`, sources (`Ticket` `REQUESTED`, chat `Message` `MENTIONS`) | by seed / ingest, then kept current by the event tools | Every traversal filters time-bounded edges to the alert time, so the graph answers "who depended on what, and who was on call, at that moment". `who_knows` and `change_story` answer company-brain questions with sources. |
+| **Semantic**: how the company works | `Team`, `Person`, `Service`, `MEMBER_OF`, `OWNS`, `DEPENDS_ON {valid_from, valid_to}`, `ON_CALL {start, end}`, `Change` + `CHANGED` / `AUTHORED_BY`, sources (`Doc`, `Ticket`, chat `Message`, linked by `REQUESTED`, `MENTIONS`, `DECIDES`, `SUPERSEDES`, `AUTHORED_BY`) | by seed / ingest, then kept current by the event tools (docs, tickets and chat are seeded only; there is no event tool for them yet) | Every traversal filters time-bounded edges to the alert time, so the graph answers "who depended on what, and who was on call, at that moment". `ask`, `who_knows` and `change_story` answer company-brain questions with sources; `SUPERSEDES` says which doc is current. |
 | **Procedural**: what fixes it | `Runbook {kind, steps, uses, successes}` + `FOR_SERVICE` + `FIXED_WITH` | `resolve_incident` learns `rb:<service>:<kind>` from a confirmed fix, or adds 1 to `uses` and `successes` if it already exists. `record_evidence` adds 1 to `uses` when a check refutes the runbook's suggestion, so its confidence drops. | `memory_suspects` follows `RECALLS` → `FIXED_WITH` → `Runbook` → `FOR_SERVICE` and suspects in-window changes of the runbook's kind on that service, most trusted runbook first. `update_facts` adds the runbook memory used for the cause (`h.runbook`), or the one the incident was `FIXED_WITH`, to the status update as its "Next action". A runbook that only shares the service and change kind is not suggested: it may fix a different failure. |
 
 Act 2 shows the three kinds working together. The refunds alert recalls the checkout incident because its cause
@@ -182,7 +194,11 @@ Seeding rebuilds the tenant from scratch and also keeps `pristine_<name>`. A dem
 current generator. Tenants share no nodes, so one tenant's incidents and learned runbooks can never be recalled for
 another. The seeded company (seed 7) has 6 teams, 24 people, 25 services, 39 `DEPENDS_ON` edges (one retired), 24
 on-call shifts, 109 changes, 5 alerts (1 for act 1, 1 for act 2, 3 for act 3), 44 anomalies, 7 runbooks, 7 past
-incidents (each with a `PAGED` edge), 3 tickets, 1 chat message and the `Meta` node: 232 nodes and 422 relationships.
+incidents (each with a `PAGED` edge), 34 docs (13 design notes, 9 postmortems, 6 decision records, 6 runbook pages;
+4 `SUPERSEDES` and 18 `DECIDES` edges), 21 tickets, 41 chat messages and the `Meta` node: 324 nodes and 777
+relationships (234 of them `MENTIONS`). The corpus is small and synthetic: a few planted facts to ask about (why the
+payments-gw pool was lowered, who designed the checkout retries, why legacy-billing left the checkout path, the
+postgres-orders connection limit debate) plus routine paperwork, all dated outside the act windows.
 
 ## Three traversals in plain English
 

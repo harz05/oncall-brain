@@ -1,6 +1,6 @@
 # Architecture
 
-On-call Brain is a small team of incident agents (triage, investigator, comms) that work on a FalkorDB graph of a company: its services, dependencies, owners, on-call shifts, changes, tickets, chats and past incidents. The agents share one incident "board" that lives in the graph. When a human confirms a fix, it becomes memory that the next incident recalls.
+On-call Brain is a small team of incident agents (triage, investigator, comms) that work on a FalkorDB graph of a company: its services, dependencies, owners, on-call shifts, changes, docs, tickets, chats and past incidents. The agents share one incident "board" that lives in the graph. When a human confirms a fix, it becomes memory that the next incident recalls. By default the three roles are played by one deterministic planner (rules that choose each step from what the graph returns); an LLM can take its place behind a port, but has not been run against a live model in this project.
 
 This document follows the usual system-design order: requirements, high-level design, deep dive, scale and reliability, trade-offs. It names the real modules and functions, so you can open the file next to each section.
 
@@ -24,11 +24,11 @@ Related documents:
 | F2 | Find who is hurt: every service that depends on the alerting service, directly or through other services, using only dependencies that existed at alert time. | `blast_radius` tool and query |
 | F3 | Find and page whoever is on call for the owning team at alert time. | `page_on_call`, `on_call_for` |
 | F4 | List suspects: changes (deploys, config changes) in the 2-hour window before the alert on any service the alerting service depends on. Also list the newest changes anywhere, so the graph can refute what a flat change log would blame. | `propose_hypotheses`, `path_suspects`, `recent_changes` |
-| F5 | Test each suspect against graph facts and record a verdict with a reason. If several are supported, keep one leading cause, record why each suspect it covers lost, and keep a suspect that explains an alerting service the leader cannot as a co-cause. | `check_hypothesis`, `conclude`, `domain/verdict.py` |
+| F5 | Test each suspect against graph facts and record a verdict (supports or refutes) with a reason and a short tag. A silent hop in the middle of the path is a weaker support with the gap named, not a refutation. If several are supported, keep one leading cause, record why each suspect it covers lost, keep a suspect that explains an alerting service the leader cannot as a co-cause, and never blame a cascade victim: a suspect upstream of the leader that was already red when the leader's change landed takes over. | `check_hypothesis`, `conclude`, `domain/verdict.py` |
 | F6 | Hand off between roles through the graph, not through Python variables. | `incident_board`, `log_step`, `agents/loop.py` |
-| F7 | Post a status update that names impact, cause, ruled-out suspects, who was paged, who to ask, the next action from the runbook, and the sources. | `post_update`, `domain/update.py` |
-| F8 | Turn a human-confirmed fix into memory, and recall it on the next similar incident. Let the runbook that fixed it decide what to suspect first. The human's call overrides the agents' pick. | `resolve_incident`, `recall_similar`, `hypothesize_from_memory` |
-| F9 | Answer company-brain questions with sources: who knows a service, where a change came from. | `who_knows`, `change_story` |
+| F7 | Write a status update for #incidents that names impact, cause, ruled-out suspects, who was paged, who to ask, the next action from the runbook, and the sources. It is stored on the incident; nothing is sent to Slack or any chat tool. | `post_update`, `domain/update.py` |
+| F8 | Turn a human-confirmed fix into memory, and recall it on the next similar incident. Let the runbook that fixed it decide what to suspect first. The human's call overrides the agents' pick. Show what memory saved by replaying the same incident without it. | `resolve_incident`, `recall_similar`, `hypothesize_from_memory`, `respond?compare=memory` |
+| F9 | Answer company-brain questions with sources: a free-form question over docs, tickets and chat, who knows a service, where a change came from. | `ask`, `who_knows`, `change_story` |
 | F10 | Explain every answer: the reason for each step, the Cypher it ran, the rows, the timing, and the graph ids to highlight. | `TraceStep`, `QueryRun`, `Highlight` |
 | F11 | Expose the same tools to the agent loop, an MCP client and the HTTP API. | `agents/registry.py` |
 | F12 | Keep each tenant's data in its own graph, and let the demo reset to a pristine state. | `FalkorGraphStore`, `GRAPH.COPY` |
@@ -37,18 +37,18 @@ Related documents:
 
 ### 1.2 Non-functional
 
-Measured on this machine (laptop, FalkorDB v4.22.0 on redis 8.10.2, seeded demo graph: 232 nodes, including the `Meta` node, and 422 relationships before any incident runs).
+Measured on this machine (laptop, FalkorDB v4.22.0 on redis 8.10.2, seeded demo graph: 324 nodes, including the `Meta` node, and 777 relationships before any incident runs).
 
 | NFR | Target | Measured | How to check |
 |---|---|---|---|
-| Latency per graph tool | < 50 ms | typical step 1 to 3 ms of database time; slowest steps are `propose_hypotheses` and `post_update` at about 5 to 7 ms; slowest single query about 3 ms | `make demo` prints queries, rows and ms per step |
-| Latency per incident | < 1 s with the deterministic planner | act 1: about 80 to 110 ms wall time for 18 steps, 65 queries (17 of them board reads); act 2: about 50 to 70 ms for 13 steps. Over 200 random eval scenarios: p50 72 ms, p95 115 ms. `make demo` (five incidents, five resets) runs in about 1.4 s | `time make demo`, `make eval` |
+| Latency per graph tool | < 50 ms | typical step 1 to 3 ms of database time; slowest steps are `post_update` (about 7 ms over the eval) and `who_knows` (about 4 ms); `ask` runs its two queries in 2 to 7 ms on the seeded corpus | `make demo` prints queries, rows and ms per step |
+| Latency per incident | < 1 s with the deterministic planner | act 1: about 100 to 140 ms wall time for 18 steps, 66 queries (17 of them board reads); act 2: about 65 to 75 ms for 13 steps (with `?compare=memory`, the replay adds roughly 200 ms: a `GRAPH.COPY` and a second run). Over 200 random eval scenarios: p50 85 ms, p95 126 ms. `make demo` (five incidents, five resets) runs in about 1.4 s | `time make demo`, `make eval` |
 | No LLM key needed | demo, tests, UI and MCP all work without one | yes: `MockProvider` (the deterministic planner) is the default | `GET /api/health` shows `planner` |
 | Read safety | read tools cannot write | every read goes through `GRAPH.RO_QUERY`; FalkorDB rejects writes | `test_read_tools_cannot_write` |
 | Tenant isolation | no query or tool reaches another tenant's graph | one graph per tenant. This is data isolation, not access control: there is no per-user auth, so any caller with API access can address any tenant, and `API_TOKEN` is all-or-nothing | `test_tenants_are_isolated` |
 | Exposure | safe to run on a laptop | compose publishes ports on 127.0.0.1 only; the API checks `Host` against `ALLOWED_HOSTS` (400), refuses cross-origin POSTs (403) and can require a bearer `API_TOKEN` (401); MCP over HTTP checks `Host`/`Origin` on any bind address (it has no token) | `test_cross_origin_writes_and_unknown_hosts_are_refused`, `test_api_token_guards_api_but_not_health_or_ui`, `test_mcp_over_http_refuses_foreign_host_and_origin` |
 | Idempotency | re-loading and re-running are safe | `MERGE` on stable ids everywhere; `seed()` rebuilds from scratch | `test_ingest_is_idempotent_and_seed_rebuilds_from_scratch`, `test_agent_steps_persist_in_the_graph_and_respond_is_idempotent` |
-| Concurrency | two responders on one tenant never duplicate work or edges | a per-tenant Redis lock around every agent run (3.7) | `test_concurrent_responders_do_not_duplicate_work_or_edges` |
+| Concurrency | two responders on one tenant never duplicate work or edges | a per-tenant Redis lock around every agent run (3.7). It serialises runs on a tenant; it is not a high-concurrency write path. Different tenants run in parallel | `test_concurrent_responders_do_not_duplicate_work_or_edges` |
 | Failure behaviour | FalkorDB down or erroring gives a clear error, not a hang. A bad LLM reply never breaks a run | API returns 503 (`/api/health` still answers with `falkordb: false`). LLM errors, and tool errors from an LLM's choice, fall back to the deterministic planner | `api/app.py` exception handlers, `test_a_bad_tool_choice_falls_back_instead_of_aborting` |
 | Repeatability | the demo gives the same result every run | fixed seed, pinned demo clock (`datagen.T1`), epoch-int timestamps, reset from a pristine copy | `make demo` exits non-zero if the story breaks |
 
@@ -57,7 +57,7 @@ Measured on this machine (laptop, FalkorDB v4.22.0 on redis 8.10.2, seeded demo 
 - Hackathon rules: FalkorDB must be the primary database and do real work. Data must be synthetic. AI assistance must be disclosed ([AI_USAGE.md](AI_USAGE.md)).
 - The dev machine has glibc 2.35, so the `falkordblite` wheel (needs glibc 2.39) does not install. We run FalkorDB's official rhel8 module build on a self-built redis (see [ADR-002](decisions/ADR-002-stack.md)).
 - No `docker pull` on the dev machine (the internal disk is nearly full). Everything lives on the external drive. Docker files are shipped for judges but not run locally.
-- No LLM key is available, so every feature must work on a deterministic planner.
+- No LLM key is available, so every feature must work on a deterministic planner. For the same reason the LLM adapters are tested only against canned HTTP replies.
 - One builder (plus AI), hours not weeks. Least code that works.
 
 ---
@@ -83,8 +83,9 @@ flowchart LR
     BOARD["services/board.py: load_board"]
     REG["agents/registry.py: REGISTRY, call, specs"]
     TOOLS["services/tools.py: the graph tools"]
+    BRAIN["services/brain.py: ask"]
     PLAN["domain/planner.py"]
-    VERD["domain/verdict.py: judge"]
+    VERD["domain/verdict.py: judge, leading"]
     UPD["domain/update.py"]
   end
   subgraph ports["ports/"]
@@ -109,9 +110,11 @@ flowchart LR
   LOOP --> PLLM
   LOOP --> REG
   REG --> TOOLS
+  REG --> BRAIN
   TOOLS --> VERD
   TOOLS --> UPD
   TOOLS --> PGR
+  BRAIN --> PGR
   BOARD --> PGR
   PLLM -. implemented by .-> MOCK
   PLLM -. implemented by .-> LLMS
@@ -174,9 +177,9 @@ sequenceDiagram
     API->>S: resolve(repo, incident_id, change_id)
     S->>T: resolve_incident
     T->>G: W CAUSED_BY, Runbook rb:payments-gw:config, FIXED_WITH, hypothesis confirmed
-    S->>T: post_update (re-posted: "status: resolved, cause confirmed")
+    S->>T: post_update (rewritten: "status: resolved, cause confirmed")
     Note over U,G: Act 2, three days later
-    U->>API: POST respond alert:refunds-latency
+    U->>API: POST respond alert:refunds-latency?compare=memory
     API->>S: respond(repo, alert_id, llm)
     S->>L: triage as before, then investigator
     L->>T: recall_similar
@@ -184,10 +187,12 @@ sequenceDiagram
     L->>T: hypothesize_from_memory
     T->>G: RO memory_suspects via RECALLS, FIXED_WITH rb:payments-gw:config, FOR_SERVICE returns chg:pgw-pool-2
     L->>T: check_hypothesis (one check, SUPPORTS)
-    S-->>U: 13 steps, solved_by_memory true, update has a Next action line
+    API->>S: without_memory(store, tenant, alert_id, llm)
+    S->>G: GRAPH.COPY pristine_acme to tenant_acme_nomem, respond() there, then drop it
+    S-->>U: 13 steps, solved_by_memory true, update has a Next action line, ablation.without_memory (6 calls, 4 checks, culprit on check 2)
 ```
 
-The numbers on the default seed (`make demo` prints them): act 1 takes 18 steps, 8 investigator calls and 5 hypothesis checks, with the culprit on check 3. It finds `chg:pgw-pool-1` on `svc:payments-gw` via checkout -> payments -> payments-gw. Both baselines without the graph are wrong: the flat change log blames `chg:search-420` (newest), and the anomaly-aware change log blames `chg:legacy-193` (legacy-billing went red first, but checkout stopped depending on it 3 days ago). Act 2 after resolving act 1 takes 13 steps, 3 investigator calls and 1 check (culprit on check 1), and is solved by memory. The anomaly-aware change log gets act 2 right too, so act 2 demonstrates memory and speed, not accuracy over that baseline. Act 2 on a fresh graph with no memory takes 6 investigator calls and 4 checks, with the culprit on check 2: nearest-first checking tries `chg:pay-77` first, a newer, healthy payments deploy one hop away. Act 3 is an alert storm two days after act 2: checkout, refunds and subscriptions alert within 4 minutes, and `respond()` runs on `alert:subscriptions-latency`. Triage calls `correlate_alerts` first (2 other alerts in the last 15 minutes, both sharing a red upstream with subscriptions): "3 related alerts on 3 services (checkout, refunds, subscriptions); paths converge on payments". The investigator checks the postgres-orders config change `chg:pg-conn-3` first, because it is the only suspect on the shared upstream: supported, explains 3 of 3 alerting services. The subscriptions deploy `chg:subs-88` is supported too (subscriptions blipped right after it) but explains 1 of 3, and `chg:pg-conn-3` explains that one too, so `conclude` records it as outranked (not a co-cause). On a fresh graph (`make demo`) that is 17 steps, 6 investigator calls, 3 checks, culprit on check 1; after acts 1 and 2 (the UI flow) recall adds a `hypothesize_from_memory` step that finds nothing, so 18 steps and 7 investigator calls. Both baselines are wrong: the flat change log blames `chg:search-430`, the anomaly-aware one `chg:subs-88` (it went red first). With correlation switched off, the same planner blames `chg:subs-88`: both suspects then explain the one alerting service, and the nearer one leads. Beyond the planted stories, `make eval` runs 200 randomised incidents with their own decoys: the graph agent finds the planted cause in 200/200, an anomaly-aware change log in 141/200, a keyword match in 59/200 and the flat change log in 0/200 ([EVAL.md](EVAL.md)).
+The numbers on the default seed (`make demo` prints them): act 1 takes 18 steps, 8 investigator calls and 5 hypothesis checks, with the culprit on check 3. It finds `chg:pgw-pool-1` on `svc:payments-gw` via checkout -> payments -> payments-gw. Both baselines without the graph are wrong: the flat change log blames `chg:search-420` (newest), and the anomaly-aware change log blames `chg:legacy-193` (legacy-billing went red first, but checkout stopped depending on it 3 days ago). Act 2 after resolving act 1 takes 13 steps, 3 investigator calls and 1 check (culprit on check 1), and is solved by memory. The anomaly-aware change log gets act 2 right too, so act 2 demonstrates memory and speed, not accuracy over that baseline. The same incident without memory takes 6 investigator calls and 4 checks, with the culprit on check 2: nearest-first checking tries `chg:pay-77` first, a newer, healthy payments deploy one hop away. That comparison is same incident, same planner, memory removed: `POST .../alerts/{id}/respond?compare=memory` (what the UI sends for act 2) runs `services/respond.py::without_memory()`, which copies the tenant's pristine graph into a scratch tenant (`GraphStore.clone_pristine`, a `GRAPH.COPY`), replays the alert there, drops the scratch graph and returns its counters as `ablation.without_memory`. `make demo` prints the same pair. Act 3 is an alert storm two days after act 2: checkout, refunds and subscriptions alert within 4 minutes, and `respond()` runs on `alert:subscriptions-latency`. Triage calls `correlate_alerts` first (2 other alerts in the last 15 minutes, both sharing a red upstream with subscriptions): "3 related alerts on 3 services (checkout, refunds, subscriptions); 6 upstream services are shared by all of them, nearest to all first: payments, postgres-orders, fraud-check". (The nearest shared service is not claimed as the cause; the UI labels it "shared by all 3 alerting services".) The investigator checks the postgres-orders config change `chg:pg-conn-3` first, because it is the only suspect on the shared upstream: supported, explains 3 of 3 alerting services. The subscriptions deploy `chg:subs-88` is supported too (subscriptions blipped right after it) but explains 1 of 3, and `chg:pg-conn-3` explains that one too, so `conclude` records it as outranked (not a co-cause). On a fresh graph (`make demo`) that is 17 steps, 6 investigator calls, 3 checks, culprit on check 1; after acts 1 and 2 (the UI flow) recall adds a `hypothesize_from_memory` step that finds nothing, so 18 steps and 7 investigator calls. Both baselines are wrong: the flat change log blames `chg:search-430`, the anomaly-aware one `chg:subs-88` (it went red first). With correlation switched off, the same planner blames `chg:subs-88`: both suspects then explain the one alerting service, and the nearer one leads. Beyond the planted stories, `make eval` runs 200 randomised incidents with their own decoys and perturbations: the graph agent finds the planted cause in 184/200, an anomaly-aware change log in 134/200, a keyword match in 57/200 and the flat change log in 0/200 (section 3.10, [EVAL.md](EVAL.md)).
 
 ### 2.3 Deployment
 
@@ -212,19 +217,20 @@ Everything is under `src/oncall_brain/`. Dependencies point inwards: adapters an
 |---|---|---|---|
 | `domain/models.py` | Value objects: `QueryRun`, `Highlight`, `ToolOutput`, `Decision`, `TraceStep`. | pydantic | no |
 | `domain/planner.py` | The deterministic planner: one pure function per role (`triage`, `investigator`, `comms`) from board to `Decision`. Also `WINDOW` (2 h), `RECALL_MIN_SCORE` (3) and `STORM_WINDOW` (15 min). | domain | no |
-| `domain/verdict.py` | `judge(CheckFacts) -> Verdict`: the rules that turn graph facts into supports / refutes / inconclusive. `leading()`: which of several supported suspects leads, which are outranked (and why), and which are co-causes. | stdlib | no |
-| `domain/update.py` | Templates for the status update ("Likely cause", or "status: resolved, cause confirmed" and "Cause (confirmed)" once a human has confirmed it; an "Also contributing:" line per co-cause; the author is named only when known) and the learned runbook. | stdlib | no |
+| `domain/verdict.py` | `judge(CheckFacts) -> Verdict`: the rules that turn graph facts into supports or refutes, each with a reason, a short tag and any monitoring gaps. `leading()`: which of several supported suspects leads (including the cascade rule), which are outranked (and why), and which are co-causes. | stdlib | no |
+| `domain/update.py` | Templates for the status update and the learned runbook. The update reads "Likely cause: config change on payments-gw by Sana Brandt: \"<change summary>\"" (or "status: resolved, cause confirmed" and "Cause (confirmed)" once a human has confirmed it; the author only when known), a "Note:" line naming any monitoring gap on the cause's path, an "Also contributing:" line per co-cause, one compact "Ruled out:" line built from the evidence tags, "Also at risk" without the services on the failure path, and "Next action: <step> (this runbook worked N of M times)". | stdlib | no |
 | `ports/__init__.py` | Protocols: `GraphRepository`, `GraphStore`, `LLMProvider`. | domain | no |
 | `adapters/falkordb/` | `FalkorRepository` (one tenant's graph), `FalkorGraphStore` (many graphs), `queries.py` (loads named Cypher), `queries/*.cypher`. | falkordb client | yes (FalkorDB) |
 | `adapters/llm/` | `MockProvider` (wraps the planner) and LLM adapters: `openai_compat.py` (any OpenAI-compatible endpoint, with presets in `wiring.PRESETS` for OpenAI, Gemini, Groq, OpenRouter and Ollama) and `anthropic.py`. Both share the fallback guardrails. | domain, registry, httpx | yes (LLM HTTP) |
 | `agents/registry.py` | The tool registry: `@tool`, `REGISTRY`, `call()`, `specs()`, `ToolContext`. | ports, domain | no |
 | `agents/loop.py` | The agent loop: `run_role()`, `record()`. | registry, ports, `services/board.py` | via ports |
 | `services/tools.py` | The graph tools. Each runs named queries through the port and returns a `ToolOutput`. | registry, domain, ports | via ports |
+| `services/brain.py` | The company-brain `ask` tool: question to content words, full-text search, re-rank, graph expansion, a deterministic answer with cited sources (3.5). Registered on import by `services/__init__.py`. | registry, domain | via ports |
 | `services/board.py` | `load_board()`: reads the incident board out of the graph. | ports | via ports |
-| `services/respond.py` | Use cases: `respond()`, `resolve()`, `outcome()`. | loop, registry, tools | via ports |
+| `services/respond.py` | Use cases: `respond()`, `resolve()`, `outcome()`, `without_memory()` (the same alert replayed on a scratch copy of the pristine graph). | loop, registry, tools | via ports |
 | `services/seeding.py` | `load()` (idempotent `MERGE` ingest), `seed()` (drop, `load()`, `Meta` fingerprint, pristine snapshot) and `reset()`. | datagen, ports | via ports |
-| `datagen.py` | The seeded synthetic company: the planted three-act story plus random noise. | domain | no |
-| `scenarios.py` | Randomised incidents for the eval: a fresh hidden cause and decoys per seed, on datagen's org. | datagen | no |
+| `datagen.py` | The seeded synthetic company: the planted three-act story, random noise, and (`_corpus`) the docs, tickets and chat the company brain answers from. | domain | no |
+| `scenarios.py` | Randomised incidents for the eval: a fresh hidden cause, decoys and perturbations per seed, on datagen's org. | datagen | no |
 | `api/app.py` | FastAPI surface over services and the registry. Error mapping, and the `Host` / same-origin / `API_TOKEN` guard. | services, registry, wiring | HTTP |
 | `mcp_server/` | MCP surface over the same registry, plus two use-case tools (`respond_to_alert`, `reset_tenant`). stdio by default, Streamable HTTP with `--http`. | registry, services, wiring | MCP |
 | `wiring.py` | Composition root: the only place that picks concrete adapters (`make_store`, `make_llm`). | adapters, config | no |
@@ -235,7 +241,7 @@ Everything is under `src/oncall_brain/`. Dependencies point inwards: adapters an
 | Port (Protocol) | Methods | Adapter today | Test double / alternative |
 |---|---|---|---|
 | `GraphRepository` | `read(name, /, **params)` (RO), `write(name, /, **params)`, `ensure_schema()`, `lock()`, `tenant` | `FalkorRepository` | Integration tests use a real FalkorDB with throwaway tenants |
-| `GraphStore` | `tenant()`, `exists()`, `snapshot()`, `restore()`, `drop()`, `tenants()`, `lock()` | `FalkorGraphStore` | |
+| `GraphStore` | `tenant()`, `exists()`, `snapshot()`, `restore()`, `drop()`, `tenants()`, `lock()`, `clone_pristine()` | `FalkorGraphStore` | |
 | `LLMProvider` | `decide(role, board, tools) -> Decision`, `name` | `MockProvider` (default), OpenAI-compatible, Anthropic | Planner unit tests call `next_decision` on plain dicts |
 
 Two details matter:
@@ -249,7 +255,7 @@ Two details matter:
 - `ToolOutput` (summary, data, queries, highlight): the single return type of every tool.
 - `Decision` (action `call` or `done`, tool, args, reason, handoff_to): what a role does next. `reason` is shown in the trace as "why".
 - `TraceStep` (seq, role, tool, reason, summary, writes, queries, highlight, data): one step of a run, returned to clients and persisted as an `AgentStep` node.
-- `CheckFacts` / `Verdict` (`domain/verdict.py`): the input and output of `judge()`.
+- `CheckFacts` / `Verdict` (`domain/verdict.py`): the input and output of `judge()`. `Verdict` is (verdict `supports` or `refutes`, reason, tag, gaps).
 - `Tool` / `ToolContext` (`agents/registry.py`): a registered tool and the tenant-bound repository it runs against.
 
 ### 3.4 The agent loop, step by step
@@ -258,7 +264,7 @@ Code: `services/respond.py::respond` and `agents/loop.py::run_role`.
 
 1. `respond(repo, alert_id, llm)` takes the tenant lock (3.7), then calls the `open_incident` tool. Its query `MERGE`s `(:Incident {id: "inc:<alert suffix>"})-[:TRIGGERED_BY]->(:Alert)`. This node is the board. The step is recorded as step 1 (role `triage`).
 2. The current role is `triage`. `run_role()` loops up to `MAX_STEPS_PER_ROLE = 40` times:
-   1. Observe: `load_board()` runs the `incident_board` query (RO). It returns the incident, the steps already logged (tool, target, role), the hypotheses with status, source, hops, change time, `explained` (the alerting services each one reaches) and `onset`, the recalled incidents with scores, the number of other alerts in the last 15 minutes (`storm`), the alerting services folded into the incident (`correlated`, empty outside a storm) and the ranked `shared_upstream`. `cause_service` is derived from the confirmed or supported hypothesis, `co_cause_services` from the co-causes.
+   1. Observe: `load_board()` runs the `incident_board` query (RO). It returns the incident, the steps already logged (tool, target, role), the hypotheses with status, source, hops, change time, `explained` (the alerting services each one reaches), `onset` and `gaps`, the recalled incidents with scores, the number of other alerts in the last 15 minutes (`storm`), the alerting services folded into the incident (`correlated`, empty outside a storm) and the ranked `shared_upstream`. `cause_service` is derived from the confirmed or supported hypothesis, `co_cause_services` from the co-causes.
    2. Decide: `llm.decide(role, board, specs)`, where `specs` are only the tools registered for agents (`registry.specs(agents_only=True)`). With `MockProvider` this is `planner.next_decision(role, board)`, a pure function of the board.
    3. If the decision is `done`: record a step with tool `handoff` and target = the next role (or `human`), and return the next role.
    4. Otherwise act: look up the tool, refuse it if it is registered with `agent=False` (defence in depth: it was never offered), set `incident_id` to the current incident if the tool takes one (whatever the planner or LLM sent), and call `registry.call()`. This validates the args with the tool's pydantic model and runs it. If the tool raises (`KeyError`, `ValueError` or `ValidationError`, for example on an id an LLM made up), the deterministic planner picks this step instead, and the reason starts with "fallback after tool error".
@@ -276,17 +282,19 @@ What each role decides, from the board only (`domain/planner.py`):
 
 The planner branches on query results. An empty `memory_suspects` result sends the investigator to traversal (act 1). A strong recall skips traversal (act 2). Each refutation changes which hypothesis is next. If everything is refuted, it escalates as a non-change cause.
 
-How memory decides (`memory_suspects`): it follows `RECALLS` -> past incident -> `FIXED_WITH` -> `Runbook` -> `FOR_SERVICE` -> service, and returns the in-window changes of the runbook's `kind` on that service that are still on the alert's live path, most trusted runbook first (`successes / uses`). Each such hypothesis carries `h.runbook`. If a check refutes it, `record_evidence` adds 1 to that runbook's `uses` (once: only when the hypothesis goes from open to refuted), so its confidence drops. `resolve_incident` adds 1 to both `uses` and `successes`. The status update gets "Next action: <first runbook step> (runbook '<title>', worked N of M times)" only from the runbook memory used for the cause, or from the runbook the incident was `FIXED_WITH`. A runbook that only shares the service and change kind may fix a different failure, so it is not suggested.
+How memory decides (`memory_suspects`): it follows `RECALLS` -> past incident -> `FIXED_WITH` -> `Runbook` -> `FOR_SERVICE` -> service, and returns the in-window changes of the runbook's `kind` on that service that are still on the alert's live path, most trusted runbook first (`successes / uses`). Each such hypothesis carries `h.runbook`. If a check refutes it, `record_evidence` adds 1 to that runbook's `uses` (once: only when the hypothesis goes from open to refuted), so its confidence drops. `resolve_incident` adds 1 to both `uses` and `successes`. The status update gets "Next action: <first runbook step> (this runbook worked N of M times)" only from the runbook memory used for the cause, or from the runbook the incident was `FIXED_WITH`. A runbook that only shares the service and change kind may fix a different failure, so it is not suggested.
 
 How a storm is correlated (`correlate_alerts`), all in Cypher traversals:
 1. `storm_alerts` finds the other alerts in the 15 minutes before this one.
 2. `storm_upstream`: for each alerting service, every service it reaches over `DEPENDS_ON` edges live at alert time (0 to 6 hops), with the hop count, and whether that upstream service went red (an anomaly in the 2-hour window).
-3. An alert is folded in if its service shares with this alert's service an upstream service (0 hops counts, so the service itself) that went red. Alerts on this alert's own service fold too, as long as something it reaches went red. Folded alerts need not share one cause, only a red upstream with this alert. An alert that merely shares a quiet piece of infrastructure (a cache everyone uses) stays a separate incident (`test_an_unrelated_alert_sharing_only_a_quiet_cache_is_not_folded`).
+3. An alert is folded in if its service shares with this alert's service an upstream service (0 hops counts, so the service itself) that went red. Alerts on this alert's own service fold too, as long as something it reaches went red. Folded alerts need not share one cause, only a red upstream with this alert. An alert that merely shares a quiet piece of infrastructure (a cache everyone uses) stays a separate incident (`test_unrelated_alert_sharing_only_a_quiet_cache_is_not_folded`).
 4. The shared upstream is the intersection of the upstream closures of every folded alerting service, ranked by convergence: the fewest total hops from the alerting services. In act 3: payments 3, postgres-orders 5, fraud-check 6, payments-gw 6, redis-cache 8, kafka 9. It can be empty when the alerts have two separate causes; the summary then says "no single service sits upstream of all of them". The summary counts alerts and services separately ("4 related alerts on 3 services").
 5. `record_correlation` writes `CORRELATED_WITH` to the folded alerts, `IMPACTS` (hops 0) on their services, and `SHARED_UPSTREAM {rank, hops}`.
 
-Coverage is per alerting service, not per alert. For each suspect with a live path, `check_hypothesis` runs `storm_unexplained` over the other alerting services and stores the ones it can reach, plus the alert's own service, as `explained` on the hypothesis and its evidence ("...; explains 1 of 3 alerting services (not refunds, checkout)"). It also stores `h.onset`, the first anomaly on the suspect's own service after the change. Neither refutes anything. When two or more suspects are supported, the investigator calls `conclude`, and `domain/verdict.py::leading()` ranks them: most alerting services explained, then a memory suggestion, then nearest the alert (hops), then earliest onset, then newest, then id. Then, for each other supported suspect:
-- If the leader explains every alerting service it explains, `record_outranked` marks it `outranked` with a separate `REFUTES` Evidence node (`ev:...:outranked`) and the reason, for example "outranked: chg:pg-conn-3 explains every alerting service this change does (1) and 2 more", "an anomaly followed chg:X earlier than it followed this change", or "tied with chg:X on every measure; picked by id". The check's own `SUPPORTS` evidence stays, so a human can still confirm it.
+Coverage is per alerting service, not per alert. For each suspect with a live path, `check_hypothesis` runs `storm_unexplained` over the other alerting services and stores the ones it can reach, plus the alert's own service, as `explained` on the hypothesis and its evidence ("...; explains 1 of 3 alerting services (not refunds, checkout)"). It also stores `h.onset`, the first anomaly on the suspect's own service after the change, and `h.gaps`, the middle hops with no anomaly on record. None of these refutes anything. When two or more suspects are supported, the investigator calls `conclude`, and `domain/verdict.py::leading()` ranks them: most alerting services explained, then fewest monitoring gaps, then a memory suggestion, then nearest the alert (hops), then earliest onset, then newest, then id.
+
+One causal rule overrides that order, the cascade rule. `conclude` first runs `depends_among` (RO): which of the supported suspects' services depend on which others over `DEPENDS_ON` edges live at alert time (1 to 6 hops). If a supported suspect's service is upstream of the leader's, it went red (its `onset`) before the leader's change landed, and it explains at least the alerting services the leader does, then the leader's anomaly most likely came from upstream: the upstream suspect takes the lead (repeated until no such suspect is left). Nearest-first alone would blame a cascade victim that happened to deploy mid-incident (`test_a_deploy_on_a_cascade_victim_is_not_blamed`: payments-gw breaks, payments deploys half a minute later and goes red, checkout alerts; the payments-gw change is named). A change that landed before the upstream service went red is not a cascade victim, so nearest wins again (`test_an_upstream_suspect_already_red_when_a_nearer_change_landed_takes_over`). Then, for each other supported suspect:
+- If the leader explains every alerting service it explains, `record_outranked` marks it `outranked` with a separate `REFUTES` Evidence node (`ev:...:outranked`, tag `outranked`) and the reason, for example "payments depends on payments-gw, which was already red when this change landed: its anomaly came from upstream (chg:gw-x)", "chg:pg-conn-3 explains every alerting service this change does (1) and 2 more", "chg:X has a complete anomaly chain; this one has a monitoring gap", "an anomaly followed chg:X earlier than it followed this change", or "tied with chg:X on every measure; picked by id". The check's own `SUPPORTS` evidence stays, so a human can still confirm it.
 - Otherwise it explains an alerting service the leader cannot, and `record_co_causes` keeps it as a `co-cause` with `h.note` ("also needed: it alone explains refunds"). Comms pages each co-cause's owning team too, the update gets an "Also contributing:" line, the outcome lists `co_causes` and the UI's root-cause card shows them.
 
 So the outcome, the posted update and the paging agree on one leading cause and on the co-causes. `tests/integration/test_storms.py` runs five storms built from live events, each against what an engineer would conclude: a quiet shared cache is not folded, a second independent cause is a co-cause, alerts on one service are one incident, a memory hit that explains part of a storm does not end the search, and of two changes on one service that explain everything, the one the service went red after wins.
@@ -295,7 +303,7 @@ A human's call overrides all of this. `resolve_incident` makes the confirmed cha
 
 Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's `algo.betweenness` and dropped it. Its scores are sampled: on the demo graph, a different `samplingSeed` gives different scores and a different order even with `samplingSize` above the node count. And it filters by label and relationship type, not by property, so it cannot leave out retired `DEPENDS_ON` edges. A score that drives a decision has to be exact and respect time; summed hops over live edges are both, and explain themselves.
 
-`outcome()` summarises the run for the UI. The cause, the ruled-out suspects (refuted and outranked; each names the change and its service), `co_causes`, the status update, who was paged, the blast radius and at-risk services (from `IMPACTS` and its `via`) and the storm all come from the graph (`cause_facts`, `refuted_hypotheses`, `co_causes`, `incident_update`, `incident_paged`, `update_facts`, `incident_storm`), so re-running a finished incident still reports them (`test_rerunning_a_finished_incident_still_reports_its_cause`). Counters are per run, from this run's trace: investigator calls, checks and `checks_to_culprit` (which check found the cause), plus the memory used. It runs two baselines that use no traversal: `recent_changes` (the flat change log: newest change in the window; `baseline_pick`, `baseline_correct`) and `anomaly_baseline` (of the in-window changes not rolled back, the one whose own service went red first after it, the same rule as the eval's `anomaly_pick`; `anomaly_baseline_pick`, `anomaly_baseline_correct`). It also returns the `runbook` and the `expert` that the update named, and `storm` (the correlated alerts and the ranked shared upstream, or null).
+`outcome()` summarises the run for the UI. The cause, the ruled-out suspects (refuted and outranked; each names the change, its service, the reason and the short tag), `co_causes`, the status update, who was paged, the blast radius and at-risk services (from `IMPACTS` and its `via`; services on the cause's own failure path are not "at risk", they are already part of it) and the storm all come from the graph (`cause_facts`, `refuted_hypotheses`, `co_causes`, `incident_update`, `incident_paged`, `update_facts`, `incident_storm`), so re-running a finished incident still reports them (`test_rerunning_a_finished_incident_still_reports_its_cause`). Counters are per run, from this run's trace: investigator calls, checks and `checks_to_culprit` (which check found the cause), plus the memory used. It runs two baselines that use no traversal: `recent_changes` (the flat change log: newest change in the window; `baseline_pick`, `baseline_correct`) and `anomaly_baseline` (of the in-window changes not rolled back, the one whose own service went red first after it, the same rule as the eval's `anomaly_pick`; `anomaly_baseline_pick`, `anomaly_baseline_correct`). It also returns the `runbook` and the `expert` that the update named, and `storm` (the correlated alerts and the ranked shared upstream, or null). With `?compare=memory` the HTTP response adds `ablation.without_memory` (investigator calls, checks, checks to culprit and root cause of the same alert on a pristine copy).
 
 ### 3.5 The tool registry
 
@@ -303,10 +311,10 @@ Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's
 
 The same registry feeds three surfaces:
 - the agent loop: `registry.call(d.tool, ctx, args)`, with `registry.specs(agents_only=True)` passed to the planner or LLM. Tools registered with `agent=False` (`resolve_incident` and the five event tools) are never offered to an agent run: an agent must not confirm its own fix or invent graph facts. The LLM adapters reject them if a model names one anyway, and the loop's `_call` refuses them too, whatever the planner;
-- the MCP server (`mcp_server/__init__.py::catalogue`): turns every registry tool into an MCP tool, adds a required `tenant` argument and marks read tools with `readOnlyHint`, then adds the two use cases `respond_to_alert` and `reset_tenant` (23 MCP tools). Calls go through `services/respond.py::run_tool()`. See [MCP.md](MCP.md);
-- the HTTP API: `GET /api/tools` returns `specs()` (all 21), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
+- the MCP server (`mcp_server/__init__.py::catalogue`): turns every registry tool into an MCP tool, adds a required `tenant` argument and marks read tools with `readOnlyHint`, then adds the two use cases `respond_to_alert` and `reset_tenant` (24 MCP tools). Calls go through `services/respond.py::run_tool()`. See [MCP.md](MCP.md);
+- the HTTP API: `GET /api/tools` returns `specs()` (all 22), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
 
-The 21 tools at the time of writing (`GET /api/tools` lists the live set), 15 of them offered to agents. "W" means the tool may write.
+The 22 tools at the time of writing (`GET /api/tools` lists the live set), 16 of them offered to agents (`ask` is offered, but the deterministic planner never calls it; it is there for an LLM planner and for outside clients). "W" means the tool may write.
 
 | Tool | W | Used by | Named queries (RO = read-only) |
 |---|---|---|---|
@@ -318,13 +326,14 @@ The 21 tools at the time of writing (`GET /api/tools` lists the live set), 15 of
 | `hypothesize_from_memory` | W | investigator | `incident_head` (RO), `memory_suspects` (RO), `add_hypotheses` |
 | `propose_hypotheses` | W | investigator | `incident_head`, `path_suspects`, `recent_changes` (RO), `add_hypotheses` |
 | `check_hypothesis` | W | investigator | `hypothesis_facts`, `live_paths`, `any_path` (only if no live path), `anomalies_between`, `storm_unexplained` (only in a storm: which alerting services it explains) (RO), `record_evidence` |
-| `conclude` | W | investigator (when 2+ suspects are supported) | `incident_head`, `incident_board` (RO), `record_outranked` (if any is outranked), `record_co_causes` (if any is a co-cause) |
-| `post_update` | W | comms; re-run by `resolve()` | `incident_head`, `update_facts`, `refuted_hypotheses` (RO, refuted and outranked), `co_causes` (RO), `post_update` |
+| `conclude` | W | investigator (when 2+ suspects are supported) | `incident_head`, `incident_board`, `depends_among` (RO: the cascade rule), `record_outranked` (if any is outranked), `record_co_causes` (if any is a co-cause) |
+| `post_update` | W | comms; re-run by `resolve()`. Writes the update for #incidents onto the incident (summary: "Wrote the status update for #incidents (stored on the incident)"); nothing is sent to Slack | `incident_head`, `update_facts`, `refuted_hypotheses` (RO, refuted and outranked, with tags), `co_causes`, `cause_facts` (RO: the failure path, so "Also at risk" leaves it out), `post_update` |
 | `resolve_incident` | W | a human (UI, API, MCP, demo); never offered to agents. The confirmed change becomes the `confirmed` hypothesis; other supported or co-cause suspects are outranked | `incident_head`, `change_info` (RO), `resolve_incident` |
 | `dependency_path` | | MCP / API | `live_paths` (keeps the shortest) |
 | `incident_board` | | MCP / API (the loop calls the same `load_board()` directly) | `incident_board` |
-| `who_knows` | (W) | comms; MCP / API and the UI's Ask tab (company brain) | `who_knows` (RO), `record_consult` (only with an `incident_id`). Registered as a write tool for that reason, so it takes the tenant lock and MCP does not mark it read-only. |
-| `change_story` | | MCP / API and the UI's Ask tab (company brain) | `change_story` |
+| `who_knows` | (W) | comms; MCP / API and the UI's Ask tab (company brain) | `who_knows` (RO: owning team 3, each authored change 2, each incident paged for 1, docs / tickets / chat written about the service 1 each, at most 3), `record_consult` (only with an `incident_id`). Registered as a write tool for that reason, so it takes the tenant lock and MCP does not mark it read-only. |
+| `change_story` | | MCP / API and the UI's Ask tab (company brain) | `change_story` (author, team, the ticket that requested it, the docs and chat that mention it with their authors, incidents it caused) |
+| `ask` | | MCP / API and the UI's Ask tab (company brain): a free-form question | `search_knowledge` (full-text, RO), `knowledge_context` (RO) |
 | `service_map` | | API `/graph`, MCP | `service_map` |
 | `record_change` | W | MCP / API (live events); re-recording an id moves the change (old `CHANGED` / `AUTHORED_BY` dropped) | `record_change` |
 | `record_anomaly` | W | MCP / API (live events) | `record_anomaly` |
@@ -334,12 +343,23 @@ The 21 tools at the time of writing (`GET /api/tools` lists the live set), 15 of
 
 The five event tools keep knowledge current. Like `resolve_incident`, they are registered with `agent=False`. Their queries are in `queries/events.cypher` and the tools are at the end of `services/tools.py`. Inputs are validated (`svc:` / `chg:` / `person:` id patterns, `kind` and `symptom` enums, summary length). `test_live_events_drive_a_new_investigation` records changes, anomalies and a dependency retired an hour earlier, raises an alert, and checks that the agents find the new cause and refute the cart suspect with "no longer depends on cart".
 
-`check_hypothesis` is the heart of the investigator. It reads the suspect's facts and up to 20 dependency paths valid at alert time (`live_paths`), then the anomalies on those services between the change and the alert. It judges the path the anomaly lit up most (shortest on ties), so a symptom that travelled a longer path is not misread because the shortest one was quiet. Then it calls the pure `judge()` in `domain/verdict.py`. The rules, in order:
-1. The change was rolled back before the alert: refutes.
-2. No dependency path valid at alert time from the alerting service to the changed service. If a path exists when you ignore validity, it refutes with "dependency retired". Otherwise it refutes with "no dependency path".
-3. The changed service showed no anomaly between the change and the alert: refutes.
-4. A service in the middle of the live path showed no anomaly, so the symptom did not travel: inconclusive.
-5. Otherwise: supports, with the propagation path as the reason (plus, in a storm, how many of the alerting services it explains).
+`ask` (`services/brain.py`) is the company brain's free-form question tool. It has no LLM; every claim in its answer points at a node:
+1. **Terms.** The question is lower-cased, cut to `[a-z0-9]` words, stopwords and one-letter words dropped, at most 12 kept. A question with no content words ("why was it?") returns a plain answer without touching the index. Nothing the user types reaches the full-text query syntax.
+2. **Search.** `search_knowledge` queries the three full-text indexes (`Doc`, `Ticket`, `Message`) with the terms OR-ed, the best 30 hits per label, each with its author and, for a doc, the newer doc that `SUPERSEDES` it.
+3. **Re-rank** in Python: how many of the question's words a hit contains (prefix stemming, so "lowered" matches "lower"), then current before superseded, then a title on the topic, then doc before ticket before chat, then the index score, then newest. The top 5 are kept. The index's own score alone favours short chat that repeats one word.
+4. **Expand.** `knowledge_context` walks one hop from the hits (`MENTIONS`, `AUTHORED_BY`, `DECIDES`, `SUPERSEDES`, `REQUESTED`, `CITES`, `HAS_UPDATE`), then each neighbour's author, a change's service and a service's owning team.
+5. **Answer.** "Most relevant: <title> (<kind>, by <author>, <date>): \"<the sentence that covers the question, plus the next>\"", then the services, changes, incidents and people from the best hits, "It is the decision of record for X" (`DECIDES`), "It replaces '<older doc>'" or "Superseded by ...", and "Also:" the next two hits. `data` carries `answer`, `hits` (with snippets), `related` (each with the edge it came through) and `sources`; the highlight lights the sources and their neighbours.
+
+For "Why was the payments gateway pool lowered?" on the seeded graph it leads with the Q4 cost review design note by Sana Brandt ("Decision: lower the pool max_connections from 200 to 20, which cuts the gateway bill by about 40%"), names `chg:pgw-pool-1`, and lists the chat proposal, the peak load test postmortem that warned against it and the tickets PAY-388 and CR-881 as sources. For "who designed the checkout retries" it leads with the v2 design by Bram Mensah and says it replaces the v1 design by Dana Okafor (`tests/integration/test_brain.py`). The corpus is 34 docs, 21 tickets and 41 chat messages, so this shows the mechanism, not search quality at scale.
+
+`check_hypothesis` is the heart of the investigator. It reads the suspect's facts and up to 20 dependency paths valid at alert time (`live_paths`), then the anomalies on those services between the change and the alert. It judges the path the anomaly lit up most (shortest on ties), so a symptom that travelled a longer path is not misread because the shortest one was quiet. Then it calls the pure `judge()` in `domain/verdict.py`. The rules, in order, with the tag each leaves on the `Evidence` node:
+1. The change was rolled back before the alert: refutes (`rolled back`).
+2. No dependency path valid at alert time from the alerting service to the changed service. If a path exists when you ignore validity, it refutes with "dependency retired" (`dependency retired`). Otherwise it refutes with "no dependency path" (`no dependency path`).
+3. The changed service showed no anomaly between the change and the alert: refutes (`no anomaly after it`).
+4. A service in the middle of the live path showed no anomaly: supports, but weakly. A silent hop is more often missing telemetry than a different cause, so the reason names it ("anomaly on payments-gw reached checkout via payments-gw -> payments -> checkout, but nothing was recorded on payments (monitoring gap?)"), the hypothesis stores it in `gaps` (`supported, with a monitoring gap`), `leading()` ranks it after any suspect with a complete chain, and the status update adds "Note: no anomaly was recorded on payments although the failure passed through it; check its monitoring" (`test_a_monitoring_gap_on_a_middle_hop_still_names_the_cause`).
+5. Otherwise: supports (`supported`), with the propagation path as the reason (plus, in a storm, how many of the alerting services it explains).
+
+There is no "inconclusive" verdict any more: every check supports or refutes. The tags feed the update's compact "Ruled out:" line ("legacy-193 (dependency retired), search-420 (no dependency path), pricing-2140 (rolled back), cart-310 (no anomaly after it)"); `conclude` adds `outranked`, and a human's confirmation adds `a human confirmed another cause`. The full reason stays on the node, in the trace and in the UI.
 
 Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` by rule 1, `chg:search-420` and `chg:legacy-193` by rule 2 (no path, retired), `chg:cart-310` by rule 3. In act 3, `chg:subs-88` passes every rule (supported, explains 1 of 3 alerting services) and loses at `conclude`, not in `judge()`.
 
@@ -367,7 +387,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 
 ### 3.7 Concurrency and idempotency
 
-- Each FalkorDB query commits atomically, but that does not make concurrent `MERGE`s safe: two agents that `MERGE` the same edge at the same moment can both miss it and both create it. So every agent run (`respond`, `resolve`, `reset`) holds a per-tenant Redis lock (a redis-py `Lock` on the key `oncall_brain:lock:<tenant>`, from `FalkorRepository.lock()`). The lock lives in the same Redis as the graphs, so it works across processes: the API, the MCP server and the scripts. Its lease is 900 s, long enough for an LLM planner, so a crashed holder frees it after 15 minutes; a waiter gives up after 120 s. Reads stay concurrent, and different tenants run in parallel. `test_concurrent_responders_do_not_duplicate_work_or_edges` runs four responders at once and finds 5 checks in total and no duplicate edge.
+- Each FalkorDB query commits atomically, but that does not make concurrent `MERGE`s safe: two agents that `MERGE` the same edge at the same moment can both miss it and both create it. So every agent run (`respond`, `resolve`, `reset`) holds a per-tenant Redis lock (a redis-py `Lock` on the key `oncall_brain:lock:<tenant>`, from `FalkorRepository.lock()`). The lock lives in the same Redis as the graphs, so it works across processes: the API, the MCP server and the scripts. Its lease is 900 s, long enough for an LLM planner, so a crashed holder frees it after 15 minutes; a waiter gives up after 120 s. Reads stay concurrent, and different tenants run in parallel. To be plain about it: this serialises agent runs on one tenant. It is a correctness guard for a handful of responders, not a design for many concurrent writers. `test_concurrent_responders_do_not_duplicate_work_or_edges` runs four responders at once and finds 5 checks in total and no duplicate edge.
 - Single write-tool calls through `POST .../tools/{name}` or MCP take the same lock (`services/respond.py::run_tool`); read tools never do. Inside an agent run the lock is already held, so the loop calls the registry directly (the Redis lock is not re-entrant).
 - Every write `MERGE`s on a stable id, so repeating it is harmless:
   - ingest: `load()` runs `ingest_*` on `team:`, `person:`, `svc:`, `chg:` and other ids, so loading twice gives the same graph (tested);
@@ -394,8 +414,22 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 - Every `TraceStep` has a `reason` (why the planner chose it), a `summary` (what it found), and every `QueryRun` it ran: the Cypher, params, rows, ms, and whether it was read-only.
 - The first query of every non-initial step is `incident_board`, the exact shared state the planner decided from.
 - `Highlight` gives the node ids and typed edges to light up. The UI merges the steps' highlights with the root cause into one lit path, for example `chg:pgw-pool-1 -CHANGED-> payments-gw <-DEPENDS_ON- payments <-DEPENDS_ON- checkout`.
-- The graph keeps the explanation too. Each check leaves an `Evidence` node with its verdict, reason and path. The status update is a `Message` that `CITES` the change, the ticket, the chat, the runbook and the person it says to ask. Rewriting the update drops stale citations. The agent history is queryable as `AgentStep` nodes (`GET /api/tenants/{t}/incidents/{id}/steps`).
+- The graph keeps the explanation too. Each check leaves an `Evidence` node with its verdict, reason, tag and path. The status update is a `Message` that `CITES` the change, the ticket, the chat, the docs that mention the change, the runbook and the person it says to ask. `ask` answers carry their sources the same way (`sources`, `related` with the edge each came through). Rewriting the update drops stale citations. The agent history is queryable as `AgentStep` nodes (`GET /api/tenants/{t}/incidents/{id}/steps`).
 - Two baselines without traversal are computed for every incident (the flat change log and the anomaly-aware change log), so every answer comes with "what a change log alone would have blamed".
+- The UI says what it is: the planner badge reads "deterministic planner: rules choose each step from what the graph returns", and the offline replay shows a "recorded replay" chip instead of a FalkorDB connection chip.
+
+### 3.10 Evaluation
+
+`scripts/eval.py` (`make eval`) builds a fresh graph per seed from `scenarios.py`: datagen's 25-service org, one alert, one planted change as the cause 0 to 3 hops upstream, decoys that each fool a method without the graph (*a* newest change off the closure, *b* rolled back, *c* a change off the propagation path, *d* a change behind a retired dependency, *e* a misleading past incident), and perturbations: noise anomalies in the window off the truth path (*noise*; when one lands on decoy *c*'s service after its change, *noise-on-c*), a silent middle hop (*gap*), and a cascade victim that deploys after the cause already went red (*innocent*). It runs `respond()` with the deterministic planner and three baselines that read the same rows without traversal. Results at N=200 ([EVAL.md](EVAL.md)):
+
+| method | correct |
+|---|---|
+| graph agent | 184/200 (92%) |
+| anomaly-aware change log | 134/200 (fooled by *d* 55 times, by a red *c* 11 times) |
+| keyword match | 57/200 |
+| flat change log | 0/200 (by construction) |
+
+By perturbation the graph agent is 66/66 on seeds with only the planted story, 48/51 with a cascade victim, 11/13 with a gap and 22/38 with noise on *c*. All 16 misses are noise-on-c seeds: a blip on *c*'s service makes *c* a supported suspect, and it then leads by being nearer, by an earlier onset or by the cascade rule (its service is upstream of the truth's and went red first), or because the truth has a gap and *c* does not. EVAL.md lists each miss with the agent's own reasons from the trace. The perturbations were added after mock judges called the first version (200/200, one decoy per verdict rule and nothing else in the window) built to be passed, and the ranking (cascade rule, gaps as weak support) changed in the same round by people who knew the perturbations. It is not a blind test; read it as "the checks hold on random topologies with this much noise", not as accuracy on real incidents.
 
 ---
 
@@ -410,12 +444,13 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 - Keep variable-length traversals bounded (`*1..6`, `*0..6` today; `live_paths` returns at most 20 paths, `recent_changes` 5 rows) and bound `any_path`, which uses an unbounded `shortestPath`. `path_suspects` has no `LIMIT`: every in-window change on the path is a suspect, so its size is set by the 2-hour window.
 - Reverse `path_suspects` when the dependency graph is large: start from the few changes in the window (the `Change.at` index finds them) and test reachability, instead of expanding every upstream service first.
 - Cache the service map per tenant and invalidate on ingest. It changes rarely and the UI asks for it often.
+- `ask` takes the best 30 full-text hits per label and re-ranks them in Python with a prefix stemmer; `who_knows` counts docs with a pattern comprehension per person. Both are fine for a 96-document corpus. With thousands of docs: tune the index (weights, a real stemmer or language setting) instead of re-ranking a fixed top 30, and keep a per-service doc count instead of recounting.
 - Archive `AgentStep` nodes of resolved incidents (or keep only a summary). History grows by 13 to 18 nodes per incident in the demo.
 
 ### 4.2 Many concurrent incidents
 
 - Per-tenant graphs and per-tenant locks: runs on different tenants never wait on each other. Within a tenant each write is small (well under a millisecond of database time here).
-- The lock is per tenant, so two incidents on one tenant run one after the other (about 70 ms each today). For an alert storm, `correlate_alerts` already folds the related alerts into the incident being worked, but responding to each of those alerts separately would still open one incident per alert. Next: route storm alerts to the open incident, and lock per incident instead of per tenant. Batch `log_step` writes if they become the bottleneck.
+- The lock is per tenant, so two incidents on one tenant run one after the other (about 85 ms each today). For an alert storm, `correlate_alerts` already folds the related alerts into the incident being worked, but responding to each of those alerts separately would still open one incident per alert. Next: route storm alerts to the open incident, and lock per incident instead of per tenant. Batch `log_step` writes if they become the bottleneck.
 - Scale reads with FalkorDB replicas. Every read already goes through `GRAPH.RO_QUERY`, so it is safe to route to a replica.
 - The app is stateless, so add API replicas freely.
 
@@ -430,6 +465,7 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 - Each step is one LLM call, about 18 per incident. Keep the deterministic planner for triage and comms, where the rules are obvious, and use the LLM only for investigator branching.
 - Cache decisions by a hash of the board. The same board gives the same decision.
 - The deterministic fallback caps the damage of a slow or wrong model: the run always finishes.
+- None of this is measured: the adapters are tested against canned HTTP replies only, and no live model has been run in this project.
 
 ### 4.5 Reliability and operations
 
@@ -446,11 +482,13 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 | FalkorDB as the only store, one graph per tenant | the graph does the work: traversal, temporal filters, shared state, memory. Tenancy and resets come almost free | no relational store for reporting. Everything is Cypher | [002](decisions/ADR-002-stack.md) |
 | Native FalkorDB build (rhel8 module + self-built redis) on the dev machine | works on glibc 2.35 without Docker | the first `make falkordb-bin` compiles redis (a few minutes) | [002](decisions/ADR-002-stack.md) |
 | Named `.cypher` files, no OGM | every query is reviewable, documented and parameterised | no compile-time check of query names (a unit test covers it) | [002](decisions/ADR-002-stack.md) |
-| Hand-written loop, planner reads the board before every step | the plan lives in the graph, the trace is complete, runs are deterministic | about 1 ms extra per step for the board read (EVAL.md: mean 1.3 ms). The planner's rules are hand-written heuristics | [003](decisions/ADR-003-agent-loop.md) |
-| LLM optional, with a deterministic fallback | works with no key, tests are stable, judges can run it | the default demo does no free-text reasoning | [003](decisions/ADR-003-agent-loop.md) |
+| Hand-written loop, planner reads the board before every step | the plan lives in the graph, the trace is complete, runs are deterministic | 1 to 2 ms extra per step for the board read (EVAL.md: mean 1.5 ms). The planner's rules are hand-written heuristics | [003](decisions/ADR-003-agent-loop.md) |
+| LLM optional, with a deterministic fallback | works with no key, tests are stable, judges can run it | the default demo does no free-text reasoning; the LLM path is untested against a live model | [003](decisions/ADR-003-agent-loop.md) |
+| A silent middle hop is weak support, not "inconclusive"; a cascade rule over live `DEPENDS_ON` and onsets | missing telemetry no longer hides the cause; a deploy on a service already red from upstream is not blamed | more rules in `leading()`, and the cascade rule can follow a red upstream decoy (8 of the 16 eval misses) | [003](decisions/ADR-003-agent-loop.md) |
+| `ask` assembles its answer from graph facts and quoted sentences, no LLM | every claim points at a node, runs offline, testable | no paraphrase or synthesis across sources; a prefix stemmer and a stopword list, only tried on a small corpus | |
 | Structural recall instead of vectors | model-free, offline, explainable by a path, respects time | needs a known cause service. Text-only similarity is not captured | [004](decisions/ADR-004-memory-model.md) |
 | Memory written only on human-confirmed resolve | the agents cannot reinforce their own mistakes | memory grows only as fast as humans confirm | [004](decisions/ADR-004-memory-model.md) |
-| One Redis lock per tenant around agent runs | concurrent responders cannot duplicate edges; works across the API, MCP and scripts | runs on one tenant are serialised | |
+| One Redis lock per tenant around agent runs | concurrent responders cannot duplicate edges; works across the API, MCP and scripts | runs on one tenant are serialised (not a high-concurrency write path) | |
 | No graph-algorithm procedures (`algo.*`) in any decision: everything is Cypher traversal (temporal variable-length paths, `shortestPath`, intersecting upstream closures) | every score is exact, respects `valid_from`/`valid_to`, and explains itself as hops. The council judged PageRank on 25 nodes decoration; we tried `algo.betweenness` for the storm ranking and dropped it (sampled scores that change with `samplingSeed`; no property filter, so retired edges count) | no showcase of FalkorDB's algorithm library | [001](decisions/ADR-001-idea.md) |
 
 ## 6. What we would revisit as the system grows
@@ -461,5 +499,6 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 4. Tools register by import side effect: `services/respond.py` imports `services/tools.py` so the `@tool` decorators run. That is simple, but every surface depends on that import. An explicit `register_all()` would be clearer once there are several tool modules.
 5. A "no change, it's capacity" path. The investigator already escalates when every change is refuted, but it does not yet look for non-change causes.
 6. Vector similarity as a tie-breaker among structurally equal recalls, stored in FalkorDB's own vector index (ADR-004).
-7. Real event sources (deploy webhooks, monitoring, paging, chat) calling the event tools.
+7. Real event sources (deploy webhooks, monitoring, paging, chat) calling the event tools, plus an event tool for docs, tickets and chat (today they are seeded only).
 8. Per-user auth mapped to tenants (section 4.3).
+9. The eval's remaining blind spot: a noisy blip on an innocent changed service still beats the truth (all 16 misses). Telling "red because of my change" from "red at the same time for another reason" needs more than onset order, for example the anomaly's kind matching the change, or several anomalies in a row.

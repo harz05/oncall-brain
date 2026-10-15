@@ -21,7 +21,7 @@
    - handoffs only go forward (triage -> investigator -> comms), so a model cannot loop the roles.
 
    `make_llm()` in `wiring.py` picks the provider from `LLM_PROVIDER` and uses the deterministic planner when no key is set (Ollama needs none).
-6. **Honest labelling.** Every run reports `planner` (for example "deterministic planner"), and the UI shows it.
+6. **Honest labelling.** Every run reports `planner` (for example "deterministic planner"), and the UI shows it as "deterministic planner: rules choose each step from what the graph returns". The offline replay is labelled "recorded replay", not shown as a FalkorDB connection.
 
 ## Consequences
 - The trace is complete and replayable. Each step's first query is the board read, so you see exactly what the planner saw.
@@ -32,11 +32,17 @@
   - In an alert storm (act 3), triage correlates the related alerts first, and the investigator checks suspects on the shared upstream first. If the best supported suspect (say, from memory) explains only some of the alerting services, the investigator lists the dependency-path suspects too before handing off.
   - When two or more suspects are supported, the investigator calls `conclude`: one leading cause is kept. Another is recorded as outranked, with the reason, only if the leader explains every alerting service it explains; otherwise it is kept as a co-cause, and comms pages its team too.
   - If everything is refuted, the investigator escalates as a non-change cause.
-- Deterministic runs make the demo repeatable and the eval meaningful (graph vs flat baseline over many seeds; see `docs/EVAL.md`).
+- Verdicts and ranking (amended after a mock judging round in commit `e3a3bdd`; the cascade rule was narrowed in `00d4494` from "the upstream service went red before the leader's did" to "the upstream service was already red when the leader's change landed"):
+  - A check supports or refutes; there is no "inconclusive". A silent hop in the middle of the path was "inconclusive", which threw away the right suspect whenever one service's telemetry was missing. It is now a weak support: the hop is named in the reason ("monitoring gap?") and stored as `Hypothesis.gaps`, and the update adds a "Note:" line asking to check that service's monitoring.
+  - `leading()` order: most alerting services explained, fewest gaps, memory suggestion, nearest, earliest onset, newest, id.
+  - Cascade rule, over that order: if a supported suspect's service is upstream of the leader's (live `DEPENDS_ON`, read by the `depends_among` query) and was already red when the leader's change landed, the leader is a cascade victim that happened to deploy, and the upstream suspect leads ("...already red when this change landed: its anomaly came from upstream"). Without it, "nearest first" blamed the victim. It only fires when the upstream suspect explains at least the same alerting services, so it cannot override coverage.
+  - Every verdict carries a short tag (`rolled back`, `dependency retired`, `no dependency path`, `no anomaly after it`, `outranked`, `a human confirmed another cause`) for the update's one-line "Ruled out:"; the full reason stays on the `Evidence` node and in the trace.
+  - Cost: the cascade rule can follow a decoy whose service a random blip turned red first; 8 of the eval's 16 misses are that (EVAL.md). The rule was written knowing the eval's perturbations, so the eval is not a blind test of it. `tests/integration/test_causality.py` keeps the two judge probes (cascade victim, monitoring gap).
+- Deterministic runs make the demo repeatable and the eval meaningful (graph vs baselines over many seeds; see `docs/EVAL.md`).
 - Coordination survives the process. Agent history is in the graph (`GET .../incidents/{id}/steps`), and a second `respond()` on the same incident picks up from the board instead of starting over.
-- Cost: one extra read-only query per step (about 1 ms on the demo graph; EVAL.md measures a mean of 1.3 ms).
-- Limitation: the planner's rules are hand-written heuristics, not learned. We say so plainly. The graph decides which branch is taken, and the rules decide what each branch means.
-- Concurrency: "read board, decide, write" is not atomic on its own, and two concurrent `MERGE`s of the same edge can both create it. Every agent run therefore holds a per-tenant Redis lock; a responder that waits finds a finished board and only hands off (ARCHITECTURE 3.7).
+- Cost: one extra read-only query per step (1 to 2 ms on the demo graph; EVAL.md measures a mean of 1.5 ms).
+- Limitation: the planner's rules are hand-written heuristics, not learned. We say so plainly, and the UI badge reads "deterministic planner: rules choose each step from what the graph returns". By default one planner plays all three roles; the roles are separate functions reading one board, not separate models. The LLM adapters are tested against canned HTTP replies only and have not been run against a live model in this project.
+- Concurrency: "read board, decide, write" is not atomic on its own, and two concurrent `MERGE`s of the same edge can both create it. Every agent run therefore holds a per-tenant Redis lock, which serialises runs on one tenant (different tenants run in parallel); a responder that waits finds a finished board and only hands off (ARCHITECTURE 3.7).
 - The brief suggested `agents/roles/` (one file per role) and `agents/trace.py`. We did not need them: the roles are three short functions in `domain/planner.py`, and the trace is `list[TraceStep]` plus `log_step`.
 
 ## Alternatives considered

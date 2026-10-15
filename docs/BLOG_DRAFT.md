@@ -28,14 +28,20 @@ A smarter change log that also watches anomalies (blame the change whose own ser
 
 One hand-made story proves little, so I also ran an eval: 200 generated incidents, each with a random alerting service, a planted cause 0 to 3 hops upstream, and decoys of every kind above.
 
+The first version scored 200/200, and a round of mock judges said, fairly, that it was built to be passed: one decoy per verdict rule and nothing else in the window. So the generator now adds what real telemetry adds: unrelated anomalies in the window, a middle hop whose anomaly never arrived, and a cascade victim, a service between the cause and the alert that happens to deploy after the cause already went red. The numbers dropped, which is the point:
+
 | method | correct |
 |---|---|
-| On-call Brain (uses the graph) | 200/200 |
-| anomaly-aware change log: change behind the first service to go red | 141/200 |
-| keyword match: change summary vs alert name | 59/200 |
+| On-call Brain (uses the graph) | 184/200 (92%) |
+| anomaly-aware change log: change behind the first service to go red | 134/200 |
+| keyword match: change summary vs alert name | 57/200 |
 | flat change log: newest change in the window | 0/200 |
 
-Read those with the caveats. The scenarios are synthetic (one 25-service company), and the same team wrote the generator and the checks, so 200/200 shows the checks hold on random topologies, not that they are the right checks for real incidents. The flat log scores 0 by construction: one decoy is always the newest change. The anomaly-aware log is the strongest rule I found without the graph, and it fails only on the retired dependency: a change plus an anomaly there looks like a real upstream cause unless you know the edge ended days ago. The planner is deterministic, with no LLM in the loop. Details in [EVAL.md's limitations](EVAL.md#limitations-read-before-quoting-the-numbers).
+On seeds with only the planted story the agent still gets 66 of 66. All 16 misses are one pattern: a random blip lands on an innocent changed service right after its change, so that change looks like a real, supported cause and wins on a ranking rule (nearer, earlier, or upstream and red first). The eval lists every miss in the agent's own words from its trace.
+
+Read those with the caveats. The scenarios are synthetic (one 25-service company), and the same team wrote the generator, the checks and the agent. Worse for a clean comparison: the perturbations and the agent's ranking rules changed in the same round, by people who knew what the perturbations were, so this is not a blind test. The flat log scores 0 by construction: one decoy is always the newest change. The anomaly-aware log is the strongest rule I found without the graph; the retired dependency fools it 55 times (a change plus an anomaly there looks like a real upstream cause unless you know the edge ended days ago), and the noisy innocent change 11 times. The planner is deterministic, with no LLM in the loop. Details in [EVAL.md's limitations](EVAL.md#limitations-read-before-quoting-the-numbers).
+
+Two of the judges' probes became rules and regression tests. A deploy on a cascade victim: payments-gw breaks, payments deploys half a minute later and goes red, checkout alerts. Nearest-first would blame payments; the graph knows payments depends on payments-gw, which was already red when the payments change landed, so the payments-gw change leads and the update says why. And a monitoring gap: if payments never reports an anomaly although the failure passed through it, the suspect is no longer "inconclusive". It is supported with the gap named ("monitoring gap?"), ranked after any suspect with a complete chain, and the status update says to check payments' monitoring.
 
 A vector store over incident text shares the keyword blind spot. Incident titles all look alike ("X p99 latency above 2s"); what makes two incidents similar is where the cause sat in the system.
 
@@ -108,7 +114,7 @@ The guard: every read goes through `GRAPH.RO_QUERY`. Send it a `CREATE` and Falk
 
 The agents never pass Python objects to each other. They share an incident board in the graph: the `Incident`, its `Hypothesis` nodes with a status, `Evidence` linked by `SUPPORTS` or `REFUTES`, and one `AgentStep` node per step. A handoff from triage to the investigator is just another `AgentStep`.
 
-Before every decision the loop re-reads the board (`incident_board`, about 1 ms), and the planner sees nothing else. Each role is a pure function of it:
+Before every decision the loop re-reads the board (`incident_board`, 1 to 2 ms), and the planner sees nothing else. Each role is a pure function of it:
 
 ```python
 def investigator(board):  # domain/planner.py, shortened
@@ -130,13 +136,12 @@ After act 1, a human confirms the cause. `resolve_incident` writes `CAUSED_BY` a
 Recall finds act 1 with score 3. The runbook that fixed act 1 is for config changes on payments-gw, so memory suspects the new payments-gw config change, and one check confirms it. From `make demo`:
 
 ```text
-investigator tool calls: 8, hypotheses checked: 5 (culprit on check 3), solved by memory: False   # act 1
-investigator tool calls: 3, hypotheses checked: 1 (culprit on check 1), solved by memory: True    # act 2
 === memory ablation: act 2 with vs without act 1 in the graph ===
+  with memory:    3 investigator calls, 1 hypotheses checked, culprit on check 1
   without memory: 6 investigator calls, 4 hypotheses checked, culprit on check 2
 ```
 
-Without memory, nearest-first checking tries a newer, healthy payments deploy one hop away before the real cause. With memory, act 2's status update ends with "Next action: Revert the config change on payments-gw (...) (runbook 'Revert the config change on payments-gw', worked 1 of 1 times)", and names who knows payments-gw best, found by `who_knows` in the same graph.
+That is the same incident twice: the "without" run replays the refunds alert on a copy of the pristine graph, which has never seen act 1. (An earlier version of the UI compared act 2 with act 1: two different incidents, which flattered memory.) The API does the same with `?compare=memory`, and the UI's act 2 card shows both. Without memory, nearest-first checking tries a newer, healthy payments deploy one hop away before the real cause. With memory, act 2's status update says "Next action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)", and names who knows payments-gw best, found by `who_knows` in the same graph.
 
 ![Act 2: the refunds incident solved from act 1's memory](img/act2.png)
 
@@ -158,9 +163,15 @@ A third review round broke an earlier version of this with one question: what if
 
 An honest note on graph algorithms. My first version ranked that shared upstream with FalkorDB's `algo.betweenness`. A review caught two problems. The scores are sampled: on my 25-service graph, changing `samplingSeed` reorders the services even with `samplingSize` above the node count. And the procedure filters by label and relationship type, not by property, so it counts dependencies that were retired before the alert. Neither is fine for a number that decides which change gets blamed, so I replaced it with summed hops over live edges, which is exact, respects time and explains itself. Everything the product does on the graph is now plain Cypher: temporal variable-length paths, `shortestPath`, and intersecting upstream closures.
 
+## Asking the graph why
+
+The same graph holds the company's paperwork: a small synthetic corpus of 34 docs (postmortems, design notes, decision records, runbook pages), 21 tickets and 41 chat messages, each linked to the services, changes, people and incidents it talks about (`MENTIONS`, `AUTHORED_BY`, `DECIDES`, `SUPERSEDES`). An `ask` tool takes a question, runs FalkorDB's full-text index over docs, tickets and chat, re-ranks the hits, then walks the graph around them.
+
+Ask "Why was the payments gateway pool lowered?" and it leads with the Q4 cost review design note by Sana Brandt, quoting "Decision: lower the pool max_connections from 200 to 20, which cuts the gateway bill by about 40%", links the change `chg:pgw-pool-1`, and lists the peak load test postmortem that warned against going below 150 among its sources. Ask "who designed the checkout retries" and it names the v2 design and says it replaces an older v1 by someone else, because `SUPERSEDES` says which doc is current. Full-text search finds the words; the edges say whose change it was, who owns the service now and whether the doc still holds. There is no LLM in it: the answer is assembled from graph facts and quoted sentences, so it can't summarise, but every claim points at a node.
+
 ## How it was built
 
-With a lot of AI help, and I want to be upfront about it. I wrote the brief: the five-idea shortlist, the scoring rubric, the engineering rules (Cypher in named files, one tool registry for the agent loop, HTTP and MCP, a planner that works without keys) and the machine constraints. Claude Code (Opus 5.5) picked the idea through an LLM council of five advisor personas (On-call Brain 8.22, runner-up 6.36), then wrote most of the code, tests and docs. A second Claude session on another machine acted as a cloud reviewer, running snapshots independently and sending patches. Full disclosure in [AI_USAGE.md](AI_USAGE.md).
+With a lot of AI help, and I want to be upfront about it. I wrote the brief: the five-idea shortlist, the scoring rubric, the engineering rules (Cypher in named files, one tool registry for the agent loop, HTTP and MCP, a planner that works without keys) and the machine constraints. Claude Code (Opus 5.5) picked the idea through an LLM council of five advisor personas (On-call Brain 8.22, runner-up 6.36), then wrote most of the code, tests and docs. A second Claude session on another machine acted as a cloud reviewer, running snapshots independently and sending patches. Late in the build, three simulated judges scored the tracks and listed overclaims; the realistic eval, the cascade rule, the same-incident memory comparison and the company-brain corpus came out of that round. Full disclosure in [AI_USAGE.md](AI_USAGE.md).
 
 > TODO(Harsh): what you personally reviewed, verified and changed (for example: ran `make setup db seed demo test` on a clean checkout, read every query, clicked through the UI).
 
@@ -174,6 +185,7 @@ redis-server --port 6379 --loadmodule ./falkordb-rhel8-x64.so
 
 ## What I'd do next
 
+- Tell "red because of my change" from "red at the same moment for another reason". That is every one of the eval's 16 misses.
 - A "no change, it's capacity" path. Today the investigator escalates when every change is refuted, but doesn't look for other causes.
 - Runbook confidence that also decays with age. Today a refuted suggestion lowers it, but time doesn't.
 - Real ingest: deploy webhooks, monitoring and paging calling the event tools (`record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`) that already keep the graph current.

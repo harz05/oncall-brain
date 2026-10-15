@@ -2,16 +2,17 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 21 registry tools plus two use-case tools,
-23 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 22 registry tools plus two use-case tools,
+24 in all.
 
 | Tool | What it does |
 |---|---|
 | `reset_tenant` | Restore the tenant's pristine seeded graph (`GRAPH.COPY`), seeding it first if there is none. |
-| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, `co_causes`, ruled-out suspects, both no-graph baselines, who was paged, status update, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. |
-| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` |
-| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also re-posts the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
-| read tools | `dependency_path`, `service_map`, `incident_board`, `who_knows`, `change_story` |
+| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, `co_causes`, ruled-out suspects with their tags, both no-graph baselines, who was paged, the status update text, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. The same-incident memory ablation (`?compare=memory`) is on the HTTP endpoint only. |
+| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` (writes the update for #incidents onto the incident; nothing is sent to Slack) |
+| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
+| company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; read-only, no LLM), `who_knows`, `change_story` |
+| read tools | `dependency_path`, `service_map`, `incident_board` |
 | live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`: keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
@@ -129,6 +130,29 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
 > respond_to_alert {"tenant": "demo", "alert_id": "alert:refunds-latency"}
   ... act 2: recalled from act 1's memory, culprit on check 1, update has a "Next action" line.
 ```
+
+## Example: ask the company brain
+
+`ask` reads only (two `GRAPH.RO_QUERY` calls), so it needs no incident. Response from a freshly reset tenant, trimmed:
+
+```text
+> ask {"tenant": "demo", "question": "Why was the payments gateway pool lowered?"}
+{"summary": "5 sources for 'payments gateway pool lowered'; most relevant doc:cost-review-pgw",
+ "data": {"answer": "Most relevant: Q4 cost review: payments gateway idle connections (design note, by Sana Brandt,
+            2026-10-06): \"payments-gw (the payments gateway) keeps a pool of 200 connections but uses fewer than 20
+            overnight. Decision: lower the pool max_connections from 200 to 20, which cuts the gateway bill by about
+            40%.\" It concerns payments-gw, payments; related changes: chg:pgw-pool-1 'Lower payments-gw HTTP pool
+            max_connections 200 -> 20 (cost cleanup)'; people who know: Sana Brandt, Quinn Tanaka. It is the decision
+            of record for payments-gw. Also: ...",
+          "hits": [{"id": "doc:cost-review-pgw", "kind": "design", "matched": 4, "superseded_by": null, ...}, ...],
+          "related": [{"id": "svc:payments-gw", "kind": "service", "via": "doc:cost-review-pgw DECIDES svc:payments-gw"},
+                      {"id": "team:payments", "kind": "team", "via": "team:payments OWNS svc:payments-gw"}, ...],
+          "sources": ["doc:cost-review-pgw", "msg:chat-008", "doc:pm-load-test-pgw", "ticket:PAY-388", "ticket:CR-881"]},
+ "queries": [{"name": "search_knowledge", "readonly": true, ...}, {"name": "knowledge_context", "readonly": true, ...}]}
+```
+
+Ask with a few content words: stopwords and one-letter words are dropped and only `[a-z0-9]` survives, so a question
+like "why was it?" returns a plain "Ask with a few content words" answer without querying the index.
 
 ## Example: push your own events, then respond
 
