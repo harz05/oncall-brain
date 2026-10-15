@@ -5,9 +5,12 @@
 # (for example `--http --port 8001` to serve Streamable HTTP instead of stdio).
 set -euo pipefail
 HOME_DIR="${ONCALL_BRAIN_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-PY="$HOME_DIR/.venv/bin/python"
+# The interpreter: ONCALL_BRAIN_PYTHON, else the active venv (VIRTUAL_ENV, which the Makefile may keep on another
+# disk), else the checkout's own .venv that `make setup` creates.
+PY="${ONCALL_BRAIN_PYTHON:-${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}}"
+PY="${PY:-$HOME_DIR/.venv/bin/python}"
 if [[ ! -x "$PY" ]]; then
-  echo "oncall-brain: no interpreter at $PY. Run 'make setup' in the On-call Brain checkout, or point ONCALL_BRAIN_HOME at it." >&2
+  echo "oncall-brain: no interpreter at $PY. Run 'make setup' in the On-call Brain checkout, point ONCALL_BRAIN_HOME at it, or set ONCALL_BRAIN_PYTHON." >&2
   exit 1
 fi
 cd "$HOME_DIR"  # settings come from .env in the checkout
