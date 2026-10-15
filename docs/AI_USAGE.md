@@ -32,10 +32,11 @@ The hackathon rules require AI coding assistants to be disclosed. This page says
 
 ## How the output was verified
 
-- **Automated tests** (`make test`): unit tests for the pure logic, and integration tests that run the real story against a real FalkorDB. They check that each decoy is refuted for the right reason, that the flat baseline is wrong, that memory makes act 2 shorter, that act 3 is solved only with alert correlation, that read tools cannot write, that tenants are isolated, and that concurrent responders do not duplicate edges.
+- **Automated tests** (`make test`): unit tests for the pure logic, and integration tests that run the real story against a real FalkorDB. They check that each decoy is refuted for the right reason, that the flat baseline is wrong, that memory makes act 2 shorter, that act 3 is solved only with alert correlation, that an unrelated alert is not folded into a storm, that agents are never offered `resolve_incident` or the event tools, that read tools cannot write, that tenants are isolated, and that concurrent responders do not duplicate edges.
 - **End-to-end demo as a check:** `make demo` runs act 1, the human resolve, act 2, a memory ablation, act 3 and a correlation ablation, and exits non-zero if any claim in the story stops holding.
 - **Eval beyond the planted story:** `make eval` runs the agent on 200 randomised incidents with their own decoys and compares it with three baselines that do not use the graph (`docs/EVAL.md`).
 - **Independent run:** the cloud reviewer ran snapshots on a different machine and filed findings and patches. Each was applied or rejected with a reason.
+- **Review rounds:** two rounds of review findings were fixed in commits `5ec24e8` and `5792df5`. One claim was withdrawn as a result: act 3 first ranked the storm's shared upstream with FalkorDB's `algo.betweenness`, but its scores are sampled (they change with `samplingSeed`) and it cannot ignore retired dependencies, so it was replaced with an exact ranking by hop count.
 - **Measured, not assumed:** the latency numbers in `docs/ARCHITECTURE.md` come from running the demo on the dev machine. The redis-cli commands in `docs/WALKTHROUGH.md` were run against the seeded graph before being written down.
 - **Lint:** `ruff` over the code.
 

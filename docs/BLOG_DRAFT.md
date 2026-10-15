@@ -24,6 +24,8 @@ The real cause is a payments-gw config change 40 minutes earlier (HTTP pool 200 
 | cart deploy | refuted | cart shows no anomaly after the change |
 | **payments-gw config change** | **supported** | anomaly propagates payments-gw -> payments -> checkout |
 
+A smarter change log that also watches anomalies (blame the change whose own service went red first) does no better: legacy-billing deployed 50 minutes before the alert and threw errors 5 minutes later, before payments-gw went red. Only the retired dependency edge rules it out.
+
 One hand-made story proves little, so I also ran an eval: 200 generated incidents, each with a random alerting service, a planted cause 0 to 3 hops upstream, and decoys of every kind above.
 
 | method | correct |
@@ -69,8 +71,7 @@ WITH a, s, min(length(p)) AS hops
 MATCH (c:Change)-[:CHANGED]->(s)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops
-ORDER BY hops, at DESC
-LIMIT 10
+ORDER BY hops, at DESC, change
 ```
 
 Walk up to 6 `DEPENDS_ON` hops from the alerting service, keeping a path only if *every* edge on it was live at alert time: `all(r IN relationships(p) ...)` filters per relationship, not per path. `*0..6` lets a change on the alerting service itself count. Then take the changes from the 2-hour window on those services, nearest first. The legacy-billing deploy never appears, because its only path uses a retired edge.
@@ -116,7 +117,8 @@ def investigator(board):  # domain/planner.py, shortened
     best = max((r["score"] for r in board["recalls"]), default=0)
     if best >= RECALL_MIN_SCORE and not _ran(board, "hypothesize_from_memory"):
         return _call("hypothesize_from_memory", "A past incident matches structurally; ...")
-    ...  # then check open hypotheses (memory first, then a storm's shared upstream, nearest, newest), then hand off
+    ...  # then check open hypotheses (memory first, then a storm's shared upstream, nearest, newest);
+         # if several are supported, conclude (keep one leading cause); then hand off
 ```
 
 Because the board is the only input, an LLM can take the planner's seat behind the same `decide(role, board, tools)` port without changing the tools or the trace. If the model picks an unknown tool, bad arguments or a repeated step, that step falls back to the deterministic planner and the trace says so. Every number in this post comes from the deterministic planner.
@@ -148,9 +150,11 @@ Memory only proposes; the same checks still decide. In act 1 the agent recalls a
 
 ## Three alerts at once
 
-Act 3 is an alert storm: checkout, refunds and subscriptions alert within 4 minutes. Investigated alone, the subscriptions alert points at a subscriptions deploy 10 minutes earlier, and that is what my planner blames when I switch correlation off. With correlation, triage first folds the other alerts into the incident and asks which services all three depend on at alert time. That is six services. It ranks them with FalkorDB's `algo.betweenness` over the dependency graph (paths converge on payments). The investigator checks suspects there first: a postgres-orders config change is confirmed on check 1, and the subscriptions deploy is refuted because checkout and refunds don't depend on subscriptions.
+Act 3 is an alert storm: checkout, refunds and subscriptions alert within 4 minutes. Investigated alone, the subscriptions alert points at a subscriptions deploy half an hour earlier, which blipped right after it. That is what my planner blames when I switch correlation off, and what the anomaly-aware change log blames too.
 
-Two honest caveats. In this story only one suspect sits on the shared upstream, so the shared-upstream set and the refutation rule decide the answer; the betweenness order matters only when several suspects sit there (a unit test covers that). And `algo.betweenness` counts every `DEPENDS_ON` edge, retired ones too, because FalkorDB's algorithms filter by label and relationship type, not by property. The shared-upstream set itself uses live edges only.
+With correlation, triage first asks, for each alerting service, which services it reaches over live dependencies and which of those went red. It folds in only the alerts that share a red upstream service with this one, so an unrelated alert that just shares a quiet cache stays its own incident. The services all three reach are ranked by convergence, the fewest total hops from the alerting services: payments 3, postgres-orders 5, and so on. The investigator checks suspects there first. A postgres-orders config change is supported and explains all three alerts. The subscriptions deploy is supported too, but explains one of three. A `conclude` step keeps one leading cause and writes down why the other lost: "outranked: chg:pg-conn-3 explains 3 of the correlated alerts, this change 1". The outcome, the status update and the paging all name the same cause.
+
+An honest note on graph algorithms. My first version ranked that shared upstream with FalkorDB's `algo.betweenness`. A review caught two problems. The scores are sampled: on my 25-service graph, changing `samplingSeed` reorders the services even with `samplingSize` above the node count. And the procedure filters by label and relationship type, not by property, so it counts dependencies that were retired before the alert. Neither is fine for a number that decides which change gets blamed, so I replaced it with summed hops over live edges, which is exact, respects time and explains itself. Everything the product does on the graph is now plain Cypher: temporal variable-length paths, `shortestPath`, and intersecting upstream closures.
 
 ## How it was built
 

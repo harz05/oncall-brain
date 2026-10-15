@@ -2,16 +2,17 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 20 registry tools plus two use-case tools,
-22 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 21 registry tools plus two use-case tools,
+23 in all.
 
 | Tool | What it does |
 |---|---|
 | `reset_tenant` | Restore the tenant's pristine seeded graph (`GRAPH.COPY`), seeding it first if there is none. |
-| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, refuted suspects, who was paged, status update, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. |
-| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `post_update`, `resolve_incident` |
+| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, ruled-out suspects, both no-graph baselines, who was paged, status update, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. |
+| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` |
+| human step | `resolve_incident`: confirm the cause and learn the runbook. Our own agent runs are never offered it. |
 | read tools | `dependency_path`, `service_map`, `incident_board`, `who_knows`, `change_story` |
-| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`: keep the graph current, then respond to the new alert |
+| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`: keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
 Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
@@ -112,7 +113,8 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
                             "summary": "Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)",
                             "verdict": "supports", "reason": "anomaly propagates payments-gw -> payments -> checkout",
                             "live_path": ["svc:checkout", "svc:payments", "svc:payments-gw"]},
-             "refuted": [...], "baseline_pick": {...}, "baseline_correct": false, "paged": [...],
+             "refuted": [...], "baseline_pick": {...}, "baseline_correct": false,
+             "anomaly_baseline_pick": {"change": "chg:legacy-193", ...}, "anomaly_baseline_correct": false, "paged": [...],
              "update_text": "...", "investigator_calls": 8, "hypotheses_checked": 5, "checks_to_culprit": 3,
              "runbook": null, "expert": {"name": "Sana Brandt", "handle": "@sana.brandt", ...}, "storm": null, ...},
  "steps": [{"seq": 1, "role": "triage", "tool": "open_incident", "summary": "Opened inc:checkout-latency ..."},

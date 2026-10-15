@@ -32,7 +32,7 @@ flowchart LR
   Anomaly -->|ON| Service
   Incident -->|TRIGGERED_BY| Alert
   Incident -->|CORRELATED_WITH| Alert
-  Incident -->|"SHARED_UPSTREAM (rank, betweenness)"| Service
+  Incident -->|"SHARED_UPSTREAM (rank, hops)"| Service
   Incident -->|"IMPACTS (hops, via)"| Service
   Incident -->|"PAGED (at, for_service)"| Person
   Incident -->|"CONSULTED (for_service, score)"| Person
@@ -77,17 +77,17 @@ semantic facts current after seeding.
 | `Team` | `id`, `name` | An engineering team that owns services and has an on-call rotation. | seed `ingest_teams` |
 | `Person` | `id`, `name`, `handle` (`@first.last`, e.g. `@sana.brandt`) | An engineer. All names are fake. | seed `ingest_people` |
 | `Service` | `id`, `name`, `tier` (1 = customer-facing critical, 2 = other) | A deployable service. | seed `ingest_services` |
-| `Change` | `id`, `kind` (`deploy` / `config`), `summary`, `at`, `version` (deploys only), `rolled_back_at` (if rolled back) | A deploy or a config change to one service. Changes are the suspects in an investigation. | seed `ingest_changes`; `record_change` → `record_change` |
+| `Change` | `id`, `kind` (`deploy` / `config`), `summary`, `at`, `version` (deploys only), `rolled_back_at` (if rolled back) | A deploy or a config change to one service. Changes are the suspects in an investigation. | seed `ingest_changes`; `record_change` → `record_change` (re-recording an id corrects it: the old `CHANGED` / `AUTHORED_BY` edges are dropped) |
 | `Alert` | `id`, `name`, `symptom` (`latency` / `errors` / `saturation`), `at`, `act` (story act 1, 2 or 3; seeded alerts only) | A monitoring alert that fired on a service. It is what starts an investigation. | seed `ingest_alerts`; `raise_alert` → `raise_alert` |
 | `Anomaly` | `id`, `kind` (`latency` / `errors` / `saturation`), `summary`, `at` | A monitoring signal on a service. Checks use it to see whether a symptom travelled along a dependency path. | seed `ingest_anomalies`; `record_anomaly` → `record_anomaly` |
 | `Incident` | `id`, `title`, `symptom`, `status` (`open` / `resolved`), `opened_at`, `resolved_at` | The shared board that every agent role reads and writes. Past incidents are already resolved. | seed `ingest_incidents` (history); `open_incident` → `open_incident`; `resolve_incident` → `resolve_incident` sets `status`, `resolved_at` |
-| `Hypothesis` | `id`, `status` (`open` → `supported` / `refuted` / `inconclusive`, then `confirmed` by a human), `source` (`dependency-path` / `recent-anywhere` / `memory`), `hops`, `created_at`, `runbook` (memory suspects only: the runbook that suggested it) | "Change X caused this incident", together with where the suspicion came from. | `propose_hypotheses`, `hypothesize_from_memory` → `add_hypotheses`; status from `check_hypothesis` → `record_evidence` and `resolve_incident` |
-| `Evidence` | `id`, `verdict` (`supports` / `refutes` / `inconclusive`), `reason`, `path` (service ids the check walked), `at` | The result of one check on a hypothesis, together with the path that justifies it. | `check_hypothesis` → `record_evidence` |
-| `Runbook` | `id`, `title`, `steps` (list), `kind` (change kind it fixes), `uses`, `successes`, `learned_from` (learned runbooks only) | A fix procedure for one service and one kind of change. Its confidence is `successes / uses`. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` (learns, or adds 1 to `uses` and `successes`); `check_hypothesis` → `record_evidence` adds 1 to `uses` when the runbook's suggestion is refuted |
+| `Hypothesis` | `id`, `status` (`open` → `supported` / `refuted` / `inconclusive`; a supported one can become `outranked` when another explains more; `confirmed` by a human), `source` (`dependency-path` / `recent-anywhere` / `memory`), `hops`, `created_at`, `runbook` (memory suspects only: the runbook that suggested it), `coverage` (how many of the correlated alerts it explains; 1 outside a storm) | "Change X caused this incident", together with where the suspicion came from. | `propose_hypotheses`, `hypothesize_from_memory` → `add_hypotheses`; status and `coverage` from `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked`; `resolve_incident` |
+| `Evidence` | `id`, `verdict` (`supports` / `refutes` / `inconclusive` / `outranked`), `reason`, `path` (service ids the check walked), `at`, `explains` (correlated alerts the change can reach) | The result of one check on a hypothesis, together with the path that justifies it. `conclude` rewrites a supported hypothesis's Evidence as `outranked`, with the reason another suspect leads (the earlier `SUPPORTS` edge stays). | `check_hypothesis` → `record_evidence`; `conclude` → `record_outranked` |
+| `Runbook` | `id`, `title`, `steps` (list), `kind` (change kind it fixes), `uses`, `successes`, `learned_from` (learned runbooks only) | A fix procedure for one service and one kind of change. Its confidence is `successes / uses`. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` (learns, or adds 1 to `uses` and `successes`); `check_hypothesis` → `record_evidence` adds 1 to `uses` when the runbook's suggestion is refuted (once, on open → refuted) |
 | `Message` | `id`, `kind` (`chat` / `status_update`), `channel`, `text`, `at` | Seeded chat that announced a change, or a status update the comms agent posted. | seed `ingest_messages` (chat); `post_update` → `post_update` (status updates) |
 | `Ticket` | `id`, `title`, `text`, `at` | A change-request ticket, which a status update can cite as a source. | seed `ingest_tickets` |
 | `AgentStep` | `id`, `seq`, `role` (`triage` / `investigator` / `comms`), `tool` (tool name or `handoff`), `target`, `reason`, `summary`, `rows`, `ms`, `writes` | One step of one agent: what it did, why, and what it cost. Handoffs between roles are steps too. | agent loop (`agents/loop.record`) → `log_step` |
-| `Meta` | `id` (always `meta`), `version` (fingerprint of the generated data), `seed` | Which generator built this graph. `reset()` restores the pristine copy only if its `version` matches the current generator, else it re-seeds. | seed `ingest_meta` |
+| `Meta` | `id` (always `meta`), `version` (fingerprint of the generated data), `seed` | Which generator built this graph. `reset()` restores the pristine copy only if its `version` matches the current generator run with this `seed`, else it re-seeds with the same seed. | seed `ingest_meta` |
 
 ## Relationships
 
@@ -96,7 +96,7 @@ semantic facts current after seeding.
 | `(Person)-[:MEMBER_OF]->(Team)` | | Team membership. | seed `ingest_people` |
 | `(Person)-[:ON_CALL]->(Team)` | `start`, `end` (end exclusive) | One on-call shift. The rotation is weekly and covers all three acts. | seed `ingest_on_call` |
 | `(Team)-[:OWNS]->(Service)` | | Ownership. | seed `ingest_services` |
-| `(Service)-[:DEPENDS_ON]->(Service)` | `valid_from`, `valid_to` (absent = still live) | The caller calls the callee during that window. `valid_from` is part of the `MERGE` key, so a dependency that is retired and later re-added gets a new edge with its own window. | seed `ingest_depends_on`; `add_dependency` → `add_dependency`; `retire_dependency` → `retire_dependency` (sets `valid_to` on the live edge) |
+| `(Service)-[:DEPENDS_ON]->(Service)` | `valid_from`, `valid_to` (absent = still live) | The caller calls the callee during that window. A pair has at most one live edge: `add_dependency` creates a new edge only if none is live, so a dependency that is retired and later re-added gets a new edge with its own window, and adding a live one again changes nothing. | seed `ingest_depends_on` (`MERGE` on `valid_from`); `add_dependency` → `add_dependency`; `retire_dependency` → `retire_dependency` (sets `valid_to` on the live edge) |
 | `(Change)-[:CHANGED]->(Service)` | | The service the change touched. | seed `ingest_changes`; `record_change` → `record_change` |
 | `(Change\|Ticket\|Message)-[:AUTHORED_BY]->(Person)` | | Who made the change, filed the ticket or wrote the chat message. | seed `ingest_changes`, `ingest_tickets`, `ingest_messages`; `record_change` (if an author is given) |
 | `(Ticket)-[:REQUESTED]->(Change)` | | The change request behind a change. | seed `ingest_tickets` |
@@ -106,13 +106,13 @@ semantic facts current after seeding.
 | `(Runbook)-[:FOR_SERVICE]->(Service)` | | The service the runbook fixes. Together with `Runbook.kind`, it says which changes the runbook is for. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:TRIGGERED_BY]->(Alert)` | | The alert that opened the incident. | `open_incident` → `open_incident` |
 | `(Incident)-[:IMPACTS]->(Service)` | `hops`, `via` | An impacted service. `hops` 0 is an alerting service. `via` is the service the blast radius was walked from: the alerting service when triage writes the edge (direct impact), and the culprit service when comms writes it (also at risk). | `open_incident` → `open_incident` (hops 0); `blast_radius` → `record_impacts`; `correlate_alerts` → `record_correlation` (hops 0 for each correlated alert's service); seed `ingest_incidents` (hops 0) |
-| `(Incident)-[:CORRELATED_WITH]->(Alert)` | | Another alert that fired in the 15 minutes before this incident's alert, folded into this incident (alert storm). `check_hypothesis` refutes a suspect that cannot reach every correlated alert's service. | `correlate_alerts` → `record_correlation` |
-| `(Incident)-[:SHARED_UPSTREAM]->(Service)` | `rank`, `betweenness` | A service every alerting service in the storm depends on (live edges at alert time), ranked by `algo.betweenness` over `Service` / `DEPENDS_ON`. The board reads these in rank order, and the investigator checks suspects on them first. Betweenness counts all `DEPENDS_ON` edges, retired ones included. | `correlate_alerts` → `record_correlation` |
+| `(Incident)-[:CORRELATED_WITH]->(Alert)` | | A related alert, folded into this incident (alert storm): it fired in the 15 minutes before this incident's alert, and its service shares with the alerting service an upstream service that went red in the 2-hour window. `check_hypothesis` counts how many of these alerts each supported suspect can reach (`coverage`). | `correlate_alerts` → `record_correlation` |
+| `(Incident)-[:SHARED_UPSTREAM]->(Service)` | `rank`, `hops` | A service every correlated alerting service depends on (live edges at alert time, 0 to 6 hops). `hops` is the total of their hop counts to it; `rank` orders by it (fewest first: where the paths converge). The board reads these in rank order, and the investigator checks suspects on them first. | `correlate_alerts` → `record_correlation` |
 | `(Incident)-[:PAGED]->(Person)` | `at`, `for_service` | Who was paged, when, and for which service. `who_knows` counts the incidents where someone was paged for the service it is asked about. | `page_on_call` → `record_page`; seed `ingest_incidents` (each past incident pages someone for its culprit service) |
 | `(Incident)-[:CONSULTED]->(Person)` | `for_service`, `score` | The person comms will ask about the culprit service: the top `who_knows` answer. The status update names them in its "Ask:" line. | `who_knows` (with an `incident_id`) → `record_consult` |
 | `(Incident)-[:HAS_HYPOTHESIS]->(Hypothesis)` | | A suspect on the board. | `add_hypotheses` |
 | `(Hypothesis)-[:SUSPECTS]->(Change)` | | The change the hypothesis blames. | `add_hypotheses` |
-| `(Evidence)-[:SUPPORTS]->(Hypothesis)` / `(Evidence)-[:REFUTES]->(Hypothesis)` | | The verdict of a check. An `inconclusive` verdict only sets the hypothesis status and writes no edge. | `check_hypothesis` → `record_evidence` (`FOREACH` picks the edge) |
+| `(Evidence)-[:SUPPORTS]->(Hypothesis)` / `(Evidence)-[:REFUTES]->(Hypothesis)` | | The verdict of a check. An `inconclusive` verdict only sets the hypothesis status and writes no edge. An outranked hypothesis gets a `REFUTES` edge with the reason it lost. | `check_hypothesis` → `record_evidence` (`FOREACH` picks the edge); `conclude` → `record_outranked` |
 | `(Incident)-[:RECALLS]->(Incident)` | `score`, `cause_service` | Episodic recall. The score is 2 when the past incident's root-cause service is on this alert's live dependency path, plus 1 for the same symptom. The planner acts on a score of 3 or more. | `recall_similar` → `record_recalls` |
 | `(Incident)-[:CAUSED_BY]->(Change)` | | The human-confirmed root cause. | seed `ingest_incidents`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:FIXED_WITH]->(Runbook)` | | The runbook that fixed the incident. | seed `ingest_incidents`; `resolve_incident` → `resolve_incident` |
@@ -181,8 +181,8 @@ Seeding rebuilds the tenant from scratch and also keeps `pristine_<name>`. A dem
 `GRAPH.COPY` from that copy, so it does not re-run ingest, as long as the copy's `Meta` fingerprint matches the
 current generator. Tenants share no nodes, so one tenant's incidents and learned runbooks can never be recalled for
 another. The seeded company (seed 7) has 6 teams, 24 people, 25 services, 39 `DEPENDS_ON` edges (one retired), 24
-on-call shifts, 109 changes, 5 alerts (1 for act 1, 1 for act 2, 3 for act 3), 43 anomalies, 7 runbooks, 7 past
-incidents (each with a `PAGED` edge), 3 tickets, 1 chat message and the `Meta` node: 231 nodes and 421 relationships.
+on-call shifts, 109 changes, 5 alerts (1 for act 1, 1 for act 2, 3 for act 3), 44 anomalies, 7 runbooks, 7 past
+incidents (each with a `PAGED` edge), 3 tickets, 1 chat message and the `Meta` node: 232 nodes and 422 relationships.
 
 ## Three traversals in plain English
 
