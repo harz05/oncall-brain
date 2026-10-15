@@ -1,7 +1,7 @@
 SHELL := /bin/bash
-# On Harsh's machine everything (venv, caches, FalkorDB binaries) lives on the external HDD via env.sh.
-# Elsewhere env.sh is absent and we fall back to ./.venv and ./.falkordb-bin.
-ENV_SH ?= /media/harsh/MyPassport1/devenv/env.sh
+# Optional machine-local environment file (e.g. to keep the venv, caches and FalkorDB binaries on another disk).
+# When it is absent everything falls back to ./.venv and ./.falkordb-bin.
+ENV_SH ?= ../../devenv/env.sh
 E := [ -f $(ENV_SH) ] && . $(ENV_SH); \
 	export VIRTUAL_ENV=$${VIRTUAL_ENV:-$(CURDIR)/.venv} FALKORDB_BIN=$${FALKORDB_BIN:-$(CURDIR)/.falkordb-bin}; \
 	export PATH=$$VIRTUAL_ENV/bin:$$PATH;
@@ -54,6 +54,7 @@ eval:
 docs:
 	$(E) python -m scripts.gen_queries_doc
 
+# Dev-only: archive HEAD for an outside code reviewer working from ../collab.
 snapshot:
 	git log --oneline -40 > ../collab/GITLOG.txt
 	git archive --format=tar.gz -o ../collab/snapshot.tar.gz HEAD
