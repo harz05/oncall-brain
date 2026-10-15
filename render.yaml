@@ -1,0 +1,17 @@
+# Render blueprint (https://render.com/docs/blueprint-spec). FalkorDB runs elsewhere (FalkorDB Cloud):
+# set FALKORDB_URL in the Render dashboard. See docs/DEPLOY.md.
+services:
+  - type: web
+    name: oncall-brain
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: FALKORDB_URL        # rediss://<user>:<password>@<host>:<port> from FalkorDB Cloud
+        sync: false
+      - key: ALLOWED_HOSTS       # your public hostname, e.g. oncall-brain.onrender.com
+        sync: false
+      - key: MAX_TENANTS
+        value: "10"
+      - key: LLM_PROVIDER        # mock = deterministic planner; or gemini/openai/groq/anthropic + LLM_API_KEY
+        value: mock

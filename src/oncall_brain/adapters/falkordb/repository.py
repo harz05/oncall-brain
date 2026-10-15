@@ -65,8 +65,9 @@ class FalkorRepository:
 
 class FalkorGraphStore:
     def __init__(self, host: str = "localhost", port: int = 6379, username: str | None = None,
-                 password: str | None = None):
-        self.db = FalkorDB(host=host, port=port, username=username, password=password)
+                 password: str | None = None, ssl: bool = False, url: str = ""):
+        self.db = (FalkorDB.from_url(url) if url
+                   else FalkorDB(host=host, port=port, username=username, password=password, ssl=ssl))
 
     def tenant(self, tenant: str) -> FalkorRepository:
         return FalkorRepository(self.db, tenant)

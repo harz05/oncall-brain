@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     falkordb_port: int = 6379
     falkordb_username: str | None = None
     falkordb_password: str | None = Field(None, repr=False)
+    falkordb_ssl: bool = False  # FalkorDB Cloud and most hosted Redis need TLS
+    falkordb_url: str = Field("", repr=False)  # e.g. rediss://user:pass@host:port; overrides the fields above
     default_tenant: str = "acme"
 
     # mock | openai | gemini | groq | openrouter | ollama | anthropic (presets in wiring.py).

@@ -17,7 +17,8 @@ PRESETS = {
 
 def make_store(s: Settings | None = None) -> FalkorGraphStore:
     s = s or get_settings()
-    return FalkorGraphStore(s.falkordb_host, s.falkordb_port, s.falkordb_username, s.falkordb_password)
+    return FalkorGraphStore(s.falkordb_host, s.falkordb_port, s.falkordb_username, s.falkordb_password,
+                            s.falkordb_ssl, s.falkordb_url)
 
 
 def make_llm(s: Settings | None = None) -> LLMProvider:
