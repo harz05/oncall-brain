@@ -125,8 +125,7 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
            {"seq": 5, "role": "investigator", "tool": "recall_similar", "summary": "Recalled inc:0911 ..."}, ...]}
 
 > resolve_incident {"tenant": "demo", "incident_id": "inc:checkout-latency", "change_id": "chg:pgw-pool-1"}
-> post_update {"tenant": "demo", "incident_id": "inc:checkout-latency"}
-  ... the stored update now starts "[checkout p99 latency above 2s] status: resolved, cause confirmed".
+  ... runbook learned; the stored update now starts "[checkout p99 latency above 2s] status: resolved, cause confirmed".
 > respond_to_alert {"tenant": "demo", "alert_id": "alert:refunds-latency"}
   ... act 2: recalled from act 1's memory, culprit on check 1, update has a "Next action" line.
 ```
