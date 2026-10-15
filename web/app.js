@@ -899,11 +899,12 @@ function brainMessage(m) {
     h('p', { class: 'answer' }, lead),
     rest ? h('details', { class: 'more' }, h('summary', {}, 'More detail'), h('p', { class: 'small' }, rest)) : null,
     hits.length ? h('div', { class: 'sources' }, h('span', { class: 'k' }, 'Sources'),
-      h('div', { class: 'chips' }, hits.map((x) => h('button', { class: 'chip-btn src', onclick: (e) => {
-        const q = e.currentTarget.nextElementSibling; if (q) q.hidden = !q.hidden; },
-      title: x.title }, h('span', { class: 'pill kind' }, kindWord(x.kind)), ' ', x.title,
-      x.superseded_by ? h('span', { class: 'pill out' }, 'superseded') : null),
-      h('blockquote', { class: 'quote small', hidden: true }, x.snippet)).flat())) : null,
+      h('div', { class: 'chips' }, hits.map((x) => [
+        h('button', { class: 'chip-btn src', title: x.title, onclick: (e) => {
+          const q = e.currentTarget.nextElementSibling; if (q) q.hidden = !q.hidden; } },
+        h('span', { class: 'pill kind' }, kindWord(x.kind)), ' ', x.title,
+        x.superseded_by ? h('span', { class: 'pill out' }, 'superseded') : null),
+        h('blockquote', { class: 'quote small', hidden: true }, x.snippet)]))) : null,
     more.length ? h('details', { class: 'more' }, h('summary', {}, `More linked (${more.length})`),
       h('div', { class: 'chips' }, more.map((r) => h('span', { class: 'chip-static' }, h('span', { class: 'pill kind' }, kindWord(r.kind)), ' ', r.name)))) : null,
     mobile() ? h('button', { class: 'ghost small-btn', onclick: () => toggleAskGraph() }, 'Show on graph') : null,
