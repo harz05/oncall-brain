@@ -2,6 +2,7 @@
 (summary, data, the queries it ran, and the graph ids to highlight). Registered once in agents.registry."""
 
 import time
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -342,3 +343,103 @@ def service_map(ctx: ToolContext, a: AtArgs) -> ToolOutput:
     """All services with owners and dependency edges (live or retired at `at`)."""
     q = ctx.repo.read("service_map", at=a.at or int(time.time()))
     return ToolOutput(summary=f"{len(q.rows)} services", data=q.rows, queries=[q])
+
+
+# --- Keeping knowledge current: events any client (MCP, HTTP) can push into the graph -------------------
+
+SVC = r"^svc:[a-z0-9-]{1,60}$"
+SYMPTOM = Literal["latency", "errors", "saturation"]
+
+
+class ChangeEvent(BaseModel):
+    service: str = Field(pattern=SVC)
+    kind: Literal["deploy", "config"]
+    summary: str = Field(max_length=300)
+    at: int | None = Field(None, description="Epoch seconds; defaults to now")
+    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$")
+    rolled_back_at: int | None = None
+    id: str | None = Field(None, pattern=r"^chg:[\w.-]{1,80}$")
+
+
+class AnomalyEvent(BaseModel):
+    service: str = Field(pattern=SVC)
+    kind: SYMPTOM
+    summary: str = Field(max_length=300)
+    at: int | None = None
+
+
+class AlertEvent(BaseModel):
+    service: str = Field(pattern=SVC)
+    symptom: SYMPTOM
+    name: str = Field(max_length=200)
+    at: int | None = None
+
+
+class DependencyEvent(BaseModel):
+    caller: str = Field(pattern=SVC)
+    callee: str = Field(pattern=SVC)
+    at: int | None = None
+
+
+def _name(service: str) -> str:
+    return service.removeprefix("svc:")
+
+
+@tool(writes=True)
+def record_change(ctx: ToolContext, a: ChangeEvent) -> ToolOutput:
+    """Record a deploy or config change on a service (from CI/CD or a human). Investigations see it at once."""
+    at = a.at or int(time.time())
+    cid = a.id or f"chg:{_name(a.service)}-{at}"
+    q = ctx.repo.write("record_change", id=cid, service=a.service, kind=a.kind, summary=a.summary, at=at,
+                       rolled_back_at=a.rolled_back_at, author=a.author)
+    if not q.rows:
+        raise ValueError(f"unknown service {a.service!r}")
+    return ToolOutput(summary=f"Recorded {a.kind} {cid} on {a.service}", data={"change": cid, "at": at}, queries=[q],
+                      highlight=Highlight(nodes=[cid, a.service], edges=[(cid, a.service, "CHANGED")]))
+
+
+@tool(writes=True)
+def record_anomaly(ctx: ToolContext, a: AnomalyEvent) -> ToolOutput:
+    """Record a monitoring anomaly (latency, errors, saturation) on a service."""
+    at = a.at or int(time.time())
+    aid = f"anom:{_name(a.service)}-{a.kind}-{at}"
+    q = ctx.repo.write("record_anomaly", id=aid, service=a.service, kind=a.kind, summary=a.summary, at=at)
+    if not q.rows:
+        raise ValueError(f"unknown service {a.service!r}")
+    return ToolOutput(summary=f"Recorded {a.kind} anomaly on {a.service}", data={"anomaly": aid, "at": at},
+                      queries=[q], highlight=Highlight(nodes=[a.service]))
+
+
+@tool(writes=True)
+def raise_alert(ctx: ToolContext, a: AlertEvent) -> ToolOutput:
+    """Record an alert on a service. Respond to it with respond_to_alert (MCP) or POST .../alerts/{id}/respond."""
+    at = a.at or int(time.time())
+    aid = f"alert:{_name(a.service)}-{a.symptom}-{at}"
+    q = ctx.repo.write("raise_alert", id=aid, service=a.service, alert_name=a.name, symptom=a.symptom, at=at)
+    if not q.rows:
+        raise ValueError(f"unknown service {a.service!r}")
+    data = {"alert": aid, "incident": incident_id_for(aid), "at": at}
+    return ToolOutput(summary=f"Alert {aid} raised on {a.service}", data=data, queries=[q],
+                      highlight=Highlight(nodes=[a.service]))
+
+
+@tool(writes=True)
+def add_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
+    """Record that `caller` starts depending on `callee` (a new DEPENDS_ON edge valid from `at`)."""
+    at = a.at or int(time.time())
+    q = ctx.repo.write("add_dependency", caller=a.caller, callee=a.callee, at=at)
+    if not q.rows:
+        raise ValueError(f"unknown service {a.caller!r} or {a.callee!r}")
+    return ToolOutput(summary=f"{a.caller} depends on {a.callee} from {at}", data=q.rows[0], queries=[q],
+                      highlight=Highlight(nodes=[a.caller, a.callee], edges=[(a.caller, a.callee, "DEPENDS_ON")]))
+
+
+@tool(writes=True)
+def retire_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
+    """Record that `caller` stopped depending on `callee` at `at`. History stays; later investigations
+    no longer follow that edge (and say so when they refute a suspect behind it)."""
+    at = a.at or int(time.time())
+    q = ctx.repo.write("retire_dependency", caller=a.caller, callee=a.callee, at=at)
+    n = q.rows[0]["retired"] if q.rows else 0
+    return ToolOutput(summary=f"Retired {n} live dependency {a.caller} -> {a.callee} at {at}", data={"retired": n},
+                      queries=[q], highlight=Highlight(nodes=[a.caller, a.callee]))

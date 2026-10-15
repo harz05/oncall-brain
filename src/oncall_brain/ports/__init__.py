@@ -11,11 +11,11 @@ class GraphRepository(Protocol):
 
     tenant: str
 
-    def read(self, name: str, **params: Any) -> QueryRun:
+    def read(self, name: str, /, **params: Any) -> QueryRun:
         """Run a named query read-only (GRAPH.RO_QUERY: the database rejects any write)."""
         ...
 
-    def write(self, name: str, **params: Any) -> QueryRun:
+    def write(self, name: str, /, **params: Any) -> QueryRun:
         """Run a named query that may write."""
         ...
 

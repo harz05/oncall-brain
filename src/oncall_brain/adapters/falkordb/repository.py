@@ -46,10 +46,10 @@ class FalkorRepository:
         rows = [dict(zip(cols, r, strict=False)) for r in res.result_set]
         return QueryRun(name=name, cypher=q.cypher, params=params, rows=rows, ms=round(ms, 2), readonly=readonly)
 
-    def read(self, name: str, **params: Any) -> QueryRun:
+    def read(self, name: str, /, **params: Any) -> QueryRun:
         return self._run(name, params, readonly=True)
 
-    def write(self, name: str, **params: Any) -> QueryRun:
+    def write(self, name: str, /, **params: Any) -> QueryRun:
         return self._run(name, params, readonly=False)
 
     def ensure_schema(self) -> None:

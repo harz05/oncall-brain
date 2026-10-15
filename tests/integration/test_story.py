@@ -177,3 +177,30 @@ def test_confirmed_cause_survives_a_recheck_and_update_rewrite(store, tenant):
     assert {h["status"] for h in board["hypotheses"] if h["change_id"] == "chg:pgw-pool-1"} == {"confirmed"}
     text = call("post_update", ctx, {"incident_id": run["incident_id"]}).data["text"]
     assert "Likely cause" in text and "Next action" in text
+
+
+def test_live_events_drive_a_new_investigation(store, tenant):
+    """Knowledge kept current through the event tools: a brand-new alert is investigated end to end, and a
+    dependency retired a minute ago already changes the verdict."""
+    from oncall_brain.agents.registry import ToolContext, call
+    from oncall_brain.datagen import DAY, T1
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    ctx = ToolContext(repo)
+    t = T1 + DAY  # a quiet day in the seeded history
+    call("record_change", ctx, {"service": "svc:inventory", "kind": "deploy", "summary": "Deploy inventory v9",
+                                "at": t - 1800, "id": "chg:inv-9"})
+    call("record_change", ctx, {"service": "svc:cart", "kind": "config", "summary": "Tune cart TTL",
+                                "at": t - 900, "id": "chg:cart-ttl"})
+    for svc, dt in (("svc:inventory", 1700), ("svc:cart", 800), ("svc:checkout", 600)):
+        call("record_anomaly", ctx, {"service": svc, "kind": "errors", "summary": "5xx up", "at": t - dt})
+    call("retire_dependency", ctx, {"caller": "svc:checkout", "callee": "svc:cart", "at": t - 3600})
+    assert call("retire_dependency", ctx, {"caller": "svc:checkout", "callee": "svc:cart", "at": t}).data == {
+        "retired": 0}  # idempotent: nothing live left to retire
+    alert = call("raise_alert", ctx, {"service": "svc:checkout", "symptom": "errors", "name": "checkout 5xx",
+                                      "at": t}).data["alert"]
+    o = respond(repo, alert, MockProvider())["outcome"]
+    assert o["root_cause"]["change"] == "chg:inv-9"
+    reasons = {r["change"]: r["reason"] for r in o["refuted"]}
+    assert "no longer depends on cart" in reasons["chg:cart-ttl"]  # the edge retired an hour ago
