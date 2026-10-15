@@ -107,7 +107,7 @@ const STYLE = [
   { selector: 'node.hot', style: { 'border-color': C.hot, 'border-width': 3, 'underlay-color': C.hot,
     'underlay-opacity': 0.25, 'underlay-padding': 7 } },
   { selector: 'edge.hot', style: { 'line-color': C.hot, 'target-arrow-color': C.hot, width: 3.5, opacity: 1 } },
-  // Alert storm: the alerting services and the top chokepoint keep their colour even while lit (hot).
+  // Alert storm: the alerting services and the top convergence point keep their colour even while lit (hot).
   { selector: 'node.storm', style: { 'border-color': C.alert, 'border-width': 3.5, 'underlay-color': C.alert,
     'underlay-opacity': 0.3, 'underlay-padding': 7 } },
   { selector: 'node.choke', style: { 'border-width': 3.5, 'underlay-color': C.shared, 'underlay-opacity': 0.35,
@@ -206,7 +206,7 @@ function elementsFor(hl) {
 }
 
 // Alert storm (correlate_alerts): alert ids are not graph nodes, so the alerting services get the alert style,
-// the shared upstream a tint, and the top betweenness chokepoint a note. Returns the note to light with the step.
+// the shared upstream a tint, and the top convergence point a note. Returns the note to light with the step.
 function markStorm(d) {
   const cy = state.cy;
   cy.getElementById(state.run.res.alert.service).addClass('alerting storm');
@@ -215,7 +215,7 @@ function markStorm(d) {
   const top = d.shared[0] && cy.getElementById(d.shared[0].service);
   if (!top?.nonempty()) return cy.collection();
   top.addClass('choke');
-  const label = `paths converge here\nbetweenness ${+d.shared[0].score.toFixed(1)}`;
+  const label = `paths converge here\n${d.shared[0].hops} hops from the alerts`;
   const note = cy.add({ group: 'nodes', classes: 'sat note', data: { id: 'note:choke', label },
     position: freeSpot(top.position(), 90, 150) });
   return note.union(cy.add({ group: 'edges', classes: 'note-link',
@@ -378,7 +378,8 @@ function intro() {
 
 function renderOutcome() {
   const res = state.run.res, o = res.outcome;
-  const rc = o.root_cause, bp = o.baseline_pick, mem = o.memory, rb = o.runbook, ex = o.expert;
+  const rc = o.root_cause, bp = o.baseline_pick, ab = o.anomaly_baseline_pick, mem = o.memory, rb = o.runbook,
+    ex = o.expert;
   const cites = res.steps.find((s) => s.tool === 'post_update')?.data?.cites || [];
   const recalled = mem.recalled[0];
 
@@ -397,6 +398,10 @@ function renderOutcome() {
       'Flat change log would blame: ', h('b', {}, short(bp.change)), ' ',
       h('span', { class: 'pill' }, o.baseline_correct ? 'same answer' : 'wrong'),
       h('span', { class: 'sub' }, bp.summary)) : null,
+    ab ? h('p', { class: `baseline ${o.anomaly_baseline_correct ? 'ok' : 'bad'}` },
+      'Change log + anomalies (no graph) would blame: ', h('b', {}, short(ab.change)), ' ',
+      h('span', { class: 'pill' }, o.anomaly_baseline_correct ? 'same answer' : 'wrong'),
+      h('span', { class: 'sub' }, ab.summary)) : null,
     rc ? [h('p', {}, rc.summary), h('p', { class: 'muted' }, rc.reason)] : null);
 
   const ruled = h('div', { class: 'card ruled' },
@@ -430,11 +435,11 @@ function renderOutcome() {
     h('p', { class: 'lead' }, h('b', {}, `${alerts.length} alerts`), ' → 1 incident'),
     h('span', { class: 'path' }, alerts.sort((a, b) => a.at - b.at).map((a) =>
       h('span', { class: 'hop alerting', title: `${a.name} · ${ist(a.at)}` }, short(a.service)))),
-    h('p', {}, h('span', { class: 'k' }, 'Shared upstream'), h('span', { class: 'muted' }, 'by betweenness')),
+    h('p', {}, h('span', { class: 'k' }, 'Shared upstream'), h('span', { class: 'muted' }, 'nearest to all alerts first')),
     h('ol', { class: 'shared-list' }, st.shared.slice(0, 3).map((s) => h('li', { value: s.rank },
-      h('span', {}, short(s.service)), h('span', { class: 'score' }, +s.score.toFixed(1))))),
+      h('span', {}, short(s.service)), h('span', { class: 'score' }, `${s.hops} hops`)))),
     state.run.act === 3 ? h('p', { class: 'caption' },
-      'Without correlating the alerts, the same planner blames subs-88 (see make demo).') : null);
+      'Without correlating the alerts, the same planner blames subs-88: it explains only one alert (see make demo).') : null);
 
   $('outcome').classList.toggle('has-storm', !!st);
   $('outcome').replaceChildren(...[h('div', { id: 'counter' }), storm, cause, ruled, memory, update].filter(Boolean));
