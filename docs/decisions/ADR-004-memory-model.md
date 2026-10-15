@@ -14,9 +14,9 @@ All memory lives in the tenant's graph. There are three kinds:
 
 | Kind | What it is in the graph | Written by |
 |---|---|---|
-| Episodic: what happened | `Incident` nodes: `TRIGGERED_BY` an `Alert`, `IMPACTS` services, `PAGED` people, `HAS_HYPOTHESIS` -> `Hypothesis` -`SUSPECTS`-> `Change`, `Evidence` that `SUPPORTS` / `REFUTES` it, `LOGGED` -> `AgentStep` history, `HAS_UPDATE` -> `Message`. Once resolved: `CAUSED_BY` -> `Change`. | the agents during a run; `resolve_incident` for the cause |
-| Semantic: facts about the company | `Team -OWNS-> Service`, `Person -MEMBER_OF-> Team`, `Service -DEPENDS_ON {valid_from, valid_to}-> Service`, `Person -ON_CALL {start, end}-> Team`, `Change -CHANGED-> Service`, `-AUTHORED_BY->`, `Ticket -REQUESTED->`, `Message -MENTIONS->` | ingest (`ingest_*` queries) |
-| Procedural: what worked | `Runbook {kind, steps, uses, successes} -FOR_SERVICE-> Service`, and `Incident -FIXED_WITH-> Runbook` | `resolve_incident` learns or reinforces `rb:<service>:<change kind>` |
+| Episodic: what happened | `Incident` nodes: `TRIGGERED_BY` an `Alert`, `IMPACTS` services, `PAGED` and `CONSULTED` people, `HAS_HYPOTHESIS` -> `Hypothesis` -`SUSPECTS`-> `Change`, `Evidence` that `SUPPORTS` / `REFUTES` it, `LOGGED` -> `AgentStep` history, `HAS_UPDATE` -> `Message`. Once resolved: `CAUSED_BY` -> `Change`. | the agents during a run; `resolve_incident` for the cause |
+| Semantic: facts about the company | `Team -OWNS-> Service`, `Person -MEMBER_OF-> Team`, `Service -DEPENDS_ON {valid_from, valid_to}-> Service`, `Person -ON_CALL {start, end}-> Team`, `Change -CHANGED-> Service`, `-AUTHORED_BY->`, `Ticket -REQUESTED->`, `Message -MENTIONS->` | ingest (`ingest_*` queries), then the event tools (`record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`) |
+| Procedural: what worked | `Runbook {kind, steps, uses, successes} -FOR_SERVICE-> Service`, and `Incident -FIXED_WITH-> Runbook` | `resolve_incident` learns or reinforces `rb:<service>:<change kind>`; `record_evidence` adds a use when a check refutes the runbook's suggestion |
 
 **Temporal facts keep knowledge current.** Dependencies and on-call shifts carry validity times. Every traversal filters edges to the ones valid at the alert time (`r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)`). A retired dependency stays in the graph as history, but it no longer counts as a path. That is how the `legacy-billing` decoy is refuted with "dependency retired before the alert", which is a different reason from "never connected".
 
@@ -25,12 +25,12 @@ All memory lives in the tenant's graph. There are three kinds:
 - Score: 2 for being on the live path, plus 1 for the same symptom (for example `latency`). The planner trusts a recall only at score >= 3 (`RECALL_MIN_SCORE`).
 - The recall is written back as `(:Incident)-[:RECALLS {score, cause_service}]->(:Incident)`, so the planner reads it from the board and the UI can draw it.
 
-**Memory proposes. Evidence still decides.** `hypothesize_from_memory` (`memory_suspects` query) turns a strong recall into suspects: changes in the alert window on the recalled cause service, still on the live path. These become ordinary `Hypothesis` nodes with `source = "memory"`. They are checked first, but by the same `check_hypothesis` rules as any other suspect. If memory finds nothing, the investigator falls back to full traversal (this happens in act 1 with `inc:0911`).
+**The runbook decides what memory suspects. Evidence still decides the cause.** `hypothesize_from_memory` (`memory_suspects` query) follows `RECALLS` -> past incident -> `FIXED_WITH` -> `Runbook` -> `FOR_SERVICE` -> service, and suspects the changes of the runbook's `kind` on that service in the alert window, still on the live path, most trusted runbook first (`successes / uses`). These become ordinary `Hypothesis` nodes with `source = "memory"` and `runbook = <id>`. They are checked first, but by the same `check_hypothesis` rules as any other suspect. If a check refutes one, its runbook gets one more use and no success, so its confidence drops. If memory finds nothing, the investigator falls back to full traversal (this happens in act 1: `inc:0911`'s runbook is for inventory deploys, and there is none in the window). When memory found the cause, the status update gives the runbook's first step as "Next action", with "worked N of M times".
 
-**Only humans write cause and runbook.** `CAUSED_BY` and runbook successes are written only by `resolve_incident`, which a human triggers after confirming the fix. Agents can recall memory, but cannot reinforce their own guesses.
+**Only humans write cause and success.** `CAUSED_BY` and runbook successes are written only by `resolve_incident`, which a human triggers after confirming the fix. Agents can lower a runbook's confidence when its suggestion is refuted, but they cannot raise it.
 
 ## Consequences
-- Act 2 after act 1 needs 3 investigator calls and 1 check, against 5 and 3 without memory. The `make demo` ablation shows both runs against the same graph.
+- Act 2 after act 1 needs 3 investigator calls and 1 check (culprit on check 1), against 6 calls and 4 checks (culprit on check 2) without memory. The `make demo` ablation shows both runs against the same seeded graph.
 - Every recall has an explanation you can draw: the new alert's service, the live dependency path, the old incident's cause service, and the runbook that fixed it.
 - Recall respects time. A past incident whose cause service is no longer upstream of the alerting service is not recalled.
 - Recall needs no model, no key and no network. It runs in a few milliseconds in the same database as everything else.
@@ -39,7 +39,7 @@ All memory lives in the tenant's graph. There are three kinds:
   - Recall needs a known cause service, so an incident resolved without a `CAUSED_BY` change is not recalled by this rule.
   - Symptom match is exact string equality.
   - Depth is bounded at 6 hops.
-  - `uses` and `successes` only grow today, because only confirmed fixes are recorded. Recording failed attempts and decaying confidence is on the backlog.
+  - Confidence drops when a suggestion is refuted, but it does not decay with age.
 - The brief's `EmbeddingProvider` port was deliberately not built (nothing would use it yet).
 
 ## Alternatives considered

@@ -14,10 +14,10 @@ The hackathon rules require AI coding assistants to be disclosed. This page says
 
 - **Exploration:** read the hackathon pages, FalkorDB's docs and repos, GraphRAG-SDK and the community-projects page, to avoid cloning an existing showcase (summary in `docs/decisions/ADR-001-idea.md`).
 - **Idea decision:** ran an LLM council: five independent advisor personas scored Harsh's five-idea shortlist on Harsh's weighted rubric, critiqued each other anonymously, and a chairman synthesised a verdict. The full transcript is in `docs/decisions/council/`.
-- **Design:** the architecture and the ADRs (`docs/ARCHITECTURE.md`, `docs/decisions/ADR-00*.md`), the graph data model and the two-act demo story with its decoys.
-- **Code:** the Python package (`src/oncall_brain/`), the Cypher queries, the synthetic data generator and the eval scenarios, the scripts, the Makefile, the Dockerfile and docker-compose, the API, the MCP server, the LLM adapters and the web UI.
-- **Tests:** unit tests (verdict rules, planner, query catalogue, generator) and integration tests against a real FalkorDB (the act 1 and act 2 story, idempotent seeding, read-only guard, step persistence, tenant isolation).
-- **Docs:** README, architecture, data model, queries, walkthrough, demo script and this file.
+- **Design:** the architecture and the ADRs (`docs/ARCHITECTURE.md`, `docs/decisions/ADR-00*.md`), the graph data model and the demo story (three acts) with its decoys.
+- **Code:** the Python package (`src/oncall_brain/`), the Cypher queries, the synthetic data generator and the eval scenarios, the scripts, the Makefile, the Dockerfile, docker-compose and `render.yaml`, the API, the MCP server, the LLM adapters and the web UI.
+- **Tests:** unit tests (verdict rules, planner, query catalogue, generator, eval scenarios, LLM adapters) and integration tests against a real FalkorDB (the three acts, idempotent ingest, read-only guard, step persistence, tenant isolation, concurrent responders, live events, API and MCP hardening).
+- **Docs:** README, architecture, data model, queries, eval, MCP, deploy, walkthrough, demo script, blog draft and this file.
 - **Environment work:** finding that `falkordblite` cannot install on this machine's glibc 2.35, and replacing it with FalkorDB's official rhel8 module on a self-built redis (both sha256-pinned in `scripts/falkordb_bin.sh`).
 
 ## What Harsh did
@@ -32,9 +32,9 @@ The hackathon rules require AI coding assistants to be disclosed. This page says
 
 ## How the output was verified
 
-- **Automated tests** (`make test`): unit tests for the pure logic, and integration tests that run the real story against a real FalkorDB. They check that each decoy is refuted for the right reason, that the flat baseline is wrong, that memory makes act 2 shorter, that read tools cannot write, and that tenants are isolated.
-- **End-to-end demo as a check:** `make demo` runs act 1, the human resolve, act 2 and a memory ablation, and exits non-zero if any claim in the story stops holding.
-- **Eval beyond the planted story:** `make eval` runs the agent on 200 randomised incidents with their own decoys and compares it with two baselines that do not use the graph (`docs/EVAL.md`).
+- **Automated tests** (`make test`): unit tests for the pure logic, and integration tests that run the real story against a real FalkorDB. They check that each decoy is refuted for the right reason, that the flat baseline is wrong, that memory makes act 2 shorter, that act 3 is solved only with alert correlation, that read tools cannot write, that tenants are isolated, and that concurrent responders do not duplicate edges.
+- **End-to-end demo as a check:** `make demo` runs act 1, the human resolve, act 2, a memory ablation, act 3 and a correlation ablation, and exits non-zero if any claim in the story stops holding.
+- **Eval beyond the planted story:** `make eval` runs the agent on 200 randomised incidents with their own decoys and compares it with three baselines that do not use the graph (`docs/EVAL.md`).
 - **Independent run:** the cloud reviewer ran snapshots on a different machine and filed findings and patches. Each was applied or rejected with a reason.
 - **Measured, not assumed:** the latency numbers in `docs/ARCHITECTURE.md` come from running the demo on the dev machine. The redis-cli commands in `docs/WALKTHROUGH.md` were run against the seeded graph before being written down.
 - **Lint:** `ruff` over the code.

@@ -29,10 +29,11 @@ One hand-made story proves little, so I also ran an eval: 200 generated incident
 | method | correct |
 |---|---|
 | On-call Brain (uses the graph) | 200/200 |
+| anomaly-aware change log: change behind the first service to go red | 141/200 |
 | keyword match: change summary vs alert name | 59/200 |
 | flat change log: newest change in the window | 0/200 |
 
-Read those with the caveats. The scenarios are synthetic (one 25-service company), and the same team wrote the generator and the checks, so 200/200 shows the checks hold on random topologies, not that they are the right checks for real incidents. The flat log scores 0 by construction: one decoy is always the newest change. The planner is deterministic, with no LLM in the loop. Details in [EVAL.md's limitations](EVAL.md#limitations-read-before-quoting-the-numbers).
+Read those with the caveats. The scenarios are synthetic (one 25-service company), and the same team wrote the generator and the checks, so 200/200 shows the checks hold on random topologies, not that they are the right checks for real incidents. The flat log scores 0 by construction: one decoy is always the newest change. The anomaly-aware log is the strongest rule I found without the graph, and it fails only on the retired dependency: a change plus an anomaly there looks like a real upstream cause unless you know the edge ended days ago. The planner is deterministic, with no LLM in the loop. Details in [EVAL.md's limitations](EVAL.md#limitations-read-before-quoting-the-numbers).
 
 A vector store over incident text shares the keyword blind spot. Incident titles all look alike ("X p99 latency above 2s"); what makes two incidents similar is where the cause sat in the system.
 
@@ -69,6 +70,7 @@ MATCH (c:Change)-[:CHANGED]->(s)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops
 ORDER BY hops, at DESC
+LIMIT 10
 ```
 
 Walk up to 6 `DEPENDS_ON` hops from the alerting service, keeping a path only if *every* edge on it was live at alert time: `all(r IN relationships(p) ...)` filters per relationship, not per path. `*0..6` lets a change on the alerting service itself count. Then take the changes from the 2-hour window on those services, nearest first. The legacy-billing deploy never appears, because its only path uses a retired edge.
@@ -94,10 +96,10 @@ LIMIT 5
 
 ### Two gotchas and a free guard
 
-Both confirmed on FalkorDB v4.22.0 (see `any_path` and `live_path` in [investigate.cypher](../src/oncall_brain/adapters/falkordb/queries/investigate.cypher)):
+Both confirmed on FalkorDB v4.22.0 (see `any_path` and `live_paths` in [investigate.cypher](../src/oncall_brain/adapters/falkordb/queries/investigate.cypher)):
 
 - `shortestPath` only works in `WITH` or `RETURN`. `MATCH p = shortestPath(...)` fails with "FalkorDB currently only supports shortestPaths in WITH or RETURN clauses", so write `WITH shortestPath((o)-[:DEPENDS_ON*]->(t)) AS p`.
-- `RETURN [n IN nodes(p) | n.id] AS path ORDER BY length(p)` fails ("Unable to locate a value with alias p") because `p` is gone after the projection. Project it first: `WITH p ORDER BY length(p) LIMIT 1 RETURN ...`.
+- `RETURN [n IN nodes(p) | n.id] AS path ORDER BY length(p)` fails ("Unable to locate a value with alias p") because `p` is gone after the projection. Project it first: `WITH p ORDER BY length(p) LIMIT 20 RETURN ...`.
 
 The guard: every read goes through `GRAPH.RO_QUERY`. Send it a `CREATE` and FalkorDB replies "graph.RO_QUERY is to be executed only on read-only queries". A read tool can't write even if its Cypher is wrong, and the database enforces that, not my code.
 
@@ -114,7 +116,7 @@ def investigator(board):  # domain/planner.py, shortened
     best = max((r["score"] for r in board["recalls"]), default=0)
     if best >= RECALL_MIN_SCORE and not _ran(board, "hypothesize_from_memory"):
         return _call("hypothesize_from_memory", "A past incident matches structurally; ...")
-    ...  # then check open hypotheses (memory first, nearest, newest), then hand off
+    ...  # then check open hypotheses (memory first, then a storm's shared upstream, nearest, newest), then hand off
 ```
 
 Because the board is the only input, an LLM can take the planner's seat behind the same `decide(role, board, tools)` port without changing the tools or the trace. If the model picks an unknown tool, bad arguments or a repeated step, that step falls back to the deterministic planner and the trace says so. Every number in this post comes from the deterministic planner.
@@ -123,16 +125,16 @@ Because the board is the only input, an LLM can take the planner's seat behind t
 
 After act 1, a human confirms the cause. `resolve_incident` writes `CAUSED_BY` and learns a runbook, `rb:payments-gw:config`. Three days later, act 2: "refunds p99 latency above 2s". Refunds also depends on payments-gw, and a new config rollout has cut the pool again (200 -> 25).
 
-Recall finds act 1 with score 3, memory proposes the new payments-gw change, and one check confirms it. From `make demo`:
+Recall finds act 1 with score 3. The runbook that fixed act 1 is for config changes on payments-gw, so memory suspects the new payments-gw config change, and one check confirms it. From `make demo`:
 
 ```text
-investigator tool calls: 8, hypotheses checked: 5, solved by memory: False   # act 1
-investigator tool calls: 3, hypotheses checked: 1, solved by memory: True    # act 2
+investigator tool calls: 8, hypotheses checked: 5 (culprit on check 3), solved by memory: False   # act 1
+investigator tool calls: 3, hypotheses checked: 1 (culprit on check 1), solved by memory: True    # act 2
 === memory ablation: act 2 with vs without act 1 in the graph ===
-  without memory: 5 investigator calls, 3 hypotheses checked
+  without memory: 6 investigator calls, 4 hypotheses checked, culprit on check 2
 ```
 
-Act 2's status update even cites "Runbook: Revert the config change on payments-gw (worked 1x)".
+Without memory, nearest-first checking tries a newer, healthy payments deploy one hop away before the real cause. With memory, act 2's status update ends with "Next action: Revert the config change on payments-gw (...) (runbook 'Revert the config change on payments-gw', worked 1 of 1 times)", and names who knows payments-gw best, found by `who_knows` in the same graph.
 
 ![Act 2: the refunds incident solved from act 1's memory](img/act2.png)
 
@@ -140,9 +142,15 @@ The three kinds of memory are ordinary nodes:
 
 - **Episodic** (what happened): `Incident`, `CAUSED_BY`, `RECALLS`, the `AgentStep` history.
 - **Semantic** (how the company works): `DEPENDS_ON {valid_from, valid_to}`, `OWNS`, `ON_CALL {start, end}`.
-- **Procedural** (what fixes it): `Runbook {uses, successes}` with `FIXED_WITH`.
+- **Procedural** (what fixes it): `Runbook {uses, successes}` with `FIXED_WITH`. The runbook decides what memory suspects (its service and change kind), and a refuted suggestion adds a use without a success, so its confidence drops.
 
 Memory only proposes; the same checks still decide. In act 1 the agent recalls an old checkout incident caused by inventory, finds no change on inventory, and moves on. And only a human writes `CAUSED_BY`, so the agents can't reinforce their own wrong guesses.
+
+## Three alerts at once
+
+Act 3 is an alert storm: checkout, refunds and subscriptions alert within 4 minutes. Investigated alone, the subscriptions alert points at a subscriptions deploy 10 minutes earlier, and that is what my planner blames when I switch correlation off. With correlation, triage first folds the other alerts into the incident and asks which services all three depend on at alert time. That is six services. It ranks them with FalkorDB's `algo.betweenness` over the dependency graph (paths converge on payments). The investigator checks suspects there first: a postgres-orders config change is confirmed on check 1, and the subscriptions deploy is refuted because checkout and refunds don't depend on subscriptions.
+
+Two honest caveats. In this story only one suspect sits on the shared upstream, so the shared-upstream set and the refutation rule decide the answer; the betweenness order matters only when several suspects sit there (a unit test covers that). And `algo.betweenness` counts every `DEPENDS_ON` edge, retired ones too, because FalkorDB's algorithms filter by label and relationship type, not by property. The shared-upstream set itself uses live edges only.
 
 ## How it was built
 
@@ -161,13 +169,13 @@ redis-server --port 6379 --loadmodule ./falkordb-rhel8-x64.so
 ## What I'd do next
 
 - A "no change, it's capacity" path. Today the investigator escalates when every change is refuted, but doesn't look for other causes.
-- Runbook confidence that can go down: record failed attempts and decay it, instead of `uses` and `successes` that only grow.
-- Real ingest from deploy webhooks, paging and chat, through the same idempotent `MERGE` queries the seed uses.
+- Runbook confidence that also decays with age. Today a refuted suggestion lowers it, but time doesn't.
+- Real ingest: deploy webhooks, monitoring and paging calling the event tools (`record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`) that already keep the graph current.
 
 ## Try it
 
 ```bash
-make setup db seed demo   # deps, FalkorDB on :6379, synthetic company, both acts in the terminal
+make setup db seed demo   # deps, FalkorDB on :6379, synthetic company, all three acts in the terminal
 make dev                  # API + web UI on http://localhost:8000
 make mcp                  # the same tools for any MCP client (stdio)
 ```
