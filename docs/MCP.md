@@ -45,7 +45,7 @@ Desktop or claude.ai needs. There is no per-user auth: anyone with the token can
 
 ## What an outside model sees, and whether it picks right
 
-The server publishes `instructions` (the three ways to use it and what ids look like), 24 tools with a description
+The server publishes `instructions` (the three ways to use it and what ids look like), 26 tools with a description
 and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
 `readOnlyHint` annotations, and two prompts:
 
@@ -106,7 +106,7 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 25 tools, 2 prompts, and the who-owns skill's three calls on a
+the server through the launcher with an MCP client: 26 tools, 2 prompts, and the who-owns skill's three calls on a
 freshly reset tenant, every answer carrying its Cypher.
 
 ## Claude Desktop

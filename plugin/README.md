@@ -1,7 +1,7 @@
 # On-call Brain, as a Claude Code plugin
 
 Incident agents and a company brain over a FalkorDB graph, inside Claude Code. The plugin ships the On-call Brain
-MCP server (25 tools, 2 prompts) and three skills:
+MCP server (26 tools, 2 prompts) and three skills:
 
 | Skill | What it does |
 |---|---|

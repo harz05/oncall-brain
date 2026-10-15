@@ -241,3 +241,65 @@ First minute of a video: with the current DEMO_SCRIPT it would narrate buttons t
 
 ## One-line verdict
 Still a yes for Track 01 and a borderline-yes for Track 02 with a now-credible MCP story, but "the MCP server is the product" is not yet true on disk: no plugin, an unapplied concurrency patch, a broken Connect page, and a disclosure doc that contradicts the LLM run are the gaps between 8/10 and the top of the field.
+
+
+## Hackathon judge, round 3
+
+## Rule 2 check
+Unchanged and still true, verified at HEAD `f715317` (05:18 IST, working tree clean). Every tool is a named, parameterised Cypher statement (91 in `docs/QUERIES.md`, generated from `src/oncall_brain/adapters/falkordb/queries/*.cypher`), the planner's only input is the incident board re-read from the graph, and memory, handoffs, the status update, the heads-up and the company brain are nodes and edges. New since round 2: `algo.pageRank` now runs on a point-in-time projection (`algorithms.cypher: topology_at / project_topology / criticality`) and writes `IMPACTS.rank` and `WARNED` edges, and `GRAPH.CONSTRAINT ... UNIQUE` on `id` for every label (`repository.py:77-101`). `source devenv/env.sh && make test`: **189 passed in 29 s** against live FalkorDB. The only graph-less path is the GitHub Pages replay, now labelled "Replay" (`f715317`). **Verdict: indispensable.**
+
+## Track scores
+
+### Track 01: 8.5/10
+For: temporal multi-hop and `shortestPath` refutations unchanged; a graph algorithm now decides an action, which was the round-2 gap: PageRank over the dependencies live at alert time orders the blast radius and picks who gets a heads-up (`services/tools.py:_criticality`, `warn_owners`; `tests/integration/test_algorithms.py` proves history edges do not change the order and the scratch graph is dropped). Claude Opus 5.5 calls `warn_owners` in all three acts unprompted (`docs/LLM_RUN.md:27`, fixtures `act{1,2,3}.json` show `"warn_owners","by":"claude-opus-5-5"`). Tool selection via MCP is now real: plugin, 14/14 pick test, every argument described, `readOnlyHint`. The stored-step "Rules / LLM chose" contradiction is gone (screenshot 03: "chosen by the model (older run; its reason was not recorded)").
+Against/missing: PageRank runs *inside* `blast_radius`, so the agent never chooses the algorithm; it chooses `warn_owners`, and the LLM system prompt (`adapters/llm/openai_compat.py:SYSTEM`) tells it to in a fixed order: the model follows a playbook that mirrors `domain/planner.py`. One algorithm only; the storm split is still a hop count, not WCC/labelPropagation. Screenshot 07 still declares "Likely cause" while `cart-310` is open.
+A 10 would: `criticality` (PageRank) and a `WCC` storm split as separately chosen tools, a trace line showing the pick and its effect, and a prompt that lets the model deviate from the playbook with a case where it did.
+
+### Track 02: 8.5/10
+For: episodic/semantic/procedural unchanged and visible ("Seen this before: 3 steps instead of 6", screenshot 10). The concurrency gap closed: rival-004 applied in `85fa11b` (unique constraints, `GRAPH.COPY` + `RENAME` atomic reset, 5 tests in `tests/integration/test_concurrency.py`, measured tables in `docs/PERF.md` "Concurrency": 8 tenants in parallel 8/8 right, 1,236 reads at p50 24 ms while agent runs hold the lock, 600 concurrent writes with 0 duplicates). One graph per tenant; handoffs first-class in the trace (screenshot 12).
+Against/missing: per-user memory is still absent (V3 "accepted, backend-first" in `collab/ACK.md:14`, nothing landed; `grep -i "per-user"` only hits the auth caveat). The per-tenant lock still serialises every write (p99 204 ms from polling, `PERF.md`). Three roles remain functions in one process; ownership has no validity.
+A 10 would: a per-engineer session/question memory recalled on the next question, per-incident instead of per-tenant locking, and a second process (the MCP server) demonstrably sharing state with the API mid-incident.
+
+### Track 03: 7.5/10
+For: docs/tickets/chat in one graph, `ask` with titled source chips and a `superseded` badge (screenshot 13), `who_knows`, `change_story`, `CITES`. New: `record_doc` (`fdef431`, `ac3ddb6`) records a decision/postmortem/runbook page as a live event with `AUTHORED_BY`, `DECIDES`, `MENTIONS`, `SUPERSEDES`, and `test_a_new_decision_record_flips_the_ask_answer_and_flags_the_old_one` shows "keeping knowledge current" as a tested behaviour, which is the first half of what round 2 asked for.
+Against/missing: ownership still has no validity, so "who owned X when" has no answer (`grep OWNS.*valid` in queries: empty; `ACK.md:24` leaves it open). The Ask screenshot (13, shot 04:51) still opens scrolled past the answer sentence ("costa) is on call..."); the fix is claimed in `b0a0167` but not re-shot. The decision chain is still a chip list, not a lit path.
+A 10 would: `OWNS {valid_from, valid_to}` plus `transfer_ownership`, the why-chain (decision -> source -> author -> superseded-by) rendered as a path, and a fresh Ask screenshot that leads with the answer.
+
+## MCP surface and plugin: 8.5/10
+Verified: `plugin/.claude-plugin/plugin.json`, `plugin/.mcp.json` (`${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp`), a launcher with a clear failure message when no interpreter is found (ran it with a bare env: "no interpreter at .../.venv/bin/python. Run 'make setup'..."; `make setup` on a plain checkout creates exactly that `.venv`), three skills whose SKILL.md bodies are genuinely good operator playbooks (incident: respond, report in order, offer `resolve_incident`; who-owns: `who_knows` -> `ask` -> `page_on_call` with no incident), `.claude-plugin/marketplace.json` at the root, README section "Use it from Claude Code in one minute" now exists (`README.md:167`), `docs/MCP.md:92-112`. `tests/integration/test_plugin.py` validates manifests (and `claude plugin validate --strict` when the CLI exists) and drives the server through the launcher with an MCP client, following the who-owns skill: it passed in this run. Catalogue: 26 tools, 2 prompts, instructions, token on HTTP.
+Costs: tool count drifts across docs (README "24 in all", `MCP.md:48` 24 and `:109` 25, `plugin/README.md` 25, live `catalogue()` returns 26: 24 registry incl. `warn_owners` and `record_doc`, plus 2). The Connect page (screenshot 14, shot 05:02) still shows `claude mcp add` and never mentions the plugin (`grep -i plugin web/`: nothing), so the product's own window does not advertise its primary install path. `docs/PRODUCT.md` still says "Plugin: in progress". No MCP resources. The marketplace install path depends on a public repo that does not exist yet.
+
+## Submission checklist
+| item | status | where |
+|---|---|---|
+| Public repo | pending push; tree clean, 68 commits | `git log`, `git status` |
+| README: setup + data model | present | `README.md:109` Mermaid model, `:152` quick start; `docs/DATA_MODEL.md` (259 lines, now with `IMPACTS.rank/score`, `WARNED`, `SUPERSEDES`) |
+| Cypher queries | present, generated, 91 statements | `docs/QUERIES.md` via `scripts/gen_queries_doc.py` |
+| Demo video script | present and current (UI v2, Claude badges, plugin skill at 1:55) | `docs/DEMO_SCRIPT.md`; line 6 preamble still says `claude mcp add` while row 22 uses `--plugin-dir` |
+| Deployment / local setup | present, not live | `Dockerfile`, `docker-compose.yml`, `render.yaml`, `docs/DEPLOY.md` |
+| Tracks named | present | `README.md:16`, `:216` per-track table |
+| AI usage disclosed | present, now consistent (186, live-LLM line removed, product-phase section added); 5 `TODO(Harsh)` lines remain for Harsh | `docs/AI_USAGE.md:27-31` |
+| Docs that teach | present and strong | `ARCHITECTURE.md` (546), `WALKTHROUGH.md`, `EVAL.md`, `PERF.md`, `SCORECARD.md`, ADR-001..006 |
+| MCP as deliverable | present, plus plugin | `docs/MCP.md`, `docs/MCP_PICK.md`, `plugin/`, `src/oncall_brain/mcp_server/` |
+| Secrets | ok | `.env` ignored, `.env.example` |
+
+## Product quality: 8.5/10
+10-second test still passes (screenshot 05). The Connect page overlap is fixed (14). Stored steps no longer contradict themselves (03). Phone layout holds (15). The answer card (08/09) remains the best screen; "Saved to memory" and "Seen this before" land without reading.
+What costs points: 9 of the 12 screenshots (02, 05-13) were shot 04:40-04:51, *before* the round-2 fix commit `b0a0167` and the PageRank step, so they still show the garbled "Also possible: ... explains every alerting service this change does (1) and 2 more" (02; the plain-words rewrite is in `web/app.js:483-485`), test tenant chips "company: after1 / shots" (`companyLabel()` only relabels the default tenant), no "Wrong cause" on act 2 (10, shot one minute before `3c49593`), no heads-up in "Who's paged", and the scrolled Ask answer (13). I cannot confirm from images that those fixes work; the images in `docs/screenshots/after/` currently under-sell the code. Screenshot 07 still shows "Likely cause" with a suspect open. Code blocks on Connect are horizontally clipped with the Copy button over the text.
+
+## What moved since round 2 (per top-5 item)
+1. **Apply rival-004 (concurrency).** Done: `85fa11b`; `repository.py` constraints + atomic reset, `test_concurrency.py` 5 tests green, `PERF.md` Concurrency section with p50/p95/p99 tables, `ACK.md:21-22` closes V2/V7. Fully moved.
+2. **Ship `plugin/` + README section.** Done: `323e6c9`, `28005a2`, `b5b8357`; manifests, launcher, 3 skills, marketplace, `README.md:167`, `MCP.md:92`, `test_plugin.py` (2 tests, pass). Residual: Connect page and `PRODUCT.md` not updated, tool-count drift.
+3. **Consistency pass.** Mostly moved: `AI_USAGE.md` consistent (186, false "never run" line gone); `DEMO_SCRIPT.md` rewritten to UI v2 + Claude + plugin; Connect overlap fixed; Rules/"LLM chose" contradiction fixed; "Also possible" rewrite, Ask scroll, act-2 Wrong cause claimed in `b0a0167`/`3c49593` but the screenshots that would prove them predate the commits. Tenant chip still leaks for non-default tenants.
+4. **Video with Claude Code first.** Not moved as suggested: the script puts the plugin segment at 1:55-2:10, not the opening 30 s. Defensible choice, but the "MCP is the product" claim is made in the last 15 seconds.
+5. **One `algo.*` the planner chooses.** Moved: rival-005 in `7a00fb8`; PageRank on the point-in-time projection, `warn_owners` action, `WARNED` edges, two integration tests, Claude picks it 3/3 acts. Half credit on "chooses": the algorithm is inside `blast_radius`, and the chosen step is in the prompt's playbook.
+
+## Top 5 changes that would raise the score now
+1. **Re-shoot the 9 stale screenshots on the default tenant and fix doc drift** (tool count 26 everywhere, `PRODUCT.md` plugin "shipped", Connect page gets `claude --plugin-dir ./plugin` and the three skills, DEMO_SCRIPT line 6). Product +0.5, MCP +0.5. ~1 h. (best score/hour)
+2. **Harsh fills the 5 `TODO(Harsh)` lines after running `make setup db seed demo test` on a clean checkout and the plugin from a fresh `claude`.** No score points, but it removes the "entirely AI-generated" rejection risk, which outweighs every row above. ~1.5 h.
+3. **Make the algorithm a chosen step:** expose `criticality` as its own tool (blast_radius stops calling it), and add `algo.WCC` over the alert-time projection in `correlate_alerts` to split a storm into components, with a trace line and a test that the planner picks each. Track 01 +0.5-1. ~3 h.
+4. **Ownership validity:** `OWNS {valid_from, valid_to}`, `transfer_ownership` event tool, `who_knows`/`page_on_call` at `$at`, one test where "who owned X at T1" differs from today. Track 03 +0.5. ~2 h.
+5. **Per-engineer memory:** `asked_by` on Ask/MCP questions as `(Person)-[:ASKED]->(Question)` nodes, recalled on the next question ("you asked about kafka on Oct 16"). Track 02 +0.5. ~2 h.
+
+## One-line verdict
+A yes for Track 01 and a yes for Track 02 now that the concurrency and algorithm gaps are closed with tests and numbers, and "the MCP server is the product" is finally true on disk with a validated plugin; what remains between this and the top of the field is a fresh set of screenshots that match the code, an algorithm the agent visibly chooses rather than inherits, and Harsh's own verification lines in `AI_USAGE.md`.

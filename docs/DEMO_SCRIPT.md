@@ -2,9 +2,8 @@
 
 For Harsh to record. Screen: the web UI at http://localhost:8000 (`make db && make dev`, Anthropic key in `.env`
 so the badges say Claude Opus 5.5), browser at 1920x1080, zoom 100%. Before recording: open the **Simulate an
-incident** menu and press **Reset demo company** so the inbox is empty. Have Claude Code open in a terminal with
-the MCP server added (`claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`)
-for the last segment.
+incident** menu and press **Reset demo company** so the inbox is empty. Have Claude Code open in a terminal from the
+repo root, started with the plugin (`claude --plugin-dir ./plugin`), for the last segment.
 
 Say plain words on camera. Leave jargon (p99, episodic, procedural, Cypher) for the README.
 
