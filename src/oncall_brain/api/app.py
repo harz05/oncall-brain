@@ -30,7 +30,7 @@ from oncall_brain.agents.registry import ToolContext
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services import respond as respond_svc
-from oncall_brain.services.seeding import reset
+from oncall_brain.services.seeding import TenantLimitReached, reset
 
 WEB_DIR = FsPath(os.environ.get("WEB_DIR") or FsPath(__file__).resolve().parents[3] / "web")
 
@@ -147,12 +147,10 @@ def tenants() -> dict[str, Any]:
 
 @app.post("/api/tenants/{tenant}/reset")
 def reset_tenant(tenant: Tenant) -> dict[str, str]:
-    # Every new tenant seeds two graphs (~5 MB); cap them. Resetting an existing tenant is always allowed.
-    # ponytail: check-then-seed race, so concurrent resets can overshoot by a few; fine for a soft cap.
-    known, cap = store().tenants(), get_settings().max_tenants
-    if tenant not in known and len(known) >= cap:
-        raise HTTPException(429, f"tenant limit reached ({cap}); reset an existing tenant or raise MAX_TENANTS")
-    return {"tenant": tenant, "status": reset(store(), tenant)}
+    try:
+        return {"tenant": tenant, "status": reset(store(), tenant, max_tenants=get_settings().max_tenants)}
+    except TenantLimitReached as e:
+        raise HTTPException(429, str(e)) from None
 
 
 @app.get("/api/tenants/{tenant}/alerts")

@@ -36,8 +36,17 @@ def seed(store: GraphStore, tenant: str, seed: int = 7) -> dict[str, int]:
     return {key: len(data[key]) for _, key in INGEST}
 
 
-def reset(store: GraphStore, tenant: str, seed_value: int = 7) -> str:
-    """Restore the pristine copy (GRAPH.COPY); seed from scratch if there is none (or it can't be copied)."""
+class TenantLimitReached(Exception):
+    pass
+
+
+def reset(store: GraphStore, tenant: str, seed_value: int = 7, max_tenants: int | None = None) -> str:
+    """Restore the pristine copy (GRAPH.COPY); seed from scratch if there is none (or it can't be copied).
+    A new tenant costs two graphs, so callers facing the network pass a cap; existing tenants always reset."""
+    # ponytail: check-then-seed race, so concurrent new-tenant resets can overshoot a little; fine for a soft cap.
+    known = store.tenants()
+    if max_tenants is not None and tenant not in known and len(known) >= max_tenants:
+        raise TenantLimitReached(f"tenant limit reached ({max_tenants}); reset an existing tenant or raise MAX_TENANTS")
     with store.lock(tenant):
         if store.restore(tenant):
             rows = store.tenant(tenant).read("data_version").rows

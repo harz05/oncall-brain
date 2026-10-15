@@ -56,10 +56,7 @@ def _respond(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, 
 
 
 def _reset(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
-    known, cap = store.tenants(), get_settings().max_tenants  # same soft cap as the HTTP API
-    if tenant not in known and len(known) >= cap:
-        raise ValueError(f"tenant limit reached ({cap}); reset an existing tenant or raise MAX_TENANTS")
-    return {"tenant": tenant, "graph": seeding.reset(store, tenant)}
+    return {"tenant": tenant, "graph": seeding.reset(store, tenant, max_tenants=get_settings().max_tenants)}
 
 
 @lru_cache
