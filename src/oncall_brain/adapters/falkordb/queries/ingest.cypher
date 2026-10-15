@@ -92,7 +92,7 @@ FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
   ON CREATE SET pg.at = r.opened_at, pg.for_service = r.paged_for)
 
 // name: ingest_docs
-// purpose: Upsert docs (postmortems, design notes, decisions, runbook pages): who wrote each, the service a decision is about, and what it mentions. Mention lookups are per label so the id indexes are used.
+// purpose: Upsert docs (postmortems, design notes, decisions, runbook pages): who wrote each, the service a decision is about, and what it mentions (a runbook page that mentions no service is a general one, which ask offers for any service). Mention lookups are per label so the id indexes are used.
 UNWIND $rows AS r
 MERGE (d:Doc {id: r.id})
 SET d.kind = r.kind, d.title = r.title, d.text = r.text, d.at = r.at

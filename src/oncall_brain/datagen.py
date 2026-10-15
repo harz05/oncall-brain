@@ -20,7 +20,8 @@ Noise (random, seeded): extra people, changes, anomalies and past incidents, kep
 Company brain corpus (_corpus): docs (postmortems, design notes, decisions, runbook pages), tickets and chat, each
 linked to the services, changes, people and incidents it talks about, with a few planted facts to ask about: why the
 payments-gw pool was lowered, who designed the checkout retries, why legacy-billing left the checkout path, the
-postgres-orders connection limit debate. Also kept outside the act windows.
+postgres-orders connection limit debate, a general rollback runbook page for services with none. Also kept outside the
+act windows.
 All names are fake. All times are epoch seconds.
 """
 
@@ -389,6 +390,12 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
     doc("runbook-inventory-cache", "runbook", "Runbook: warming the inventory cache", ful[2], ago(58),
         "After an inventory rollback, warm the cache from the warehouse-sync snapshot before reopening traffic; a cold "
         "cache kept checkout slow during the flash sale (inc:0911).", ["inventory", "warehouse-sync", "inc:0911"])
+    # Mentions no service on purpose: ask offers it for any service that has no runbook of its own.
+    doc("runbook-rollback", "runbook", "Runbook: rolling back a bad deploy", plat[0], ago(40),
+        "For any service without a runbook of its own. Find the change first: the newest deploy or config change on "
+        "the service or on anything it depends on, not the newest deploy anywhere. Roll back a bad deploy by "
+        "redeploying the previous version from the pipeline; revert a config change by restoring the previous config "
+        "template. Then watch p99 and errors for 15 minutes and say in #incidents what you rolled back.", [])
     # A postmortem and an #incidents wrap-up per past incident, written by whoever was paged.
     names = {p["id"]: p["name"] for p in d["people"]}
     changes = {c["id"]: c for c in d["changes"]}

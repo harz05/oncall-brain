@@ -4,6 +4,9 @@ For seeds 1..N: load scenarios.scenario(seed) into a fresh tenant graph, run the
 (triage -> investigator -> comms, deterministic planner) and score the root cause it marks SUPPORTED against
 the planted truth, next to three baselines that see the same change log without the graph. Prints the per-seed
 table and rewrites docs/EVAL.md. Drops the tenant at the end.
+
+--planner llm uses make_llm() (LLM_PROVIDER, LLM_MODEL) instead and also counts the steps that fell back to the
+planner; it prints its numbers and leaves docs/EVAL.md alone (that file is the deterministic planner's record).
 """
 
 import argparse
@@ -15,10 +18,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from oncall_brain.adapters.llm.mock import MockProvider
+from oncall_brain.ports import LLMProvider
 from oncall_brain.scenarios import anomaly_pick, keyword_pick, scenario
 from oncall_brain.services.respond import respond
 from oncall_brain.services.seeding import INGEST
-from oncall_brain.wiring import make_store
+from oncall_brain.wiring import make_llm, make_store
 
 DOC = Path(__file__).parents[1] / "docs" / "EVAL.md"
 BOARD = "incident_board"  # the planner's observe step, read before every decision; reported on its own row
@@ -65,11 +69,11 @@ def why_wrong(run: dict, sc: dict, got: str | None, names: dict[str, str]) -> st
                                                          for s in sc["truth_path"]) + ")"
 
 
-def run_seed(store, tenant: str, seed: int, tool_ms: dict[str, list[float]]) -> dict:
+def run_seed(store, tenant: str, seed: int, tool_ms: dict[str, list[float]], llm: LLMProvider) -> dict:
     sc = scenario(seed)
     repo = load(store, tenant, sc["data"])
     t0 = time.perf_counter()
-    run = respond(repo, sc["alert_id"], MockProvider())
+    run = respond(repo, sc["alert_id"], llm)
     ms = (time.perf_counter() - t0) * 1000
     for s in run["steps"]:
         tool_ms[BOARD] += [q.ms for q in s.queries if q.name == BOARD]
@@ -88,7 +92,8 @@ def run_seed(store, tenant: str, seed: int, tool_ms: dict[str, list[float]]) -> 
             **{m: p == truth for m, p in picks.items()},
             "fooled": {m: letter.get(p, "none" if p is None else "other") for m, p in picks.items() if p != truth},
             "calls": o["investigator_calls"],
-            "checks": o["hypotheses_checked"], "ms": ms,
+            "checks": o["hypotheses_checked"], "ms": ms, "decisions": len(run["steps"]) - 1,  # all but open_incident
+            "fallbacks": sum(s.reason.startswith(("LLM fallback:", "fallback after tool error")) for s in run["steps"]),
             "refuted": {k for k, v in sc["decoys"].items() if v in refuted},
             "memory_misled": bool(o["memory"]["suspects"]),
             "why": None if got == truth else why_wrong(run, sc, got, letter)}
@@ -281,23 +286,42 @@ def report(rows: list[dict], tool_ms: dict[str, list[float]], services: int) -> 
     return "\n".join(lines)
 
 
+def llm_summary(rows: list[dict], planner: str) -> int:
+    """The LLM run's numbers, printed for docs/LLM_RUN.md; a sample this small would only blur EVAL.md."""
+    n, d, f = len(rows), sum(r["decisions"] for r in rows), sum(r["fallbacks"] for r in rows)
+    ms = [r["ms"] for r in rows]
+    print(f"\n{planner}, N={n}\n\n| measure | value |\n|---|---|\n"
+          + "\n".join(f"| {m[0]} correct | {frac(sum(r[k] for r in rows), n)} |" for k, m in METHODS.items())
+          + f"\n| decisions (all roles) | {d} ({d / n:.1f} per incident) |\n| fell back to the planner | {frac(f, d)} |"
+          f"\n| incidents with no fallback | {frac(sum(not r['fallbacks'] for r in rows), n)} |"
+          f"\n| investigator calls / checks per incident | {statistics.mean(r['calls'] for r in rows):.1f} / "
+          f"{statistics.mean(r['checks'] for r in rows):.1f} |"
+          f"\n| respond() s per incident: mean / p50 / p95 | {stats([x / 1000 for x in ms]).replace(' |', ' /')} |"
+          f"\n| ms per decision (mean) | {sum(ms) / d:.0f} |\n\n{perturbation_table(rows)}")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--n", type=int, default=30)
     p.add_argument("--tenant", default="eval")
+    p.add_argument("--planner", choices=["mock", "llm"], default="mock", help="llm: make_llm(); EVAL.md untouched")
     a = p.parse_args()
-    store = make_store()
+    store, llm = make_store(), MockProvider() if a.planner == "mock" else make_llm()
     rows: list[dict] = []
     tool_ms: dict[str, list[float]] = defaultdict(list)
     try:
         for seed in range(1, a.n + 1):
-            rows.append(run_seed(store, a.tenant, seed, tool_ms))
+            rows.append(run_seed(store, a.tenant, seed, tool_ms, llm))
             r = rows[-1]
             print(f"seed {seed:>3} {r['alert']:<28} {tags(r):<26} graph={'ok ' if r['graph'] else 'MISS'} "
                   + " ".join(f"{m}={'ok ' if r[m] else 'miss'}" for m in list(METHODS)[1:])
-                  + f" {r['ms']:.0f} ms" + (f"  <- {r['why']}" if r["why"] else ""))
+                  + f" {r['ms']:.0f} ms {r['fallbacks']}/{r['decisions']} fallbacks"
+                  + (f"  <- {r['why']}" if r["why"] else ""))
     finally:
         store.drop(a.tenant)
+    if a.planner == "llm":
+        return llm_summary(rows, llm.name)
     doc = report(rows, tool_ms, len(scenario(1)["data"]["services"]))
     DOC.write_text(doc + "\n")
     print("\n## Accuracy" + doc.split("## Accuracy", 1)[1].split("## Latency", 1)[0])
