@@ -95,7 +95,7 @@ export function build(container, g) {
   // Callers on the left, dependencies on the right. Built-in breadthfirst (rotated) if dagre did not load.
   const layout = typeof cytoscapeDagre !== 'undefined' ? LAYOUT
     : { name: 'breadthfirst', directed: true, padding: 30, transform: (_, p) => ({ x: p.y * 1.6, y: p.x / 1.6 }) };
-  cy = cytoscape({ container, elements, style: STYLE, layout, minZoom: 0.3, maxZoom: 1.3,
+  cy = cytoscape({ container, elements, style: STYLE, layout, minZoom: 0.55, maxZoom: 1.3,  // labels stay >= ~9px
     boxSelectionEnabled: false, autoungrabify: true });
   homePositions = new Map(cy.nodes().map((n) => [n.id(), { ...n.position() }]));
   return { services: g.nodes.length, deps: g.edges.length, retired: g.edges.filter((e) => !e.live).length };
@@ -210,7 +210,10 @@ export function scopeTo(eles) {
   if (typeof cytoscapeDagre !== 'undefined') {
     cy.elements(':visible').layout({ ...LAYOUT, fit: false, animate: false }).run();
   }
-  refit(eles);
+  if (visible()) {
+    cy.resize();
+    cy.fit(cy.elements(':visible'), 36);
+  }
 }
 
 export function scopeAll() {
