@@ -306,7 +306,7 @@ The 20 tools at the time of writing (`GET /api/tools` lists the live set). "W" m
 | `resolve_incident` | W | a human (UI, API, MCP, demo) | `incident_head`, `change_info` (RO), `resolve_incident` |
 | `dependency_path` | | MCP / API | `live_paths` (keeps the shortest) |
 | `incident_board` | | MCP / API (the loop calls the same `load_board()` directly) | `incident_board` |
-| `who_knows` | (W) | comms; MCP / API and the UI's Ask tab (company brain) | `who_knows` (RO), `record_consult` (only with an `incident_id`). It is registered as a read tool, so MCP marks it read-only although this one write can happen. |
+| `who_knows` | (W) | comms; MCP / API and the UI's Ask tab (company brain) | `who_knows` (RO), `record_consult` (only with an `incident_id`). Registered as a write tool for that reason, so it takes the tenant lock and MCP does not mark it read-only. |
 | `change_story` | | MCP / API and the UI's Ask tab (company brain) | `change_story` |
 | `service_map` | | API `/graph`, MCP | `service_map` |
 | `record_change` | W | MCP / API (live events) | `record_change` |
