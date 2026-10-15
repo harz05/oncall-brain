@@ -22,6 +22,6 @@ case "${1:-start}" in
       --daemonize yes --logfile "$DATA/falkordb.log"
     for _ in $(seq 20); do "$BIN/redis-cli" -p "$PORT" ping >/dev/null 2>&1 && { echo "FalkorDB up on :$PORT"; exit 0; }; sleep 0.25; done
     echo "FalkorDB failed to start, see $DATA/falkordb.log" >&2; exit 1 ;;
-  stop) "$BIN/redis-cli" -p "$PORT" shutdown nosave 2>/dev/null || true; echo "FalkorDB stopped" ;;
+  stop) "$BIN/redis-cli" -p "$PORT" shutdown save 2>/dev/null || true; echo "FalkorDB stopped (data saved to $DATA)" ;;
   *) echo "usage: $0 start|stop" >&2; exit 2 ;;
 esac
