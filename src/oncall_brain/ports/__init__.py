@@ -27,6 +27,14 @@ class GraphRepository(Protocol):
         """Exclusive lock on this tenant for a whole agent run (see the adapter for why)."""
         ...
 
+    def scratch(self, name: str) -> "GraphRepository":
+        """A side graph of this tenant for a projection a graph algorithm runs on; drop it with `drop_graph()`."""
+        ...
+
+    def drop_graph(self) -> None:
+        """Delete this (scratch) graph."""
+        ...
+
 
 class GraphStore(Protocol):
     """Many isolated graphs in one FalkorDB: one per tenant, plus a pristine copy for demo resets."""

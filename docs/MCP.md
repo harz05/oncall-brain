@@ -2,8 +2,8 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 22 registry tools plus two use-case tools,
-24 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 23 registry tools plus two use-case tools,
+25 in all.
 
 | Tool | What it does |
 |---|---|

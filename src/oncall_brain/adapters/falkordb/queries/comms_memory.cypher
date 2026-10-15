@@ -5,12 +5,15 @@ OPTIONAL MATCH (i)-[imp:IMPACTS]->(s0:Service)
 WITH i, a, collect(DISTINCT {service: s0.id, via: imp.via}) AS impacts
 OPTIONAL MATCH (i)-[:PAGED]->(p:Person)-[:MEMBER_OF]->(t:Team)
 WITH i, a, impacts, collect(DISTINCT {name: p.name, handle: p.handle, team: t.name}) AS paged
-OPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)
+OPTIONAL MATCH (i)-[w:WARNED]->(wp:Person)-[:MEMBER_OF]->(wt:Team)
 WITH i, a, impacts, paged,
+     collect(DISTINCT {handle: wp.handle, team: wt.name, service: w.for_service, rank: w.rank}) AS warned
+OPTIONAL MATCH (i)-[cx:CONSULTED]->(x:Person)-[:MEMBER_OF]->(xt:Team)
+WITH i, a, impacts, paged, warned,
      collect(DISTINCT {id: x.id, name: x.name, handle: x.handle, team: xt.name, service: cx.for_service}) AS experts
 OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WHERE h.status IN ['confirmed', 'supported']
-WITH i, a, impacts, paged, experts, h, c, s ORDER BY h.status
+WITH i, a, impacts, paged, warned, experts, h, c, s ORDER BY h.status
 LIMIT 1
 OPTIONAL MATCH (c)-[:AUTHORED_BY]->(author:Person)
 OPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)
@@ -18,8 +21,8 @@ OPTIONAL MATCH (src)-[:REQUESTED|MENTIONS]->(c)
 // that merely shares the service and change kind may fix a different failure (a full disk vs a connection limit).
 OPTIONAL MATCH (rb:Runbook {id: h.runbook})
 OPTIONAL MATCH (i)-[:FIXED_WITH]->(fx:Runbook)
-WITH a, impacts, paged, experts, h, c, s, author, src, coalesce(rb, fx) AS rb
-RETURN a.name AS alert, impacts, paged, experts, c.id AS change, c.summary AS change_summary,
+WITH a, impacts, paged, warned, experts, h, c, s, author, src, coalesce(rb, fx) AS rb
+RETURN a.name AS alert, impacts, paged, warned, experts, c.id AS change, c.summary AS change_summary,
        c.kind AS change_kind, s.id AS cause_service, h.status AS cause_status, h.gaps AS cause_gaps,
        author.name AS author, collect(DISTINCT src.id) AS sources,
        collect(DISTINCT {id: rb.id, title: rb.title, steps: rb.steps, successes: rb.successes,

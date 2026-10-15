@@ -1,6 +1,7 @@
 """The graph tools. Each one runs named Cypher through the GraphRepository port and returns a ToolOutput
 (summary, data, the queries it ran, and the graph ids to highlight). Registered once in agents.registry."""
 
+import secrets
 import time
 from typing import Literal
 
@@ -80,23 +81,89 @@ def _resolve_time(ctx: ToolContext, incident_id: str | None, at: int | None) -> 
     return at or int(time.time()), None, []
 
 
+def _criticality(ctx: ToolContext, at: int, qs: list) -> dict[str, float]:
+    """PageRank of every service over the dependencies live at `at`. FalkorDB's algorithms walk every edge of a graph
+    and the tenant graph keeps retired and not-yet-live dependencies as history, so the live edges are first projected
+    into a scratch graph (`scratch_<tenant>_topology_<nonce>`), `algo.pageRank` runs there, and the projection is
+    dropped. Every step is in the trace."""
+    topo = ctx.repo.read("topology_at", at=at)
+    qs.append(topo)
+    scratch = ctx.repo.scratch("topology_" + secrets.token_hex(4))
+    try:
+        qs.append(scratch.write("project_topology", edges=topo.rows))
+        ranked = scratch.read("criticality")
+        qs.append(ranked)
+    finally:
+        scratch.drop_graph()
+    return {r["service"]: r["score"] for r in ranked.rows}
+
+
 @tool(writes=True)
 def blast_radius(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
-    """Every service that depends on `service`, directly or transitively, via dependencies live at that time.
-    With an incident, records them on the board as impacted."""
+    """Every service that depends on `service`, directly or transitively, via dependencies live at that time, most
+    critical first: tier 1 before tier 2, then by PageRank over the dependency graph as it was at that time
+    (`algo.pageRank` on a projection of the live edges), so the services the rest of the company relies on come
+    first. With an incident, records them on the board as impacted, with their rank (`warn_owners` uses it)."""
     at, head, qs = _resolve_time(ctx, a.incident_id, a.at)
     q = ctx.repo.read("blast_radius", service=a.service, at=at)
     qs.append(q)
     rows = q.rows
+    if rows:
+        score = _criticality(ctx, at, qs)
+        for r in rows:
+            r["score"] = round(score.get(r["service"], 0.0), 4)
+        rows.sort(key=lambda r: (r["tier"], -r["score"], r["hops"], r["service"]))
+        for i, r in enumerate(rows):
+            r["rank"] = i + 1
     if head:
         qs.append(ctx.repo.write("record_impacts", incident_id=a.incident_id, via=a.service,
                                  rows=[{"service": r["service"], "hops": r["hops"]} for r in rows]))
+        if rows:
+            qs.append(ctx.repo.write("record_criticality", incident_id=a.incident_id,
+                                     rows=[{"service": r["service"], "rank": r["rank"], "score": r["score"]}
+                                           for r in rows]))
     hl = Highlight(nodes=[a.service] + [r["service"] for r in rows])
     for r in rows:
         hl.edges += _path_edges(r["path"])
     tier1 = [r["service"] for r in rows if r["tier"] == 1]
-    return ToolOutput(summary=f"{len(rows)} services depend on {a.service} ({len(tier1)} tier-1)",
-                      data=rows, queries=qs, highlight=hl)
+    first = ", ".join(r["service"].removeprefix("svc:") for r in rows[:3])
+    return ToolOutput(summary=f"{len(rows)} services depend on {a.service} ({len(tier1)} tier-1)" + (
+        f"; most critical first: {first} (tier, then PageRank over the dependencies live at that time)" if rows
+        else ""), data=rows, queries=qs, highlight=hl)
+
+
+class WarnArgs(BaseModel):
+    incident_id: str = Field(description="Incident id, e.g. inc:checkout-latency")
+    limit: int = Field(2, ge=1, le=10, description="How many teams to warn, most critical first")
+
+
+@tool(writes=True)
+def warn_owners(ctx: ToolContext, a: WarnArgs) -> ToolOutput:
+    """Send a heads-up to the on-call of the impacted teams whose services the rest of the company relies on, before
+    their own customers page them. Teams come in the criticality order `blast_radius` recorded on the board (tier,
+    then PageRank over the dependencies live at alert time); teams already paged are skipped; at most `limit`.
+    Records WARNED on the incident."""
+    head, qs = _head(ctx, a.incident_id)
+    q = ctx.repo.read("warn_candidates", incident_id=a.incident_id, at=head["at"])
+    qs.append(q)
+    picked: list[dict] = []
+    for r in q.rows:  # rows come best rank first; one person per team
+        if all(r["team"] != x["team"] for x in picked):
+            picked.append(r)
+        if len(picked) == a.limit:
+            break
+    if not picked:
+        return ToolOutput(summary="Every impacted team is already paged; nobody else to warn", data=[], queries=qs)
+    qs.append(ctx.repo.write("record_warning", incident_id=a.incident_id, at=head["at"],
+                             rows=[{"person": r["person"], "service": r["service"], "rank": r["rank"]}
+                                   for r in picked]))
+    summary = "Heads-up to " + "; ".join(
+        f"{r['name']} ({r['handle']}, {r['team_name']}) for {r['service'].removeprefix('svc:')} "
+        f"(criticality rank {r['rank']}, tier {r['tier']})" for r in picked)
+    hl = Highlight(nodes=[a.incident_id] + [r["person"] for r in picked] + [r["service"] for r in picked],
+                   edges=[(a.incident_id, r["person"], "WARNED") for r in picked]
+                   + [(r["team"], r["service"], "OWNS") for r in picked])
+    return ToolOutput(summary=summary, data=picked, queries=qs, highlight=hl)
 
 
 @tool(writes=True)

@@ -147,6 +147,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
                    "solved_by_memory": bool(cause and memory and any(
                        m["change"] == cause["change"] for m in memory[0]))},
         "paged": repo.read("incident_paged", incident_id=incident_id).rows,
+        "warned": repo.read("incident_warned", incident_id=incident_id).rows,
         "blast_radius": sorted(direct),
         "at_risk": sorted({x["service"] for x in impacts} - direct - set((cause or {}).get("live_path") or [])),
         "co_causes": co,

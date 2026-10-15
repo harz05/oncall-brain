@@ -90,6 +90,8 @@ def comms(board: dict[str, Any]) -> Decision:
     if cause and not _ran(board, "blast_radius", cause):
         return _call("blast_radius", f"Who else depends on {cause}? Warn them before they page us.",
                      service=cause)
+    if cause and not _ran(board, "warn_owners"):
+        return _call("warn_owners", "Of the teams hurt, tell the ones the rest of the company relies on first.")
     if not _ran(board, "post_update"):
         return _call("post_update", "Write the status update with owners, cause and sources.")
     return Decision(action="done", reason="Update written; waiting for a human to confirm the fix.")

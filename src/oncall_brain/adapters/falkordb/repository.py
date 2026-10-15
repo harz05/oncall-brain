@@ -11,7 +11,7 @@ from oncall_brain.adapters.falkordb import queries
 from oncall_brain.domain.models import QueryRun
 
 _TENANT = re.compile(r"^[a-z0-9_]{1,40}$")
-PREFIX, PRISTINE, RESTORING = "tenant_", "pristine_", "restoring_"
+PREFIX, PRISTINE, RESTORING, SCRATCH = "tenant_", "pristine_", "restoring_", "scratch_"
 
 # Index every label we MERGE or look up by id, and give each a UNIQUE constraint on `id` (ensure_schema), so the
 # database itself refuses a second node with an id that exists. FalkorDB raises if an index already exists; that's fine.
@@ -28,10 +28,21 @@ def _check_tenant(tenant: str) -> str:
 
 
 class FalkorRepository:
-    def __init__(self, db: FalkorDB, tenant: str):
+    def __init__(self, db: FalkorDB, tenant: str, graph: str | None = None):
         self.tenant = _check_tenant(tenant)
         self._db = db
-        self._graph = db.select_graph(PREFIX + tenant)
+        self._graph = db.select_graph(graph or PREFIX + tenant)
+
+    def scratch(self, name: str) -> "FalkorRepository":
+        """A repository on a side graph of this tenant (`scratch_<tenant>_<name>`): a projection built from the
+        tenant graph for a graph algorithm to run on (the algorithms see every edge, so the projection holds only the
+        edges live at the time in question). Callers drop it with `drop_graph()` when done."""
+        return FalkorRepository(self._db, self.tenant, graph=SCRATCH + f"{self.tenant}_{_check_tenant(name)}")
+
+    def drop_graph(self) -> None:
+        """Delete this graph (meant for scratch projections; a tenant graph is dropped through the store)."""
+        if self._graph.name in self._db.list_graphs():
+            self._graph.delete()
 
     def lock(self):
         """One agent run per tenant at a time, across processes (API, MCP, scripts): a Redis lock next to the graph.
@@ -178,6 +189,8 @@ class FalkorGraphStore:
         return True
 
     def drop(self, tenant: str) -> None:
-        for name in (PREFIX + _check_tenant(tenant), PRISTINE + tenant, RESTORING + tenant):
-            if name in self._names():
+        names = self._names()
+        scratch = [n for n in names if n.startswith(SCRATCH + _check_tenant(tenant) + "_")]
+        for name in (PREFIX + tenant, PRISTINE + tenant, RESTORING + tenant, *scratch):
+            if name in names:
                 self.db.select_graph(name).delete()

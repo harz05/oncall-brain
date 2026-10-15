@@ -417,6 +417,21 @@ duplicate edges in two repeats of three: FalkorDB has no uniqueness constraint o
 per-tenant lock stays around anything that writes edges. The constraints are the floor under the lock, not a
 replacement for it.
 
+## Algorithms on a projection
+
+`blast_radius` now projects the dependencies live at alert time into a scratch graph and runs `algo.pageRank` there
+(ARCHITECTURE 3.10): one read on the tenant graph, one `UNWIND ... MERGE` write and one procedure call on the
+projection, then a delete. Measured with `python -m scripts.eval --n 40` twice on one box, before and after:
+
+| | before | after |
+|---|---|---|
+| `blast_radius` queries per call, p50 ms | 8.3 | 13.2 |
+| `warn_owners` queries per call, p50 ms | | 4.6 |
+| `respond()` wall time per incident, p50 ms | 225.5 | 227.8 |
+
+About 5 ms per `blast_radius` call on the 25-service graph (38 live edges), inside the run-to-run noise of a whole
+incident. The box these two runs were made on is about 2.5x slower than the one behind the EVAL.md table.
+
 ## Limitations
 
 - **Our generator, our laptop.** The graphs are synthetic and seeded by us; real dependency maps differ in depth,

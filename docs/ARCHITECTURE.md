@@ -317,7 +317,7 @@ So the outcome, the posted update and the paging agree on one leading cause and 
 
 A human's call overrides all of this. `resolve_incident` makes the confirmed change the incident's `confirmed` hypothesis (creating one with source `human` and "confirmed by a human" `SUPPORTS` evidence if no agent suspected it) and outranks every other supported or co-cause suspect ("a human confirmed chg:X as the cause"). The tool then re-runs `post_update`, so on every surface (UI, HTTP, MCP) the stored update reads "status: resolved, cause confirmed" and "Cause (confirmed)".
 
-Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's `algo.betweenness` and dropped it. Its scores are sampled: on the demo graph, a different `samplingSeed` gives different scores and a different order even with `samplingSize` above the node count. And it filters by label and relationship type, not by property, so it cannot leave out retired `DEPENDS_ON` edges. A score that drives a decision has to be exact and respect time; summed hops over live edges are both, and explain themselves.
+Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's `algo.betweenness` and dropped it. Its scores are sampled: on the demo graph, a different `samplingSeed` gives different scores and a different order even with `samplingSize` above the node count. A score that decides which change gets blamed has to be exact; summed hops over live edges are, and explain themselves. The other objection, that a procedure filters by label and relationship type and so cannot leave out retired `DEPENDS_ON` edges, is solved for the one algorithm the product does use: PageRank for criticality runs on a point-in-time projection of the live edges (3.10).
 
 `outcome()` summarises the run for the UI. The cause, the ruled-out suspects (refuted and outranked; each names the change, its service, the reason and the short tag), `co_causes`, the status update, who was paged, the blast radius and at-risk services (from `IMPACTS` and its `via`; services on the cause's own failure path are not "at risk", they are already part of it) and the storm all come from the graph (`cause_facts`, `refuted_hypotheses`, `co_causes`, `incident_update`, `incident_paged`, `update_facts`, `incident_storm`), so re-running a finished incident still reports them (`test_rerunning_a_finished_incident_still_reports_its_cause`). Counters are per run, from this run's trace: investigator calls, checks and `checks_to_culprit` (which check found the cause), plus the memory used. It runs two baselines that use no traversal: `recent_changes` (the flat change log: newest change in the window; `baseline_pick`, `baseline_correct`) and `anomaly_baseline` (of the in-window changes not rolled back, the one whose own service went red first after it, the same rule as the eval's `anomaly_pick`; `anomaly_baseline_pick`, `anomaly_baseline_correct`). It also returns the `runbook` and the `expert` that the update named, and `storm` (the correlated alerts and the ranked shared upstream, or null). With `?compare=memory` the HTTP response adds `ablation.without_memory` (investigator calls, checks, checks to culprit and root cause of the same alert on a pristine copy).
 
@@ -328,14 +328,15 @@ Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's
 The same registry feeds three surfaces:
 - the agent loop: `registry.call(d.tool, ctx, args)`, with `registry.specs(agents_only=True)` passed to the planner or LLM. Tools registered with `agent=False` (`resolve_incident` and the five event tools) are never offered to an agent run: an agent must not confirm its own fix or invent graph facts. The LLM adapters reject them if a model names one anyway, and the loop's `_call` refuses them too, whatever the planner;
 - the MCP server (`mcp_server/__init__.py::catalogue`): turns every registry tool into an MCP tool, adds a required `tenant` argument and marks read tools with `readOnlyHint`, then adds the two use cases `respond_to_alert` and `reset_tenant` (24 MCP tools). Calls go through `services/respond.py::run_tool()`. See [MCP.md](MCP.md);
-- the HTTP API: `GET /api/tools` returns `specs()` (all 22), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
+- the HTTP API: `GET /api/tools` returns `specs()` (all 23), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
 
-The 22 tools at the time of writing (`GET /api/tools` lists the live set), 16 of them offered to agents (`ask` is offered, but the deterministic planner never calls it; it is there for an LLM planner and for outside clients). "W" means the tool may write.
+The 23 tools at the time of writing (`GET /api/tools` lists the live set), 17 of them offered to agents (`ask` is offered, but the deterministic planner never calls it; it is there for an LLM planner and for outside clients). "W" means the tool may write.
 
 | Tool | W | Used by | Named queries (RO = read-only) |
 |---|---|---|---|
 | `open_incident` | W | `respond()` step 1 | `open_incident` |
-| `blast_radius` | W | triage, comms | `incident_head` (RO), `blast_radius` (RO), `record_impacts` (only with an incident) |
+| `blast_radius` | W | triage, comms | `incident_head` (RO), `blast_radius` (RO), `topology_at` (RO), `project_topology` and `criticality` (`algo.pageRank`, both on the scratch projection), `record_impacts` and `record_criticality` (only with an incident) |
+| `warn_owners` | W | comms | `incident_head` (RO), `warn_candidates` (RO: impacted services by criticality rank with their team's on-call, paged teams left out), `record_warning` |
 | `page_on_call` | W | triage, comms | `incident_head` (RO), `on_call_for` (RO), `record_page` |
 | `correlate_alerts` | W | triage (alert storms only) | `incident_head`, `storm_alerts`, `storm_upstream` (RO), `record_correlation` (only if related alerts were found) |
 | `recall_similar` | W | investigator | `recall_similar` (RO), `record_recalls` |
@@ -451,7 +452,13 @@ By perturbation the graph agent is 66/66 on seeds with only the planted story, 4
 
 ---
 
-### 3.11 Who decides each step: Claude by default, rules as the floor
+### 3.11 Graph algorithms as tools
+
+One algorithm procedure takes part in a decision: `algo.pageRank`, as criticality. `blast_radius` orders the impacted services tier 1 first and then by PageRank over the dependency graph as it was at alert time, records the order on the board (`IMPACTS.rank`, `IMPACTS.score`), and comms' `warn_owners` sends a heads-up to the on-call of the top-ranked impacted teams that nobody has paged yet, so the teams the rest of the company relies on hear about it before their own customers page them. The update's "Heads-up" line shows the result.
+
+FalkorDB's procedures walk every edge of a graph, and the tenant graph keeps retired and not-yet-live dependencies as history, so the algorithm never runs on the tenant graph. `topology_at` reads the `DEPENDS_ON` edges live at the alert time, `project_topology` writes them into a scratch graph (`scratch_<tenant>_topology_<nonce>`, one per call, so concurrent callers never share one), `criticality` runs `algo.pageRank('Service', 'DEPENDS_ON')` there, and the projection is dropped. All four queries are in the trace, like any other. `test_criticality_comes_from_the_dependencies_live_at_alert_time_not_from_history` gives every service a retired dependency on one impacted service and a future one too: over the whole graph PageRank crowns it, on the projection its place does not move, and the projection holds exactly the live edge count. Cost on the 25-service graph: about 5 ms more per `blast_radius` call (8 to 13 ms p50 for its queries on the same box), which is within the noise of a whole run (PERF.md). PageRank is exact and deterministic, which is why it was chosen over betweenness (sampled, see 3.4); tier comes first because business criticality is not a graph property, and the graph breaks ties within a tier.
+
+### 3.12 Who decides each step: Claude by default, rules as the floor
 
 `wiring.make_llm()` returns the deterministic planner unless `LLM_PROVIDER` names a real provider with a key. With a
 key, the model receives the system prompt in `adapters/llm/openai_compat.py` (the roles' playbook, "start every
@@ -524,7 +531,7 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 | Structural recall instead of vectors | model-free, offline, explainable by a path, respects time | needs a known cause service. Text-only similarity is not captured | [004](decisions/ADR-004-memory-model.md) |
 | Memory written only on human-confirmed resolve | the agents cannot reinforce their own mistakes | memory grows only as fast as humans confirm | [004](decisions/ADR-004-memory-model.md) |
 | One Redis lock per tenant around agent runs | concurrent responders cannot duplicate edges; works across the API, MCP and scripts | runs on one tenant are serialised (not a high-concurrency write path) | |
-| No graph-algorithm procedures (`algo.*`) in any decision: everything is Cypher traversal (temporal variable-length paths, `shortestPath`, intersecting upstream closures) | every score is exact, respects `valid_from`/`valid_to`, and explains itself as hops. The council judged PageRank on 25 nodes decoration; we tried `algo.betweenness` for the storm ranking and dropped it (sampled scores that change with `samplingSeed`; no property filter, so retired edges count) | no showcase of FalkorDB's algorithm library | [001](decisions/ADR-001-idea.md) |
+| One algorithm procedure in a decision (`algo.pageRank` as criticality, on a point-in-time projection, 3.10); none in the cause ranking, which stays Cypher traversal (temporal variable-length paths, `shortestPath`, intersecting upstream closures) | a score that blames a change has to be exact and respect `valid_from`/`valid_to`: hops are both. Criticality only orders who is warned first, and the projection keeps it time-correct; `algo.betweenness` stays out because its scores are sampled (they change with `samplingSeed`) | the storm split is still pairwise Python over `storm_upstream` rows, not `algo.WCC` on a projection | [001](decisions/ADR-001-idea.md) |
 
 ## 6. What we would revisit as the system grows
 

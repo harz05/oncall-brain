@@ -39,6 +39,10 @@ def status_update(facts: dict[str, Any], refuted: list[dict[str, Any]], origin: 
     paged = [p for p in facts["paged"] if p.get("handle")]
     if paged:
         lines.append("Paged: " + ", ".join(f"{p['handle']} ({p['team']})" for p in paged))
+    warned = sorted((w for w in facts.get("warned", []) if w.get("handle")), key=lambda w: w.get("rank") or 0)
+    if warned:
+        lines.append("Heads-up (most relied-on first): " + ", ".join(
+            f"{w['handle']} ({w['team']}) for {_short(w['service'])}" for w in warned))
     if at_risk:
         lines.append("Also at risk: " + ", ".join(_short(s) for s in at_risk))
     experts = [x for x in facts.get("experts", []) if x.get("id")]

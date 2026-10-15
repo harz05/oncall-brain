@@ -63,6 +63,8 @@ def test_comms_pages_culprit_owner_names_an_expert_warns_dependents_then_posts()
     b["steps"].append({"tool": "who_knows", "target": "svc:payments-gw", "role": "comms"})
     assert next_decision("comms", b).tool == "blast_radius"
     b["steps"].append({"tool": "blast_radius", "target": "svc:payments-gw", "role": "comms"})
+    assert next_decision("comms", b).tool == "warn_owners"
+    b["steps"].append({"tool": "warn_owners", "target": "inc:x", "role": "comms"})
     assert next_decision("comms", b).tool == "post_update"
 
 

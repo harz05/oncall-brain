@@ -38,8 +38,9 @@ flowchart LR
   Incident -->|TRIGGERED_BY| Alert
   Incident -->|CORRELATED_WITH| Alert
   Incident -->|"SHARED_UPSTREAM (rank, hops)"| Service
-  Incident -->|"IMPACTS (hops, via)"| Service
+  Incident -->|"IMPACTS (hops, via, rank, score)"| Service
   Incident -->|"PAGED (at, for_service)"| Person
+  Incident -->|"WARNED (at, for_service, rank)"| Person
   Incident -->|"CONSULTED (for_service, score)"| Person
   Incident -->|HAS_HYPOTHESIS| Hypothesis
   Hypothesis -->|SUSPECTS| Change
@@ -110,10 +111,11 @@ semantic facts current after seeding.
 | `(Anomaly)-[:ON]->(Service)` | | Where the anomaly was seen. | seed `ingest_anomalies`; `record_anomaly` → `record_anomaly` |
 | `(Runbook)-[:FOR_SERVICE]->(Service)` | | The service the runbook fixes. Together with `Runbook.kind`, it says which changes the runbook is for. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:TRIGGERED_BY]->(Alert)` | | The alert that opened the incident. | `open_incident` → `open_incident` |
-| `(Incident)-[:IMPACTS]->(Service)` | `hops`, `via` | An impacted service. `hops` 0 is an alerting service. `via` is the service the blast radius was walked from: the alerting service when triage writes the edge (direct impact), and the culprit service when comms writes it (also at risk). | `open_incident` → `open_incident` (hops 0); `blast_radius` → `record_impacts`; `correlate_alerts` → `record_correlation` (hops 0 for each correlated alert's service); seed `ingest_incidents` (hops 0) |
+| `(Incident)-[:IMPACTS]->(Service)` | `hops`, `via`, `rank`, `score` | An impacted service. `hops` 0 is an alerting service. `via` is the service the blast radius was walked from: the alerting service when triage writes the edge (direct impact), and the culprit service when comms writes it (also at risk). `rank` is the criticality order (1 = warn first: tier 1 before tier 2, then by `score`, the service's PageRank over the dependencies live at alert time), rewritten by every `blast_radius` call with an incident. | `open_incident` → `open_incident` (hops 0); `blast_radius` → `record_impacts`, `record_criticality`; `correlate_alerts` → `record_correlation` (hops 0 for each correlated alert's service); seed `ingest_incidents` (hops 0) |
 | `(Incident)-[:CORRELATED_WITH]->(Alert)` | | A related alert, folded into this incident (alert storm): it fired in the 15 minutes before this incident's alert, and its service shares with the alerting service an upstream service (0 to 6 hops, so possibly the service itself) that went red in the 2-hour window. Alerts on the alerting service itself fold too. Related alerts need not share one cause. `check_hypothesis` records which of their services each suspect can reach (`explained`). | `correlate_alerts` → `record_correlation` |
 | `(Incident)-[:SHARED_UPSTREAM]->(Service)` | `rank`, `hops` | A service every correlated alerting service depends on (live edges at alert time, 0 to 6 hops). There may be none, when the alerts have separate causes. `hops` is the total of their hop counts to it; `rank` orders by it (fewest first: where the paths converge). The board reads these in rank order, and the investigator checks suspects on them first. | `correlate_alerts` → `record_correlation` |
 | `(Incident)-[:PAGED]->(Person)` | `at`, `for_service` | Who was paged, when, and for which service. `who_knows` counts the incidents where someone was paged for the service it is asked about. | `page_on_call` → `record_page`; seed `ingest_incidents` (each past incident pages someone for its culprit service) |
+| `(Incident)-[:WARNED]->(Person)` | `at`, `for_service`, `rank` | Who got a heads-up: the on-call of an impacted team that was not paged, in criticality order (`rank` is the `IMPACTS.rank` of the service it was sent for). The status update's "Heads-up" line. | `warn_owners` → `record_warning` |
 | `(Incident)-[:CONSULTED]->(Person)` | `for_service`, `score` | The person comms will ask about the culprit service: the top `who_knows` answer. The status update names them in its "Ask:" line. | `who_knows` (with an `incident_id`) → `record_consult` |
 | `(Incident)-[:HAS_HYPOTHESIS]->(Hypothesis)` | | A suspect on the board. | `add_hypotheses` |
 | `(Hypothesis)-[:SUSPECTS]->(Change)` | | The change the hypothesis blames. | `add_hypotheses` |
@@ -196,7 +198,7 @@ confirms it in one check instead of testing every change on the path. That short
 ## Tenants
 
 Each tenant has its own graph in the same FalkorDB: `tenant_<name>`, where the name matches `[a-z0-9_]{1,40}`.
-Seeding rebuilds the tenant from scratch and also keeps `pristine_<name>`. A demo reset is a server-side
+A graph algorithm never runs on the tenant graph, because FalkorDB's procedures walk every edge and the tenant graph keeps retired and not-yet-live dependencies as history. `blast_radius` projects the `DEPENDS_ON` edges live at the alert time into `scratch_<tenant>_topology_<nonce>` (`topology_at`, `project_topology`), runs `algo.pageRank` there (`criticality`) and drops it; `GraphStore.drop(tenant)` removes any projection left behind. Seeding rebuilds the tenant from scratch and also keeps `pristine_<name>`. A demo reset is a server-side
 `GRAPH.COPY` from that copy, so it does not re-run ingest, as long as the copy's `Meta` fingerprint matches the
 current generator. Tenants share no nodes, so one tenant's incidents and learned runbooks can never be recalled for
 another. The seeded company (seed 7) has 6 teams, 24 people, 25 services, 39 `DEPENDS_ON` edges (one retired), 24
