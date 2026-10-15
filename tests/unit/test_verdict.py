@@ -67,11 +67,13 @@ def test_a_silent_middle_hop_is_a_weak_support_with_the_gap_named():
     assert v.verdict == "supports" and v.gaps == ("svc:payments",) and "monitoring gap" in v.reason
 
 
-def test_an_upstream_suspect_that_went_red_first_takes_over_from_a_nearer_one():
-    near = {**h("pay", hops=1, onset=27), "service": "svc:payments"}
-    far = {**h("gw", hops=2, onset=20), "service": "svc:payments-gw"}
+def test_an_upstream_suspect_already_red_when_a_nearer_change_landed_takes_over():
+    near = {**h("pay", hops=1, at=25, onset=27), "service": "svc:payments"}
+    far = {**h("gw", hops=2, at=18, onset=20), "service": "svc:payments-gw"}
     lead, lost, _ = leading([near, far], {("svc:payments", "svc:payments-gw")})
-    assert lead["change_id"] == "gw" and "went red first" in lost[0][1]
+    assert lead["change_id"] == "gw" and "already red when this change landed" in lost[0][1]
+    early = {**near, "at": 15}  # payments deployed before payments-gw went red: no cascade, nearest wins again
+    assert leading([early, far], {("svc:payments", "svc:payments-gw")})[0]["change_id"] == "pay"
     lead, _, _ = leading([near, far])  # without the dependency fact, nearest still wins
     assert lead["change_id"] == "pay"
 

@@ -56,7 +56,7 @@ s { color: var(--refutes); text-decoration-thickness: 2px; }
 }
 h1 { font-size: 18px; letter-spacing: 0.2px; }
 .tagline { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.meta { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.meta { display: flex; flex-shrink: 0; gap: 8px; flex-wrap: wrap; justify-content: flex-end; } /* tagline gives way first */
 .chip {
   padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2);
   font-size: 12.5px; white-space: nowrap;
@@ -131,12 +131,13 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 }
 .outcome > .card { flex: 1 0 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .outcome > .card.intro { flex: 1 1 auto; max-width: 820px; }
-.outcome > .card.counter { flex: 0 0 200px; }
+.outcome > .card.counter { flex: 0 0 215px; }
 .outcome > .card.update { flex-basis: 330px; }
 /* Act 3 adds the Storm card: the others give up some width so the row still fits 1920px. */
 .outcome > .card.storm { flex: 0 0 310px; }
 .outcome.has-storm > .card:not(.storm, .counter) { flex-shrink: 1; min-width: 195px; }
 .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+.h3-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .intro ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; }
 .nums { display: grid; gap: 8px; }
 .num { display: flex; flex-direction: column; }
@@ -154,6 +155,8 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .next { display: grid; gap: 4px; padding: 6px 8px; border: 1px solid #1f5f4a; border-radius: 6px; background: #0f2a24; }
 .next .sub, .ctc { display: block; color: var(--muted); font-size: 12.5px; }
 .ruled ul { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
+.ruled .sub { display: block; font-size: 12.5px; }
+.pill.out { background: #2a3345; color: #b9c3d3; font-weight: 600; text-transform: none; letter-spacing: 0; white-space: nowrap; }
 .reason { color: var(--muted); }
 .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
 .update pre {
@@ -178,7 +181,6 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .hop.alerting { background: #3b1d1d; border-color: var(--alert); }
 .shared-list { margin: 0; padding-left: 22px; display: grid; gap: 2px; }
 .shared-list li:first-child { color: var(--shared); font-weight: 700; }
-.shared-list .score { float: right; font: 600 12.5px var(--mono); color: var(--shared); }
 .caption { color: var(--muted); font-size: 12.5px; font-style: italic; }
 
 /* ---------- trace ---------- */
@@ -245,7 +247,7 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .ask .card { display: grid; gap: 6px; }
 .ask-form label { color: var(--muted); font-size: 12.5px; }
 .ask-row { display: flex; gap: 8px; }
-.ask-row select {
+.ask-row select, .ask-row input {
   flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--panel-2); color: var(--text); font: inherit; font-size: 13px;
 }
@@ -257,6 +259,11 @@ h1 { font-size: 18px; letter-spacing: 0.2px; }
 .score { font: 600 12px var(--mono); color: var(--brain); white-space: nowrap; }
 .sources { margin: 0; padding-left: 16px; display: grid; gap: 4px; font-size: 13px; }
 .ask .error { color: var(--alert); }
+.ask-form .quick { margin-top: 4px; }
+.answer { font-size: 15.5px; line-height: 1.5; }
+.hits { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
+.pill.kind { background: var(--panel-2); border: 1px solid var(--line); color: var(--brain); font-weight: 600; }
+.examples { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text); font-style: italic; }
 
 @media (max-height: 820px) {
   .top { padding: 6px 18px; }

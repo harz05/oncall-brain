@@ -29,7 +29,7 @@ def main() -> None:
         dump("act1", act1)
         dump("resolve", c.post(f"{base}/incidents/{act1['incident_id']}/resolve",
                                json={"change_id": act1["outcome"]["root_cause"]["change"]}).json())
-        dump("act2", c.post(f"{base}/alerts/{ACTS[2]}/respond").json())
+        dump("act2", c.post(f"{base}/alerts/{ACTS[2]}/respond", params={"compare": "memory"}).json())
         dump("act3", c.post(f"{base}/alerts/{ACTS[3]}/respond").json())
     finally:
         make_store().drop(TENANT)

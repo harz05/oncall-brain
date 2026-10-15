@@ -59,9 +59,9 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
 
     Order: explains the most alerting services, then fewest monitoring gaps, then a memory suggestion, then nearest
     the alert, then first followed by an anomaly, then newest, then id. One causal rule overrides that order: if a
-    suspect's service is upstream of the leader's (depends_on holds (leader service, its service)) and went red
-    first, the leader's anomaly is most likely propagation, so the upstream suspect leads (a cascade victim that
-    happened to have a deploy is not the cause).
+    suspect's service is upstream of the leader's (depends_on holds (leader service, its service)) and was already
+    red when the leader's change landed, the leader's anomaly is most likely propagation, so the upstream suspect
+    leads (a cascade victim that happened to deploy mid-incident is not the cause).
     Another suspect is outranked only if the leader explains every alerting service it explains; if it explains a
     service the leader cannot, it is a co-cause, not ruled out. Returns (leader, [(outranked, why)], [(co, why)])."""
 
@@ -72,7 +72,8 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
         return h.get("onset") or INF
 
     def upstream_first(up: dict, down: dict) -> bool:
-        return (down["service"], up["service"]) in depends_on and onset(up) < onset(down) and cov(up) >= cov(down)
+        # A cascade: down's service depends on up's, and up's service was already red before down's change landed.
+        return (down["service"], up["service"]) in depends_on and onset(up) < down["at"] and cov(up) >= cov(down)
 
     def key(h: dict) -> tuple:
         return (-len(cov(h)), len(h.get("gaps") or []), h["source"] != "memory",
@@ -92,8 +93,8 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
             co.append((h, "also needed: it alone explains " + ", ".join(sorted(_n(s) for s in hc - lc))))
             continue
         if upstream_first(lead, h):
-            why = (f"{_n(h['service'])} depends on {_n(lead['service'])}, which went red first: its anomaly came "
-                   f"from upstream ({lead['change_id']})")
+            why = (f"{_n(h['service'])} depends on {_n(lead['service'])}, which was already red when this change "
+                   f"landed: its anomaly came from upstream ({lead['change_id']})")
         elif len(hc) < len(lc):
             why = (f"{lead['change_id']} explains every alerting service this change does ({len(hc)}) and "
                    f"{len(lc) - len(hc)} more")

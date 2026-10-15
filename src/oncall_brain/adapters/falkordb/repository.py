@@ -15,8 +15,9 @@ PREFIX, PRISTINE = "tenant_", "pristine_"
 
 # Index every label we MERGE or look up by id. FalkorDB raises if an index already exists; that's fine.
 INDEXED_LABELS = ["Team", "Person", "Service", "Change", "Alert", "Anomaly", "Incident", "Hypothesis",
-                  "Evidence", "Runbook", "Message", "Ticket", "AgentStep"]
+                  "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep"]
 TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window filters scan these
+FULLTEXT = {"Doc": ["title", "text"], "Ticket": ["title", "text"], "Message": ["text"]}  # what `ask` searches
 
 
 def _check_tenant(tenant: str) -> str:
@@ -54,11 +55,14 @@ class FalkorRepository:
         return self._run(name, params, readonly=False)
 
     def ensure_schema(self) -> None:
+        # Labels and properties come from the constants above, never from input.
         targets = [(label, "id") for label in INDEXED_LABELS] + [(label, "at") for label in TIME_INDEXED]
-        for label, prop in targets:
+        stmts = [f"CREATE INDEX FOR (n:{label}) ON (n.{prop})" for label, prop in targets] + [
+            f"CREATE FULLTEXT INDEX FOR (n:{label}) ON ({', '.join('n.' + p for p in props)})"
+            for label, props in FULLTEXT.items()]
+        for stmt in stmts:
             try:
-                # Labels and properties come from the constant lists above, never from input.
-                self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.{prop})")
+                self._graph.query(stmt)
             except Exception as e:  # already indexed
                 if "already indexed" not in str(e):
                     raise

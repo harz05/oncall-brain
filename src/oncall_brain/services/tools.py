@@ -159,7 +159,8 @@ def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
                              alerts=[{"alert": r["alert"], "service": r["service"]} for r in alerts], shared=ranked))
     names = ", ".join(sorted(x.removeprefix("svc:") for x in group))
     summary = (f"{len(alerts) + 1} related alerts on {len(group)} service{'s' * (len(group) > 1)} ({names})" + (
-        f"; paths converge on {ranked[0]['service'].removeprefix('svc:')}" if ranked and len(group) > 1
+        f"; {len(ranked)} upstream services are shared by all of them, nearest to all first: "
+        f"{', '.join(r['service'].removeprefix('svc:') for r in ranked[:3])}" if ranked and len(group) > 1
         else "; no single service sits upstream of all of them" if len(group) > 1 else ""))
     hl = Highlight(nodes=sorted(group) + [r["service"] for r in ranked],
                    edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in alerts])
@@ -344,7 +345,7 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
                          *(x["id"] for x in experts)] if c]
     qs.append(ctx.repo.write("post_update", incident_id=a.incident_id, message_id=f"msg:update:{a.incident_id}",
                              text=text, at=head["at"], cites=cites))
-    return ToolOutput(summary="Posted status update to #incidents",
+    return ToolOutput(summary="Wrote the status update for #incidents (stored on the incident)",
                       data={"text": text, "cites": cites, "runbook": runbooks[0] if runbooks else None,
                             "expert": experts[0] if experts else None},
                       queries=qs, highlight=Highlight(nodes=cites))

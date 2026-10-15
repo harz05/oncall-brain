@@ -100,7 +100,7 @@ def test_company_brain_who_knows_and_change_sources(store, tenant):
     assert experts[0]["on_owning_team"] and experts[0]["changes"] >= 1
     assert experts == sorted(experts, key=lambda r: -r["score"])
     story = call("change_story", ctx, {"change_id": "chg:pgw-pool-1"}).data
-    assert {s["id"] for s in story["sources"]} == {"ticket:CR-881", "msg:pay-deploys-1"}
+    assert {s["id"] for s in story["sources"]} == {"ticket:CR-881", "msg:pay-deploys-1", "doc:cost-review-pgw"}
     assert story["team"] == "Payments"
 
 

@@ -8,7 +8,13 @@ Decoys each fool a method without the graph, and each is refuted by a different 
   c  a change on a dependency off the propagation path, with no anomaly
   d  (about half the seeds) change + anomaly on a service the alert USED to depend on (retired edge)
   e  (about half the seeds) a resolved past incident, same symptom, cause on the path, nothing changed there now
-Only d can fool the anomaly-aware baseline (anomaly_pick): a goes red after the truth, b is rolled back, c is quiet.
+Perturbations, so the window is not only the planted story (each seed is tagged with the ones it got):
+  gap       (~20% of seeds whose path has a hop in between) one intermediate hop never reports its anomaly
+  innocent  (~30% of seeds with a cause upstream of the alert) a cascade victim on the truth path, or the alerting
+            service itself, deploys after the cause already went red, then goes red itself
+  noise     (~half the seeds) 1-3 unrelated blips in the window on dependencies off the truth path
+  noise-on-c  one of those blips lands on decoy c's service after its change, so c no longer looks quiet
+Without perturbations only d fools the anomaly-aware baseline (anomaly_pick); noise-on-c can too.
 Background changes and anomalies land outside the window. The agent only ever sees the graph.
 """
 
@@ -75,7 +81,8 @@ def anomaly_pick(changes: list[dict], anomalies: list[dict], alert: dict) -> dic
 
 
 def scenario(seed: int) -> dict[str, Any]:
-    """{data (datagen.generate() shape), alert_id, truth_change, baseline_change, truth_path, decoys}."""
+    """{data (datagen.generate() shape), alert_id, truth_change, baseline_change, truth_path, decoys,
+    perturbations: {tag: ids it planted or silenced}}."""
     rng = random.Random(seed)
     data = generate(seed)
     for key in ("changes", "alerts", "anomalies", "tickets", "messages", "incidents", "runbooks"):
@@ -103,9 +110,10 @@ def scenario(seed: int) -> dict[str, Any]:
                                 "version": ver if kind == "deploy" else None})
         return cid
 
-    def anomaly(svc: str, t: int, kind: str) -> None:
-        data["anomalies"].append({"id": f"anom:{name(svc)}-{next(ids)}", "service": svc, "at": t, "kind": kind,
-                                  "summary": ANOMALY_TEXT[kind]})
+    def anomaly(svc: str, t: int, kind: str) -> str:
+        aid = f"anom:{name(svc)}-{next(ids)}"
+        data["anomalies"].append({"id": aid, "service": svc, "at": t, "kind": kind, "summary": ANOMALY_TEXT[kind]})
+        return aid
 
     # --- the alert ----------------------------------------------------------------------------------
     adj = live_adjacency(data["depends_on"], at)
@@ -124,11 +132,16 @@ def scenario(seed: int) -> dict[str, Any]:
     while path[-1] != origin:
         cur = path[-1]
         path.append(rng.choice(sorted(u for u, vs in adj.items() if cur in vs and dist.get(u) == dist[cur] - 1)))
+    # Telemetry gap: a hop in between is red in reality but its anomaly never reached the feed.
+    gap = rng.choice(path[1:-1]) if len(path) >= 3 and rng.random() < 0.2 else None
     t = at - rng.randint(20, 110) * MIN  # <= 4 services x <= 4 min of propagation still lands before the alert
     truth = change(cause, t)
     for i, svc in enumerate(path):
         t += rng.randint(1, 4) * MIN
-        anomaly(svc, t, rng.choice(["saturation", symptom]) if i == 0 else symptom)
+        if i == 0:
+            onset = t  # the cause's own service goes red
+        if svc != gap:
+            anomaly(svc, t, rng.choice(["saturation", symptom]) if i == 0 else symptom)
 
     # --- decoys ---------------------------------------------------------------------------------------
     decoys: dict[str, str] = {}
@@ -150,6 +163,24 @@ def scenario(seed: int) -> dict[str, Any]:
         t = at - rng.randint(12, 110) * MIN
         decoys["d"] = change(svc, t)
         anomaly(svc, t + rng.randint(1, 5) * MIN, symptom)
+
+    # --- perturbations: what real telemetry adds on top of the planted story ----------------------------
+    perturbations: dict[str, list[str]] = {"gap": [gap]} if gap else {}
+    # A cascade victim nearer the alert deploys after the cause already went red, and goes red after its own change:
+    # supported by the anomaly check, and nearer the alert than the truth.
+    if (victims := [s for s in path[1:] if s != gap]) and rng.random() < 0.3:
+        svc = rng.choice(victims)
+        t = rng.randint(onset + MIN, at - 11 * MIN)  # <= 11 min old: decoy a stays the newest change
+        perturbations["innocent"] = [change(svc, t)]
+        anomaly(svc, t + rng.randint(1, 3) * MIN, symptom)
+    if (spare := sorted(closure - set(path))) and rng.random() < 0.5:
+        blips = [(rng.choice(spare), rng.randint(at - WINDOW, at - MIN)) for _ in range(rng.randint(1, 3))]
+        perturbations["noise"] = [anomaly(svc, t, rng.choice(list(ANOMALY_TEXT))) for svc, t in blips]
+        # Spare sets are small, so a blip often lands on decoy c's service after its change: c then looks supported.
+        c = next((x for x in data["changes"] if x["id"] == decoys.get("c")), None)
+        if c and any(svc == c["service"] and t >= c["at"] for svc, t in blips):
+            perturbations["noise-on-c"] = [c["id"]]
+
     changed_now = {c["service"] for c in data["changes"]}  # only in-window changes exist so far
     if (quiet := sorted(closure - changed_now)) and rng.random() < 0.5:
         svc = rng.choice(quiet)
@@ -179,4 +210,4 @@ def scenario(seed: int) -> dict[str, Any]:
         anomaly(rng.choice(services), quiet_time(), rng.choice(list(ANOMALY_TEXT)))
 
     return {"data": data, "alert_id": alert["id"], "truth_change": truth, "baseline_change": decoys["a"],
-            "truth_path": path[::-1], "decoys": decoys}
+            "truth_path": path[::-1], "decoys": decoys, "perturbations": perturbations}

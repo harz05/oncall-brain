@@ -22,7 +22,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const kindOf = (id) => id.split(':', 1)[0];
 const short = (id) => (id ? id.slice(id.indexOf(':') + 1) : '');
 const names = new Map(); // id -> friendlier graph label learned from step data (people, teams)
-const state = { tenant: '', acts: {}, alerts: {}, cy: null, run: null, best: {}, busy: false, next: 'btn-reset', skip: false };
+const state = { tenant: '', acts: {}, alerts: {}, cy: null, run: null, busy: false, next: 'btn-reset', skip: false };
+const EXAMPLES = ['Why was the payments gateway pool lowered?', 'Who should I ask about postgres-orders?',
+  'What fixed the checkout latency incident?'];
 
 // ---------- DOM: strings become text nodes, so API data is never parsed as HTML ----------
 function h(tag, attrs = {}, ...kids) {
@@ -60,7 +62,7 @@ async function api(method, path, body) {
 }
 
 async function fixture(path) {
-  const p = decodeURIComponent(path);
+  const p = decodeURIComponent(path).split('?')[0]; // act 2 asks ?compare=memory; its fixture already has it
   if (p.endsWith('/reset')) return { tenant: state.tenant, status: 'restored' };
   const routes = [[/\/health$/, 'health'], [/\/alerts$/, 'alerts'], [/\/graph/, 'graph'], [/\/resolve$/, 'resolve'],
     [/checkout-latency\/respond$/, 'act1'], [/refunds-latency\/respond$/, 'act2'],
@@ -74,19 +76,19 @@ const T = () => `/api/tenants/${encodeURIComponent(state.tenant)}`;
 
 // ---------- graph ----------
 const STYLE = [
-  { selector: 'node', style: { label: 'data(label)', 'font-family': FONT, 'font-size': 13, color: C.text,
+  { selector: 'node', style: { label: 'data(label)', 'font-family': FONT, 'font-size': 16, color: C.text,
     'text-valign': 'center', 'text-halign': 'center', 'transition-property': 'opacity, background-color, border-color',
     'transition-duration': 300 } },
-  { selector: 'node.svc', style: { shape: 'round-rectangle', width: 'data(w)', height: 30, 'background-color': C.svc,
+  { selector: 'node.svc', style: { shape: 'round-rectangle', width: 'data(w)', height: 36, 'background-color': C.svc,
     'border-width': 1.5, 'border-color': C.svcBorder } },
   { selector: 'node.t1', style: { 'border-width': 2.5, 'border-color': C.t1, 'font-weight': 600 } },
-  { selector: 'node.sat', style: { width: 18, height: 18, 'font-size': 11, 'text-valign': 'bottom', 'text-margin-y': 4,
+  { selector: 'node.sat', style: { width: 22, height: 22, 'font-size': 14, 'text-valign': 'bottom', 'text-margin-y': 4,
     'text-background-color': C.bg, 'text-background-opacity': 0.75, 'text-background-padding': 2, 'border-width': 0 } },
-  { selector: 'node.chg', style: { shape: 'diamond', width: 24, height: 24, 'background-color': C.chg } },
+  { selector: 'node.chg', style: { shape: 'diamond', width: 30, height: 30, 'background-color': C.chg } },
   { selector: 'node.person', style: { shape: 'ellipse', 'background-color': C.person } },
-  { selector: 'node.team', style: { shape: 'hexagon', width: 22, 'background-color': C.team } },
+  { selector: 'node.team', style: { shape: 'hexagon', width: 27, 'background-color': C.team } },
   { selector: 'node.inc', style: { shape: 'octagon', 'background-color': C.inc } },
-  { selector: 'node.rb', style: { shape: 'round-rectangle', width: 26, height: 16, 'background-color': C.rb } },
+  { selector: 'node.rb', style: { shape: 'round-rectangle', width: 32, height: 20, 'background-color': C.rb } },
   { selector: 'edge', style: { width: 1.5, 'line-color': C.edge, 'target-arrow-color': C.edge,
     'target-arrow-shape': 'triangle', 'arrow-scale': 0.8, 'curve-style': 'bezier',
     'transition-property': 'opacity, line-color, width', 'transition-duration': 300 } },
@@ -113,7 +115,7 @@ const STYLE = [
   { selector: 'node.choke', style: { 'border-width': 3.5, 'underlay-color': C.shared, 'underlay-opacity': 0.35,
     'underlay-padding': 8 } },
   { selector: 'node.note', style: { width: 1, height: 1, 'background-opacity': 0, 'border-width': 0, 'underlay-opacity': 0,
-    color: C.shared, 'font-size': 12.5, 'font-weight': 600, 'text-wrap': 'wrap' } }, // after .hot: only its label shows
+    color: C.shared, 'font-size': 15, 'font-weight': 600, 'text-wrap': 'wrap' } }, // after .hot: only its label shows
   { selector: 'edge.note-link', style: { width: 1.5, 'line-color': C.shared, 'line-style': 'dotted',
     'target-arrow-shape': 'none' } },
   { selector: 'edge.recalls.hot', style: { 'line-color': C.inc, 'target-arrow-color': C.inc, 'underlay-color': C.inc,
@@ -137,28 +139,28 @@ function buildGraph(g) {
   }
   const elements = [
     ...g.nodes.map((n) => ({ group: 'nodes', classes: n.tier === 1 ? 'svc t1' : 'svc',
-      data: { id: n.id, label: n.name, w: n.name.length * 8 + 28 } })),
+      data: { id: n.id, label: n.name, w: n.name.length * 9.5 + 30 } })),
     ...g.edges.map((e) => ({ group: 'edges', classes: e.live ? 'dep' : 'dep retired',
       data: { id: `${e.source}>${e.target}>DEPENDS_ON`, source: e.source, target: e.target } })),
   ];
   // Callers on the left, dependencies on the right. Built-in breadthfirst (rotated) if dagre did not load.
   const layout = typeof cytoscapeDagre !== 'undefined'
-    ? { name: 'dagre', rankDir: 'LR', nodeSep: 14, rankSep: 90, padding: 24 }
+    ? { name: 'dagre', rankDir: 'LR', nodeSep: 16, rankSep: 100, padding: 24 }
     : { name: 'breadthfirst', directed: true, padding: 30, transform: (_, p) => ({ x: p.y * 1.6, y: p.x / 1.6 }) };
   const retired = g.edges.filter((e) => !e.live).length;
   state.graphCaption = `Service dependency graph · ${g.nodes.length} services · ${g.edges.length} dependencies`
     + ` (${retired} retired) · callers left, dependencies right`;
   hudIdle();
-  state.cy = cytoscape({ container: $('graph'), elements, style: STYLE, layout, minZoom: 0.25, maxZoom: 1.3,
+  state.cy = cytoscape({ container: $('graph'), elements, style: STYLE, layout, minZoom: 0.25, maxZoom: 1.15,
     boxSelectionEnabled: false, autoungrabify: true });
 }
 
 // Place a satellite next to its anchor, at the first spot (preferred angle first, then fanning out) that does
 // not overlap a node or its label. ponytail: O(nodes) per candidate, fine for the ~60 nodes we ever draw.
-function freeSpot(base, pref, W = 92) {
+function freeSpot(base, pref, W = 110) {
   const boxes = state.cy.nodes().map((n) => n.boundingBox({ includeLabels: true }));
-  const UP = 16, DOWN = 32; // satellite icon plus its label underneath (W wide)
-  for (const r of [60, 95, 130, 170, 220]) {
+  const UP = 18, DOWN = 38; // satellite icon plus its label underneath (W wide)
+  for (const r of [70, 105, 140, 180, 230]) {
     for (let k = 0; k < 12; k++) {
       const a = ((pref + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 30) * Math.PI) / 180;
       const p = { x: base.x + r * Math.cos(a), y: base.y + r * Math.sin(a) };
@@ -215,15 +217,17 @@ function markStorm(d) {
   const top = d.shared[0] && cy.getElementById(d.shared[0].service);
   if (!top?.nonempty()) return cy.collection();
   top.addClass('choke');
-  const label = `paths converge here\n${d.shared[0].hops} hops from the alerts`;
+  // It is not where the cause is (that can be further upstream), only the nearest service every alert reaches.
+  const n = new Set([state.run.res.alert.service, ...d.alerts.map((a) => a.service)]).size;
+  const label = `shared by all ${n}\nalerting services`;
   const note = cy.add({ group: 'nodes', classes: 'sat note', data: { id: 'note:choke', label },
-    position: freeSpot(top.position(), 90, 150) });
+    position: freeSpot(top.position(), 90, 170) });
   return note.union(cy.add({ group: 'edges', classes: 'note-link',
     data: { id: 'note:choke>link', source: note.id(), target: top.id() } }));
 }
 
-// Fade everything except what this run touched (plus one dependency hop of context); brighten `hot`.
-// Works without a run too (company-brain answers before act 1).
+// Fade everything except what this run touched (plus one dependency hop of context); brighten `hot`, then zoom to
+// `focus` (default: all the run touched). Works without a run too (company-brain answers before act 1).
 function paint(hot, focus) {
   const cy = state.cy;
   if (!cy) return;
@@ -237,11 +241,18 @@ function paint(hot, focus) {
     state.run?.cause.addClass('cause');
     hot.removeClass('dim ctx').addClass('hot');
   });
-  const target = focus && focus.nonempty() ? focus : touched;
-  if (target.nonempty()) {
+  const target = focus ?? touched; // an empty focus (a handoff) keeps the camera where it is
+  if (target?.nonempty()) {
     cy.stop(true);
     cy.animate({ fit: { eles: target, padding: 36 }, duration: 450, easing: 'ease-in-out-cubic' });
   }
+}
+
+// Zoom target for a step: its elements plus one hop of context, unless that hop would shrink labels below ~13px
+// (a hub like checkout touches half the graph); then just the step's own elements. 72 = paint()'s fit padding x2.
+function near(eles) {
+  const cy = state.cy, wide = eles.union(eles.nodes().closedNeighborhood()), bb = wide.boundingBox();
+  return Math.min((cy.width() - 72) / bb.w, (cy.height() - 72) / bb.h) >= 0.8 ? wide : eles;
 }
 
 function resetGraphView() {
@@ -261,6 +272,9 @@ function learnNames(step) {
     names.set(d.team, `${d.team_name} team`);
   }
   if (step.tool === 'who_knows') for (const p of d || []) names.set(p.person, p.name);
+  if (step.tool === 'ask') {
+    for (const r of d?.related || []) if (['person', 'team'].includes(kindOf(r.id))) names.set(r.id, r.name);
+  }
 }
 
 function queryBlock(q) {
@@ -333,7 +347,8 @@ function reveal(i) {
     if (step.data.verdict === 'supports') run.cause = run.cause.union(eles);
     else state.cy.getElementById(step.data.change).addClass('refuted');
   }
-  paint(eles);
+  // The storm step already spans the alerting services and their shared upstream; one more hop would be most of the graph.
+  paint(eles, step.tool === 'correlate_alerts' ? eles : near(eles));
 }
 
 function onTraceClick(ev) {
@@ -343,25 +358,31 @@ function onTraceClick(ev) {
   $('trace').querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
   li.classList.add('selected');
   const step = state.run.res.steps[Number(li.dataset.i)];
-  if (step?.eles) paint(step.eles, step.eles);
+  if (step?.eles) paint(step.eles, near(step.eles));
 }
 
 // ---------- outcome ----------
 function renderCounter() {
   const run = state.run, o = run.res.outcome;
-  const prev = run.act === 2 && state.best[1];
+  // Only the same incident replayed on the pristine graph (no act-1 memory) is a fair "memory helps" comparison;
+  // without that ablation the card shows this run's own counts and nothing to compare them with.
+  const wo = run.done ? run.res.ablation?.without_memory : null;
   const num = (label, now, before) => h('div', { class: 'num' },
     h('span', { class: 'big' }, before != null ? [h('span', { class: 'before' }, before), h('span', { class: 'arrow' }, '→'), now] : now),
     h('span', { class: 'lbl' }, label));
   const ctc = run.done ? o.checks_to_culprit : null; // shown once the replay ends, so it can't spoil it
+  const check = (n) => (n == null ? 'no culprit' : `check ${n}`);
   const el = h('div', { class: 'card counter', id: 'counter' },
-    h('h3', {}, run.act === 2 && prev ? 'Act 2 vs act 1' : `Act ${run.act}`),
+    h('h3', {}, wo ? `Act ${run.act}: same incident` : `Act ${run.act}`),
+    wo ? h('p', { class: 'ctc' }, 'without → with memory') : null,
     h('div', { class: 'nums' },
-      num('investigator calls', run.calls, run.done && prev ? prev.calls : null),
-      num('hypotheses checked', run.hyps, run.done && prev ? prev.hyps : null)),
-    ctc != null ? h('p', { class: 'ctc' }, `culprit on check ${ctc} of ${o.hypotheses_checked}`,
-      prev?.checks != null ? h('span', { class: 'muted' }, ` (act 1: ${prev.checks} of ${prev.hyps})`) : null) : null,
+      num('investigator calls', run.calls, wo?.investigator_calls),
+      num('hypotheses checked', run.hyps, wo?.hypotheses_checked)),
+    ctc != null ? h('p', { class: 'ctc' }, wo ? `culprit on ${check(wo.checks_to_culprit)} → check ${ctc}`
+      : `culprit on check ${ctc} of ${o.hypotheses_checked}`) : null,
     run.done && o.memory.solved_by_memory ? h('span', { class: 'pill memory' }, 'solved by memory') : null);
+  if (wo) el.title = `Same incident, without memory: ${plural(wo.investigator_calls, 'call')}, culprit on `
+    + `${check(wo.checks_to_culprit)} → with memory: ${plural(o.investigator_calls, 'call')}, check ${ctc}`;
   const old = $('counter');
   if (old) old.replaceWith(el);
   else $('outcome').prepend(el);
@@ -409,7 +430,8 @@ function renderOutcome() {
   const ruled = h('div', { class: 'card ruled' },
     h('h3', {}, `Ruled out (${o.refuted.length})`),
     o.refuted.length ? h('ul', {}, o.refuted.map((r) => h('li', {},
-      h('s', {}, short(r.change)), ` on ${short(r.service)}: `, h('span', { class: 'reason' }, r.reason))))
+      h('s', {}, short(r.change)), ` on ${short(r.service)} `, r.tag ? h('span', { class: 'pill out' }, r.tag) : null,
+      h('span', { class: 'reason sub' }, r.reason))))
       : h('p', { class: 'muted' }, 'Nothing to rule out: memory went straight to the cause.'));
 
   const memory = h('div', { class: 'card memory-card' },
@@ -427,7 +449,7 @@ function renderOutcome() {
     h('p', {}, h('span', { class: 'k' }, 'Also at risk '), o.at_risk.map(short).join(', ') || 'none'));
 
   const update = h('div', { class: 'card update' },
-    h('h3', {}, 'Status update posted to #incidents'),
+    h('h3', {}, 'Status update for #incidents ', h('span', { class: 'h3-note' }, '(stored on the incident)')),
     h('pre', {}, o.update_text || '(none)'),
     cites.length ? h('p', {}, h('span', { class: 'k' }, 'Sources '), cites.map((c) => h('span', { class: 'src' }, c))) : null);
 
@@ -438,8 +460,7 @@ function renderOutcome() {
     h('span', { class: 'path' }, alerts.sort((a, b) => a.at - b.at).map((a) =>
       h('span', { class: 'hop alerting', title: `${a.name} · ${ist(a.at)}` }, short(a.service)))),
     h('p', {}, h('span', { class: 'k' }, 'Shared upstream'), h('span', { class: 'muted' }, 'nearest to all alerts first')),
-    h('ol', { class: 'shared-list' }, st.shared.slice(0, 3).map((s) => h('li', { value: s.rank },
-      h('span', {}, short(s.service)), h('span', { class: 'score' }, `${s.hops} hops`)))),
+    h('ol', { class: 'shared-list' }, st.shared.slice(0, 3).map((s) => h('li', { value: s.rank }, short(s.service)))),
     state.run.act === 3 ? h('p', { class: 'caption' },
       'Without correlating the alerts, the same planner blames subs-88: it explains only one alert (see make demo).') : null);
 
@@ -500,6 +521,20 @@ const changeStory = (c) => [
   h('p', {}, h('span', { class: 'k' }, 'Caused'), c.incidents.map(short).join(', ') || 'no incidents'),
 ];
 
+// Free-text question: the answer first, then what it rests on (hits, linked nodes, source ids).
+const kindPill = (kind) => h('span', { class: 'pill kind' }, kind);
+const askAnswer = (d) => [
+  h('p', { class: 'answer' }, d.answer),
+  d.hits?.length ? h('ol', { class: 'hits' }, d.hits.map((x) => h('li', {},
+    h('div', {}, kindPill(x.kind), ' ', h('b', {}, x.title),
+      x.superseded_by ? [' ', h('span', { class: 'pill out' }, `superseded by ${short(x.superseded_by)}`)] : null),
+    h('div', { class: 'reason' }, x.snippet)))) : null,
+  d.related?.length ? [h('p', { class: 'k' }, 'Related'), h('ul', { class: 'hits' }, d.related.map((r) => h('li', {},
+    kindPill(r.kind), ' ', h('b', {}, r.name), r.via ? h('span', { class: 'muted' }, ` · ${r.via}`) : null)))] : null,
+  d.sources?.length ? h('p', {}, h('span', { class: 'k' }, 'Sources'), d.sources.map((s) => h('span', { class: 'src' }, s)))
+    : null,
+];
+
 async function ask(tool, args, render) {
   const out = $('ask-out');
   out.replaceChildren(h('p', { class: 'muted' }, 'Querying FalkorDB…'));
@@ -510,7 +545,7 @@ async function ask(tool, args, render) {
       h('div', { class: 'card-head' }, h('span', { class: 'role brain' }, 'brain'), h('code', { class: 'tool' }, tool)),
       render(r.data), cypherList(r.queries)));
     const eles = elementsFor(r.highlight);
-    if (eles) paint(eles, eles);
+    if (eles) paint(eles, near(eles));
   } catch (e) {
     out.replaceChildren(h('p', { class: 'error' }, e.message));
   }
@@ -524,6 +559,7 @@ function syncButtons() {
   $('btn-resolve').disabled = b || !(run?.done && run.res.outcome.root_cause && !run.resolved);
   for (const el of document.querySelectorAll('.controls .step')) el.classList.toggle('primary', !b && el.id === state.next);
   if (OFFLINE) return;
+  $('ask-go').disabled = b;
   $('ask-who').disabled = b || !$('ask-svc').value;
   $('ask-why').disabled = b || !$('ask-chg').value;
 }
@@ -574,7 +610,6 @@ function clearRun() {
 
 async function doReset() {
   const r = await api('POST', `${T()}/reset`);
-  state.best = {};
   names.clear();
   await loadTenant();
   clearRun();
@@ -585,7 +620,8 @@ async function doReset() {
 async function doAct(act) {
   const alert = state.alerts[act];
   status(`Agents are working on “${alert.name}”…`);
-  const res = await api('POST', `${T()}/alerts/${encodeURIComponent(alert.id)}/respond`);
+  // Act 2 also replays the same alert on the pristine graph (no act-1 memory): the response's `ablation`.
+  const res = await api('POST', `${T()}/alerts/${encodeURIComponent(alert.id)}/respond${act === 2 ? '?compare=memory' : ''}`);
   clearRun();
   showTab(false);
   const cy = state.cy;
@@ -611,15 +647,16 @@ async function doAct(act) {
   $('btn-skip').hidden = true;
   state.run.done = true;
   const o = res.outcome;
-  state.best[act] = { calls: o.investigator_calls, hyps: o.hypotheses_checked, checks: o.checks_to_culprit };
   renderOutcome();
   fillAsk();
   // Memory moment: draw new incident -> recalled incident -> its runbook (the chain the recall query walked).
   const memo = o.memory.solved_by_memory ? elementsFor({ nodes: [], edges: o.memory.recalled.flatMap((r) =>
     [[res.incident_id, r.incident, 'RECALLS'], [r.incident, r.runbook, 'FIXED_WITH']]) }) : null;
   if (memo) state.run.touched = state.run.touched.union(memo);
-  // Alert storm: the whole run spans most of the graph, so end on the alerting services, shared upstream and cause.
-  paint(memo, o.storm && state.cy ? state.run.cause.union(state.cy.$('.storm, .shared')) : null);
+  // End on the answer, big enough to read: the whole run spans most of the graph (labels ~10px at 1080p). A storm
+  // ends on the alerting services, shared upstream and cause; otherwise the cause path and the memory chain.
+  const cause = state.run.cause, storm = o.storm && state.cy ? state.cy.$('.storm, .shared') : null;
+  paint(memo, storm ? cause.union(storm) : cause?.nonempty() ? (memo ? cause.union(memo) : cause) : null);
   state.next = o.root_cause ? 'btn-resolve' : 'btn-reset';
   status(o.root_cause ? `Act ${act} done: ${short(o.root_cause.change)} on ${short(o.root_cause.service)} in `
     + `${o.investigator_calls} investigator calls. Confirm it to save the fix to memory.` : `Act ${act} done: no root cause.`);
@@ -634,7 +671,7 @@ async function doResolve() {
   const eles = elementsFor(r.highlight);
   if (eles) {
     run.touched = run.touched.union(eles);
-    paint(eles);
+    paint(eles, near(eles));
   }
   state.next = state.alerts[run.act + 1] ? `btn-act${run.act + 1}` : 'btn-reset';
   status(r.summary);
@@ -650,9 +687,16 @@ async function init() {
   $('tab-trace').onclick = () => showTab(false);
   $('tab-ask').onclick = () => showTab(true);
   if (OFFLINE) {
-    $('ask').replaceChildren(h('p', { class: 'card note' }, 'Ask the brain runs live Cypher against FalkorDB, so it needs '
-      + 'the live API: start the server and open this page without ?offline=1.'));
+    $('ask').replaceChildren(h('div', { class: 'card note' },
+      h('p', {}, 'Ask the brain runs live Cypher against FalkorDB, so it needs the live API: start the server and open '
+        + 'this page without ?offline=1. Questions it answers, for example:'),
+      h('ul', { class: 'examples' }, EXAMPLES.map((q) => h('li', {}, q)))));
   } else {
+    $('ask-q').placeholder = EXAMPLES[0];
+    $('ask-form').onsubmit = (e) => {
+      e.preventDefault(); // the native form gives Enter-to-ask; never navigate
+      busy(() => ask('ask', { question: $('ask-q').value.trim() }, askAnswer));
+    };
     $('ask-who').onclick = () => busy(() => ask('who_knows', { service: $('ask-svc').value }, whoKnows));
     $('ask-why').onclick = () => busy(() => ask('change_story', { change_id: $('ask-chg').value }, changeStory));
   }
@@ -662,12 +706,17 @@ async function init() {
     const hl = await api('GET', '/api/health');
     const tenant = params.get('tenant');
     state.tenant = tenant && /^[a-z0-9_]{1,40}$/.test(tenant) ? tenant : hl.default_tenant;
-    $('tenant').textContent = `tenant: ${state.tenant}${OFFLINE ? ' · offline replay' : ''}`;
-    $('db').textContent = hl.falkordb ? 'FalkorDB' : 'FalkorDB down';
-    $('db').title = hl.falkordb ? 'FalkorDB connected' : 'FalkorDB unreachable';
-    $('db').classList.add(hl.falkordb ? 'ok' : 'bad');
+    $('tenant').textContent = `tenant: ${state.tenant}`;
+    if (OFFLINE) { // a recording, not a connection: no green dot
+      $('db').textContent = 'recorded replay';
+      $('db').title = 'Replaying runs recorded from the real code (web/fixtures); no FalkorDB behind this page';
+    } else {
+      $('db').textContent = hl.falkordb ? 'FalkorDB' : 'FalkorDB down';
+      $('db').title = hl.falkordb ? 'FalkorDB connected' : 'FalkorDB unreachable';
+      $('db').classList.add(hl.falkordb ? 'ok' : 'bad');
+    }
     $('planner').textContent = /deterministic|mock/i.test(hl.planner)
-      ? 'deterministic planner: the graph picks every branch' : `LLM planner: ${hl.planner}`;
+      ? 'deterministic planner: rules choose each step from what the graph returns' : `LLM planner: ${hl.planner}`;
   } catch (e) {
     if (!OFFLINE) {  // no backend (e.g. a static host): replay the recorded fixtures instead
       params.set('offline', '1');

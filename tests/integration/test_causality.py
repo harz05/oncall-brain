@@ -25,7 +25,7 @@ def test_a_deploy_on_a_cascade_victim_is_not_blamed(s):
     st.change("payments", 27.5, "pay-x"), st.red("payments", 26.7), st.red("checkout", 10)
     o = respond(repo, st.alert("checkout", 2), MockProvider())["outcome"]
     assert o["root_cause"]["change"] == "chg:gw-x"
-    assert "went red first" in {r["change"]: r["reason"] for r in o["refuted"]}["chg:pay-x"]
+    assert "already red when this change landed" in {r["change"]: r["reason"] for r in o["refuted"]}["chg:pay-x"]
 
 
 def test_a_monitoring_gap_on_a_middle_hop_still_names_the_cause(s):
