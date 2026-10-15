@@ -248,8 +248,9 @@ function renderInbox() {
     h('p', { class: 'muted small' }, 'Alerts from your monitoring land here. ',
       h('button', { class: 'link-btn', onclick: () => fireNext() }, 'Simulate one'), ', or ',
       h('button', { class: 'link-btn', onclick: () => showView('connect') }, 'connect your alerts'), '.'))]);
-  set('panel-foot', state.health ? [h('span', { class: `dot ${state.health.falkordb ? 'confirmed' : 'error'}` }),
-    ` FalkorDB ${state.health.falkordb ? 'connected' : 'down'} · steps chosen by ${plannerLabel()} · company: ${state.tenant}`] : '');
+  set('panel-foot', OFFLINE ? 'Recorded replay of real runs (steps chosen by Claude Opus 5.5); no database behind this page.'
+    : state.health ? [h('span', { class: `dot ${state.health.falkordb ? 'confirmed' : 'error'}` }),
+      ` FalkorDB ${state.health.falkordb ? 'connected' : 'down'} · steps chosen by ${plannerLabel()} · company: ${state.tenant}`] : '');
 }
 
 function renderLanding() {
@@ -388,7 +389,11 @@ function renderAnswer(cur) {
           h('p', { class: 'byline' }, 'A human should look. The suspects the agents tested are listed below.')]);
 
   // Actions.
-  const alts = o ? [...o.refuted, ...(o.co_causes || [])].filter((r) => r.change !== rc?.change) : [];
+  // Other changes a human might name instead: the suspects that lost, plus what the change log alone would blame.
+  const seen = new Set([rc?.change]);
+  const alts = o ? [...o.refuted, ...(o.co_causes || []), o.baseline_pick, o.anomaly_baseline_pick]
+    .filter((r) => r && !seen.has(r.change) && seen.add(r.change))
+    .map((r) => ({ ...r, tag: r.tag || 'not on a dependency path the agents tested' })) : [];
   const actions = o && cur.incident && !resolved ? h('div', { class: 'actions' },
     rc ? h('button', { class: 'confirm', disabled: state.running && !cur.done, onclick: () => resolve(cur, rc.change) }, '✓ Confirm cause') : null,
     alts.length ? h('button', { class: 'ghost tall', onclick: () => { cur.showAlt = !cur.showAlt; renderAnswer(cur); } }, rc ? 'Wrong cause' : 'Pick the cause') : null,
