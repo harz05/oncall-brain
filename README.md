@@ -35,6 +35,8 @@ Recall finds act 1 by structure, because payments-gw is on refunds' live depende
 **Act 3, two days later: three alerts in 4 minutes** (checkout, refunds, subscriptions).
 Triage sees other alerts in the last 15 minutes on the board and calls `correlate_alerts` first. It folds the other two alerts into the incident (`CORRELATED_WITH`) and finds the services all three depend on at alert time (payments, payments-gw, fraud-check, kafka, postgres-orders, redis-cache). It ranks them with FalkorDB's `algo.betweenness` (paths converge on payments) and stores them as `SHARED_UPSTREAM {rank, betweenness}`. The investigator checks suspects on that shared upstream first: the postgres-orders config change (max_connections 500 -> 150) is supported on check 1. A subscriptions deploy 10 minutes before the alert is refuted: it "cannot explain the alerts on refunds, checkout (they do not depend on subscriptions)". Without correlation, the same planner blames that subscriptions deploy (`make demo` prints this ablation). Two limits: betweenness orders suspects inside the shared upstream, but here only one suspect sits there, so the shared-upstream set and the storm rule decide act 3. And `algo.betweenness` counts all `DEPENDS_ON` edges, retired ones too (FalkorDB's algorithms filter by label and type, not by property); the shared-upstream set uses live edges only.
 
+![Act 3: three alerts folded into one incident; the shared upstream ranked by betweenness; the postgres-orders change found on check 1](docs/img/act3.png)
+
 ## Why the graph is not decoration
 
 | What the agents do | FalkorDB feature doing the work | Without it |
