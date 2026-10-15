@@ -124,6 +124,14 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
     investigator = [s for s in trace if s.role == "investigator" and s.tool != "handoff"]
     recalls = (_data(trace, "recall_similar") or [[]])[0]
     memory = _data(trace, "hypothesize_from_memory")
+    if trace:
+        mem = {"recalled": [r for r in recalls if r["score"] >= RECALL_MIN_SCORE],
+               "suspects": memory[0] if memory else [],
+               "solved_by_memory": bool(cause and memory and any(m["change"] == cause["change"] for m in memory[0]))}
+    else:  # a stored incident: what memory did is on the graph (RECALLS edges, memory-sourced hypotheses)
+        row = repo.read("incident_memory", incident_id=incident_id).rows[0]
+        mem = {"recalled": [r for r in row["recalled"] if r["incident"] and (r["score"] or 0) >= RECALL_MIN_SCORE],
+               "suspects": [], "solved_by_memory": bool(cause and row["solved_by_memory"])}
     # Impact, pages and the storm come from the graph too (IMPACTS, PAGED, CORRELATED_WITH, SHARED_UPSTREAM).
     st = repo.read("incident_storm", incident_id=incident_id).rows[0]
     storm_alerts = [x for x in st["alerts"] if x["alert"]]
@@ -142,10 +150,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "baseline_correct": bool(cause and flat and flat["change"] == cause["change"]),
         "anomaly_baseline_pick": smart,
         "anomaly_baseline_correct": bool(cause and smart and smart["change"] == cause["change"]),
-        "memory": {"recalled": [r for r in recalls if r["score"] >= RECALL_MIN_SCORE],
-                   "suspects": memory[0] if memory else [],
-                   "solved_by_memory": bool(cause and memory and any(
-                       m["change"] == cause["change"] for m in memory[0]))},
+        "memory": mem,
         "paged": repo.read("incident_paged", incident_id=incident_id).rows,
         "warned": repo.read("incident_warned", incident_id=incident_id).rows,
         "blast_radius": sorted(direct),

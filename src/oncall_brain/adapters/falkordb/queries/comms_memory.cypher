@@ -140,3 +140,19 @@ WITH DISTINCT d, max(CASE WHEN x = c THEN 1 ELSE 0 END) AS about_change,
 RETURN d.id AS id, d.title AS title, d.kind AS kind, d.at AS at, about_change, weighty
 ORDER BY about_change DESC, weighty DESC, at DESC
 LIMIT 2
+
+// name: incident_memory
+// purpose: What memory did for an incident, read back from the graph (a stored incident has no live trace): the past incidents it recalled (RECALLS, best score first) with their fix, and whether its leading cause came from a memory-derived hypothesis.
+MATCH (i:Incident {id: $incident_id})
+OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)
+WHERE h.status IN ['supported', 'confirmed'] AND h.source = 'memory'
+WITH i, count(h) > 0 AS solved_by_memory
+OPTIONAL MATCH (i)-[x:RECALLS]->(past:Incident)
+OPTIONAL MATCH (past)-[:FIXED_WITH]->(rb:Runbook)
+OPTIONAL MATCH (past)-[:CAUSED_BY]->(pc:Change)-[:CHANGED]->(ps:Service)
+WITH solved_by_memory, past, x, rb, pc, ps
+ORDER BY x.score DESC, past.id
+RETURN solved_by_memory,
+       collect({incident: past.id, title: past.title, symptom: past.symptom, score: x.score,
+                cause_service: coalesce(x.cause_service, ps.id), cause_change: pc.id, runbook: rb.id,
+                runbook_title: rb.title}) AS recalled

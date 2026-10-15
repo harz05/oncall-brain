@@ -57,8 +57,13 @@ def test_two_act_story_over_http(api):
     res = c.post(f"{base}/incidents/{act1['incident_id']}/resolve", json={"change_id": "chg:pgw-pool-1"}).json()
     assert res["data"]["runbook"] == "rb:payments-gw:config"
 
-    warm = c.post(f"{base}/alerts/{ACTS[2]}/respond").json()["outcome"]
+    warm_run = c.post(f"{base}/alerts/{ACTS[2]}/respond").json()
+    warm = warm_run["outcome"]
     assert warm["memory"]["solved_by_memory"]
+    # Reopened from the graph (no live trace), the incident still knows what memory did for it.
+    stored = c.get(f"{base}/incidents/{warm_run['incident_id']}").json()["outcome"]["memory"]
+    assert stored["solved_by_memory"] and stored["recalled"][0]["incident"] == act1["incident_id"]
+    assert stored["recalled"][0]["runbook_title"]
 
     c.post(f"{base}/reset")
     cold = c.post(f"{base}/alerts/{ACTS[2]}/respond").json()["outcome"]
