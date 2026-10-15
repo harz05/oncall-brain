@@ -204,7 +204,7 @@ function renderSimulateMenu() {
     return h('div', { class: `menu-item${isNext ? ' next' : ''}`, role: 'none' },
       h('div', { class: 'mi-text' }, h('b', {}, scenarioTitle(sc)), h('span', { class: 'muted small' }, SCENARIO_NOTE[sc.act] || '')),
       h('button', { class: isNext ? 'primary-btn' : 'ghost', role: 'menuitem', disabled: done || state.running,
-        onclick: () => { closeMenus(); fire(sc.act); } }, done ? 'Simulated ✓' : 'Simulate'));
+        onclick: () => { closeMenus(); fire(sc.act); } }, done ? (OFFLINE ? 'Replayed ✓' : 'Simulated ✓') : OFFLINE ? 'Replay' : 'Simulate'));
   });
   const svcs = [...(state.graph?.nodes || [])].sort((a, b) => a.name.localeCompare(b.name));
   const custom = OFFLINE ? null : h('details', { class: 'custom' },
@@ -264,7 +264,8 @@ function renderLanding() {
       + 'what changed, what fixed it last time. Confirm the cause and it remembers.'),
     h('div', { class: 'cta-row' },
       h('button', { class: 'cta', disabled: state.running || !state.alerts.length, onclick: () => fireNext() },
-        next ? `Simulate an incident: ${scenarioTitle(next).toLowerCase()}` : 'All demo incidents handled. Reset demo company'),
+        next ? `${OFFLINE ? 'Replay a recorded incident' : 'Simulate an incident'}: ${scenarioTitle(next).toLowerCase()}`
+          : 'All demo incidents handled. Reset demo company'),
       h('button', { class: 'ghost tall', onclick: () => showView('connect') }, 'Connect your alerts')),
     h('ol', { class: 'how' },
       step('1', 'An alert fires', 'From your monitoring through a webhook, or simulated here.'),
