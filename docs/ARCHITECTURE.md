@@ -424,7 +424,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 
 | method | correct |
 |---|---|
-| graph agent | 184/200 (92%) |
+| graph agent | 186/200 (93%) |
 | anomaly-aware change log | 134/200 (fooled by *d* 55 times, by a red *c* 11 times) |
 | keyword match | 57/200 |
 | flat change log | 0/200 (by construction) |
@@ -443,7 +443,7 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
   - start from the few candidates (`path_suspects` from the `Change.at` range index; recall, memory and storm checks from the services involved), take `shortestPath` in `WITH` as a lower bound on hops and keep it if every edge on it is live at alert time;
   - only when that shortest path crosses a retired or not-yet-live edge, fall back to a traversal whose `WHERE` on the variable-length edge (`[e:DEPENDS_ON*0..6] WHERE e.valid_from <= at ...`) FalkorDB applies at each hop, pruning invalid branches instead of enumerating them;
   - compute closures (`blast_radius`, `storm_upstream`) breadth-first, one `CALL {}` per hop over live edges, deduplicating each level.
-  Result at 1,000 services: `blast_radius` on the hub 2,599 -> 45 ms, `storm_upstream` 254 -> 38 ms, `recall_similar` 171 -> 34 ms, `path_suspects` 73 -> 13 ms (p50). The old statements are kept as `*_reference` queries in `queries/reference.cypher`; `tests/integration/test_query_equivalence.py` checks the shipped forms return exactly the same rows on the demo graph, 20 eval scenarios and a 100-service hub graph with cycles, and the eval is unchanged (184/200). `live_paths` (the check's 20 paths) still enumerates, by design, with an early exit when no path exists.
+  Result at 1,000 services: `blast_radius` on the hub 2,599 -> 45 ms, `storm_upstream` 254 -> 38 ms, `recall_similar` 171 -> 34 ms, `path_suspects` 73 -> 13 ms (p50). The old statements are kept as `*_reference` queries in `queries/reference.cypher`; `tests/integration/test_query_equivalence.py` checks the shipped forms return exactly the same rows on the demo graph, 20 eval scenarios and a 100-service hub graph with cycles, and the eval was unchanged by the rewrite (184/200 at the time; 186/200 after a later ranking fix). `live_paths` (the check's 20 paths) still enumerates, by design, with an early exit when no path exists.
 - Indexes: `id` on every label except `Meta`, range indexes on `Change.at` and `Anomaly.at` (`repository.TIME_INDEXED`), and full-text indexes for `ask`. `who_knows` still starts with a `Node By Label Scan` over teams (so over every person); at scale, start it from the service.
 - For very large storms, cap the number of alerts correlated, or start from the services that went red in the window.
 - Keep variable-length traversals bounded (`*1..6`, `*0..6` today; `live_paths` returns at most 20 paths, `recent_changes` 5 rows) and bound `any_path`, which uses an unbounded `shortestPath`. `path_suspects` has no `LIMIT`: every in-window change on the path is a suspect, so its size is set by the 2-hour window.
@@ -488,7 +488,7 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 | Named `.cypher` files, no OGM | every query is reviewable, documented and parameterised | no compile-time check of query names (a unit test covers it) | [002](decisions/ADR-002-stack.md) |
 | Hand-written loop, planner reads the board before every step | the plan lives in the graph, the trace is complete, runs are deterministic | 1 to 2 ms extra per step for the board read (EVAL.md: mean 1.5 ms). The planner's rules are hand-written heuristics | [003](decisions/ADR-003-agent-loop.md) |
 | LLM optional, with a deterministic fallback | works with no key, tests are stable, judges can run it | the default demo does no free-text reasoning; the LLM path is untested against a live model | [003](decisions/ADR-003-agent-loop.md) |
-| A silent middle hop is weak support, not "inconclusive"; a cascade rule over live `DEPENDS_ON` and onsets | missing telemetry no longer hides the cause; a deploy on a service already red from upstream is not blamed | more rules in `leading()`, and the cascade rule can follow a red upstream decoy (8 of the 16 eval misses) | [003](decisions/ADR-003-agent-loop.md) |
+| A silent middle hop is weak support, not "inconclusive"; a cascade rule over live `DEPENDS_ON` and onsets | missing telemetry no longer hides the cause; a deploy on a service already red from upstream is not blamed | more rules in `leading()`, and the cascade rule can follow a red upstream decoy (5 of the 14 eval misses) | [003](decisions/ADR-003-agent-loop.md) |
 | `ask` assembles its answer from graph facts and quoted sentences, no LLM | every claim points at a node, runs offline, testable | no paraphrase or synthesis across sources; a prefix stemmer and a stopword list, only tried on a small corpus | |
 | Structural recall instead of vectors | model-free, offline, explainable by a path, respects time | needs a known cause service. Text-only similarity is not captured | [004](decisions/ADR-004-memory-model.md) |
 | Memory written only on human-confirmed resolve | the agents cannot reinforce their own mistakes | memory grows only as fast as humans confirm | [004](decisions/ADR-004-memory-model.md) |
@@ -505,4 +505,4 @@ The demo graph is tiny (25 services). Here is what we would change as each dimen
 6. Vector similarity as a tie-breaker among structurally equal recalls, stored in FalkorDB's own vector index (ADR-004).
 7. Real event sources (deploy webhooks, monitoring, paging, chat) calling the event tools, plus an event tool for docs, tickets and chat (today they are seeded only).
 8. Per-user auth mapped to tenants (section 4.3).
-9. The eval's remaining blind spot: a noisy blip on an innocent changed service still beats the truth (all 16 misses). Telling "red because of my change" from "red at the same time for another reason" needs more than onset order, for example the anomaly's kind matching the change, or several anomalies in a row.
+9. The eval's remaining blind spot: a noisy blip on an innocent changed service still beats the truth (12 of the 14 misses). Telling "red because of my change" from "red at the same time for another reason" needs more than onset order, for example the anomaly's kind matching the change, or several anomalies in a row.

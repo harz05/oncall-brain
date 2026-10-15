@@ -32,7 +32,7 @@ The first version scored 200/200, and a round of mock judges said, fairly, that 
 
 | method | correct |
 |---|---|
-| On-call Brain (uses the graph) | 184/200 (92%) |
+| On-call Brain (uses the graph) | 186/200 (93%) |
 | anomaly-aware change log: change behind the first service to go red | 134/200 |
 | keyword match: change summary vs alert name | 57/200 |
 | flat change log: newest change in the window | 0/200 |

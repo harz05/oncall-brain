@@ -87,12 +87,12 @@ These scenarios are synthetic and written by the same team as the checks, so rea
 
 | method | uses the graph | correct |
 |---|---|---|
-| **On-call Brain** (deterministic planner) | yes | **184/200 (92%)** |
+| **On-call Brain** (deterministic planner) | yes | **186/200 (93%)** |
 | anomaly-aware change log: change behind the first service to go red | no | 134/200 (fooled by the retired-dependency decoy *d* 55 times, by decoy *c* made red by noise 11 times) |
 | keyword match: change summary vs alert name | no | 57/200 |
 | flat change log: newest change in the window | no | 0/200 (its pick is always a planted decoy) |
 
-What fails: all 16 graph-agent misses are seeds where a random blip landed on decoy *c*'s service after its change, so *c* looks like a real, supported cause (22/38 correct on those seeds). On the 66 seeds with only the planted story it is 66/66; with a silent middle hop 11/13; with a cascade victim 48/51.
+What fails: 14 misses. 12 are seeds where a random blip landed on decoy *c*'s service after its change, so *c* looks like a real, supported cause (26/38 correct on those seeds); 2 combine a silent middle hop with a cascade victim, whose complete chain then outranks the truth's gapped one. On the 66 seeds with only the planted story it is 66/66; with unrelated noise 82/94; with a silent middle hop 9/13; with a cascade victim 47/51.
 
 The eval has single-alert incidents only; act 3's storm is checked by `make demo` and `test_act3_alert_storm_is_correlated_and_only_then_solved`, five more storms (two independent causes, alerts on one service, a quiet shared cache, memory that explains part of a storm, two changes on one service) by `tests/integration/test_storms.py`, and a cascade victim and a monitoring gap by `tests/integration/test_causality.py`. A whole incident (three agent roles, all reads and writes) takes about 85 ms (median over the eval, p95 126 ms) on the deterministic planner; a single tool's queries take 1-8 ms. At scale, the hot traversals avoid enumerating paths (candidates from the time indexes, `shortestPath` checked against edge validity, per-hop-filtered fallbacks, breadth-first closures with `CALL {}`): on a hub-heavy 1,000-service graph, `blast_radius` on the hub went from 2.6 s to 45 ms with identical results ([docs/PERF.md](docs/PERF.md)).
 
