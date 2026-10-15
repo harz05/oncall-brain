@@ -10,7 +10,7 @@ the MCP Inspector or any other MCP client can call the tools directly: 21 regist
 | `reset_tenant` | Restore the tenant's pristine seeded graph (`GRAPH.COPY`), seeding it first if there is none. |
 | `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, `co_causes`, ruled-out suspects, both no-graph baselines, who was paged, status update, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. |
 | agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` |
-| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). Unlike the UI and HTTP resolve, it does not re-post the status update: call `post_update` afterwards for "status: resolved, cause confirmed". Our own agent runs are never offered it. |
+| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also re-posts the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
 | read tools | `dependency_path`, `service_map`, `incident_board`, `who_knows`, `change_story` |
 | live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`: keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 

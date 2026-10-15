@@ -134,7 +134,7 @@ Ids are stable and human-readable, so writes can `MERGE` on them and a trace can
 | Anomaly | `anom:<slug>`; `record_anomaly` makes `anom:<service>-<kind>-<at>` | `anom:pgw-1` |
 | Incident | `inc:<alert slug>` for live incidents (derived from the alert id), `inc:<number>` for history | `inc:checkout-latency`, `inc:0911` |
 | Hypothesis | `hyp:<incident slug>:<change slug>` (one per incident and change, also when `resolve_incident` creates it) | `hyp:checkout-latency:pgw-pool-1` |
-| Evidence | `ev:<incident slug>:<change slug>` for the check (a re-check overwrites it); `...:outranked` for `conclude`'s outranked verdict; `...:human` for the "confirmed by a human" support. A suspect outranked by a human's confirmation gets `<hypothesis id>:human` (it keeps the `hyp:` prefix) | `ev:checkout-latency:pgw-pool-1`, `ev:subscriptions-latency:subs-88:outranked`, `ev:checkout-latency:cart-310:human`, `hyp:checkout-latency:pgw-pool-1:human` |
+| Evidence | `ev:<incident slug>:<change slug>` for the check (a re-check overwrites it); `...:outranked` for `conclude`'s outranked verdict; `...:human` both for the "confirmed by a human" support and for the refutation of a suspect a human's confirmation outranked | `ev:checkout-latency:pgw-pool-1`, `ev:subscriptions-latency:subs-88:outranked`, `ev:checkout-latency:cart-310:human`, `ev:checkout-latency:pgw-pool-1:human` |
 | Runbook | `rb:<slug>` seeded, `rb:<service>:<change kind>` learned | `rb:pg-disk`, `rb:payments-gw:config` |
 | Message | `msg:<slug>` chat, `msg:update:<incident id>` status update | `msg:pay-deploys-1`, `msg:update:inc:checkout-latency` |
 | Ticket | `ticket:<key>` | `ticket:CR-881` |

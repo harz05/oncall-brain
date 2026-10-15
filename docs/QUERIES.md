@@ -892,7 +892,7 @@ OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(o:Hypothesis)
 WHERE o.id <> h.id AND o.status IN ['supported', 'co-cause']
 FOREACH (x IN CASE WHEN o IS NULL THEN [] ELSE [o] END |
   SET x.status = 'outranked'
-  MERGE (oe:Evidence {id: x.id + ':human'})
+  MERGE (oe:Evidence {id: 'ev:' + substring(x.id, 4) + ':human'})
   SET oe.verdict = 'outranked', oe.reason = 'outranked: a human confirmed ' + $change_id + ' as the cause'
   MERGE (oe)-[:REFUTES]->(x))
 RETURN DISTINCT i.id AS incident, rb.id AS runbook, rb.title AS title, rb.steps AS steps,

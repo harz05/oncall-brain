@@ -339,3 +339,14 @@ def test_add_dependency_can_move_a_live_edge_start_earlier(store, tenant):
     out = call("add_dependency", ctx, {"caller": "svc:search", "callee": "svc:cart", "at": 8500})
     assert out.data["valid_from"] == 8500
     assert call("dependency_path", ctx, {"from_service": "svc:search", "to_service": "svc:cart", "at": 8600}).data
+
+
+def test_resolving_over_any_surface_reposts_the_update(store, tenant):
+    from oncall_brain.services.respond import run_tool  # the path MCP and HTTP /tools take
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[1], MockProvider())
+    run_tool(repo, "resolve_incident", {"incident_id": run["incident_id"], "change_id": "chg:pgw-pool-1"})
+    text = repo.read("incident_update", incident_id=run["incident_id"]).rows[0]["text"]
+    assert "status: resolved, cause confirmed" in text

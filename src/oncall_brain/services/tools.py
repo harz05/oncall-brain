@@ -364,6 +364,8 @@ def resolve_incident(ctx: ToolContext, a: ResolveArgs) -> ToolOutput:
     if not q.rows:
         return ToolOutput(summary=f"{a.incident_id} was already resolved", data=None, queries=qs)
     r = q.rows[0]
+    # Re-post the status update so it says resolved and names the confirmed cause (whichever surface called us).
+    qs += post_update(ctx, IncidentArgs(incident_id=a.incident_id)).queries
     return ToolOutput(summary=f"Resolved {a.incident_id}; runbook '{r['title']}' now has {r['successes']} success(es)",
                       data=r, queries=qs,
                       highlight=Highlight(nodes=[a.incident_id, a.change_id, r["runbook"]],

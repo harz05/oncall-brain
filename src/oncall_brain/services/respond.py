@@ -44,13 +44,10 @@ def run_tool(repo: GraphRepository, name: str, args: dict[str, Any]) -> ToolOutp
 
 
 def resolve(repo: GraphRepository, incident_id: str, change_id: str) -> dict[str, Any]:
-    """The human's call: record the confirmed cause and learn the runbook, then re-post the status update so the
-    stored update says resolved and names the confirmed cause."""
+    """The human's call: record the confirmed cause, learn the runbook and re-post the update (resolve_incident)."""
     with repo.lock():
         out = registry.call("resolve_incident", ToolContext(repo),
                             {"incident_id": incident_id, "change_id": change_id})
-        if out.data:
-            registry.call("post_update", ToolContext(repo), {"incident_id": incident_id})
     return out.model_dump()
 
 
