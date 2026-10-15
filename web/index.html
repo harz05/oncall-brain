@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>On-call Brain</title>
   <link rel="stylesheet" href="style.css">
-  <!-- Pinned CDN builds (verified 200). Order matters: cytoscape-dagre registers itself on window.cytoscape. -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+  <!-- Vendored builds (cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0): no CDN, works offline. Order matters: cytoscape-dagre registers itself on window.cytoscape. -->
+  <script src="vendor/cytoscape.min.js"></script>
+  <script src="vendor/dagre.min.js"></script>
+  <script src="vendor/cytoscape-dagre.min.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
