@@ -908,13 +908,15 @@ async function doReset() {
 // ---------- ask the brain ----------
 // The answer first (one or two sentences), then at most five source chips, then the rest behind disclosures.
 function splitAnswer(text) {
-  const sentences = String(text || '').match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
+  const full = String(text || '');
+  // Sentences end at punctuation followed by whitespace, so "@hana.costa" and "inc:0911" never split a sentence.
+  const sentences = full.split(/(?<=[.!?])\s+/);
   let lead = '';
   for (const s of sentences) {
     if (lead && lead.length + s.length > 260) break;
-    lead += s;
+    lead += (lead ? ' ' : '') + s;
   }
-  return [lead.trim(), text.slice(lead.length).trim()];
+  return [lead.trim(), full.slice(lead.length).trim()];
 }
 
 function brainMessage(m) {
