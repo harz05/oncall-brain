@@ -14,11 +14,13 @@ The answer leads with the graph fact, then quotes the supporting source; no LLM,
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain.models import Highlight, QueryRun, ToolOutput
+from oncall_brain.services import sessions
 
 # Question words carry no content and the index has no stopword list, so they would match nearly everything.
 STOPWORDS = frozenset(
@@ -31,7 +33,10 @@ KINDS = {"postmortem": "postmortem", "design": "design note", "decision": "decis
          "ticket": "ticket", "chat": "chat", "status_update": "status update"}
 TOP, PER_LABEL = 5, 30
 # Intent rules on the lowered question, first match wins: "who owns kafka and who knows it" is about ownership.
+# "what did I ask about who owns kafka" is a recall: history comes first, since "ask" and "owns" would match below.
 INTENTS = (
+    ("history", re.compile(r"\bwhat (did|have) i ask|\bdid i ask\b|\bmy (last|previous|earlier|recent|past) "
+                           r"questions?\b|\bwhat was i asking\b|\bmy questions\b")),
     ("owner", re.compile(r"\bown(s|ed|er|ers)?\b|\bwhose\b|\bwhich team\b|\bon[ -]call\b")),
     ("expert", re.compile(r"\bwho knows\b|\bexperts?\b|\bask\b")),
     ("why", re.compile(r"\bwhy\b|\bdecid|\bdecision")),
@@ -44,9 +49,21 @@ KIND_RANK = {"change": 0, "ticket": 1, "service": 2, "person": 3, "team": 4}
 
 class AskArgs(BaseModel):
     question: str = Field(max_length=300, description="A question in plain words, e.g. who owns kafka? why was "
-                          "legacy-billing retired? how do I roll back a bad deploy on cart?")
+                          "legacy-billing retired? how do I roll back a bad deploy on cart? As a follow-up: and who "
+                          "is on call for it? To recall: what did I ask about payments-gw?")
     at: int | None = Field(None, description="Epoch seconds for 'who is on call'; default: the latest alert in the "
                            "graph")
+    user: str | None = Field(None, pattern=sessions.USER, description="Who is asking, e.g. person:hana-costa (a "
+                             "Person id or @handle). The question is then remembered in that person's session in the "
+                             "graph: a follow-up can say 'it' or 'them', and 'what did I ask about X' works. Without "
+                             "it nothing is recorded")
+    session: str = Field("default", pattern=sessions.KEY, description="Conversation key for the user, e.g. a chat or "
+                         "terminal id; 'it' is read within one session. Default: one running conversation")
+
+    @field_validator("user", "session", mode="before")
+    @classmethod
+    def _lower(cls, v: Any) -> Any:
+        return sessions.lower(v)
 
 
 def terms(question: str) -> list[str]:
@@ -303,16 +320,35 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     question names; by intent answers from the graph first (who owns -> OWNS + on call; who knows -> expertise
     ranking; why -> decisions of record + change story; how do I -> runbooks + past fixes; what happened ->
     incidents), then full-text search finds supporting sources, preferring those tied to a linked entity, flags
-    docs a newer doc superseded, and lists every source."""
-    words = terms(a.question)
-    empty = {"hits": [], "related": [], "sources": [], "linked": [], "intent": None}
-    if not words:
-        return ToolOutput(summary="Nothing to search for", data={**empty, "answer": "Ask with a few content words "
-                          "(a service, what happened); one-letter words and words like 'why' or 'the' match nothing."})
+    docs a newer doc superseded, and lists every source. Given a user, the question is remembered in that person's
+    session in the graph: a follow-up can say "it" or "them" (read as what the previous question was about; the
+    answer says so), and "what did I ask about payments-gw" lists their earlier questions with the sources cited."""
+    empty = {"hits": [], "related": [], "sources": [], "linked": [], "intent": None, "resolved": None,
+             "recorded": None}
     ans = _Answer()
-    q = padded(a.question)
+    sid = sessions.session_id(a.user, a.session) if a.user else None
+    # A follow-up's "it" means what the previous question in this session was about (session_context).
+    previous = (ans.read(ctx, "session_context", session_id=sid) or [None])[0] if sid else None
+    question, carried, pronoun = (sessions.resolve(a.question, previous["entities"]) if previous
+                                  else (a.question, [], None))
+    resolved = ({"pronoun": pronoun, "as": [e["id"] for e in carried],
+                 "from": {"question": previous["question"], "seq": previous["seq"], "text": previous["text"]}}
+                if carried else None)
+    lead_in = (f'Taking "{pronoun}" as {" and ".join(sessions.mention(e) for e in carried)}, from your earlier '
+               f'question "{previous["text"]}". ' if carried else "")
+    words = terms(question)
+    if not words:
+        return ToolOutput(summary="Nothing to search for", queries=ans.queries, data={
+            **empty, "resolved": resolved, "answer": lead_in + "Ask with a few content words (a service, what "
+            "happened); one-letter words and words like 'why' or 'the' match nothing."})
+    intent = intent_of(question)
+    if intent == "history":
+        return _history(ctx, ans, a, question, {**empty, "resolved": resolved})
+    q = padded(question)
     ents = link(ans.read(ctx, "link_entities", q=q), q)
-    intent = intent_of(a.question)
+    asked = padded(a.question)
+    for e in ents:  # carried: linked through the pronoun, not named in the question as it was asked
+        e["carried"] = bool(carried) and e["id"] in resolved["as"] and f" {e['matched']} " not in asked
     if intent and ents:
         ROUTES[intent](ctx, ans, ents, words, a.at)
     lead = list(ans.sources)  # what the graph fact cites: those docs lead the hits
@@ -331,12 +367,13 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
                                             -coverage(words, r["title"] or ""), LABEL_ORDER[r["label"]], -r["score"],
                                             -(r["at"] or 0)))[:TOP]
     # intent: the route whose graph fact leads the answer; "search" when none did (no rule, or nothing linked).
-    info = {"linked": [{k: e[k] for k in ("id", "kind", "name", "matched")} for e in ents],
-            "intent": intent if ans.parts else "search"}
+    info = {"linked": [{k: e[k] for k in ("id", "kind", "name", "matched", "carried")} for e in ents],
+            "intent": intent if ans.parts else "search", "resolved": resolved, "recorded": None}
     if not ranked and not ans.parts:
-        return ToolOutput(summary=f"No docs, tickets or chat mention {', '.join(words)}", queries=ans.queries,
-                          data={**empty, **info, "answer": f"Nothing in docs, tickets or chat mentions "
-                                f"{', '.join(words)}."})
+        out = ToolOutput(summary=f"No docs, tickets or chat mention {', '.join(words)}", queries=ans.queries,
+                         data={**empty, **info, "answer": lead_in + f"Nothing in docs, tickets or chat mentions "
+                               f"{', '.join(words)}."})
+        return _remember(ctx, a, sid, question if carried else None, out, ents, [])
     by_hit: dict[str, list[dict]] = {h["id"]: [] for h in ranked}
     context = ans.read(ctx, "knowledge_context", ids=list(by_hit)) if ranked else []
     for r in sorted(context, key=lambda r: list(by_hit).index(r["hit"])):  # "via" names the most relevant hit
@@ -358,13 +395,102 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     flags = sum(h["superseded_by"] is not None for h in ranked)
     what = (f"{intent}: {', '.join(e['matched'] for e in ents)}" if ans.parts else f"'{' '.join(words)}'") + (
         f"; most relevant {ranked[0]['id']}" if ranked else "")
-    return ToolOutput(summary=f"{len(sources)} sources for {what}" + (f" ({flags} superseded)" if flags else ""),
-                      data={"answer": " ".join(parts), "hits": hits, "related": list(related.values()),
-                            "sources": sources, **info},
-                      queries=ans.queries, highlight=Highlight(
-                          nodes=list(dict.fromkeys(sources + list(related) + [e["id"] for e in ents])),
-                          edges=list(dict.fromkeys(ans.edges))))
+    out = ToolOutput(summary=f"{len(sources)} sources for {what}" + (f" ({flags} superseded)" if flags else ""),
+                     data={"answer": lead_in + " ".join(parts), "hits": hits, "related": list(related.values()),
+                           "sources": sources, **info},
+                     queries=ans.queries, highlight=Highlight(
+                         nodes=list(dict.fromkeys(sources + list(related) + [e["id"] for e in ents])),
+                         edges=list(dict.fromkeys(ans.edges))))
+    return _remember(ctx, a, sid, question if carried else None, out, ents, sources)
 
+
+def _remember(ctx: ToolContext, a: AskArgs, sid: str | None, resolved: str | None, out: ToolOutput,
+              ents: list[dict], sources: list[str]) -> ToolOutput:
+    """Given a user: append the question to their session in the graph (sessions.record), say so in the data and
+    keep the write in the trace. ABOUT the linked entities, ANSWERED_WITH the sources in rank order."""
+    if not sid:
+        return out
+    about = [{"id": e["id"], "matched": e["matched"], "carried": e["carried"]} for e in ents]
+    cited = [{"id": x, "rank": i + 1} for i, x in enumerate(sources)]
+    out.data["recorded"], run = sessions.record(ctx, sid=sid, user=a.user, key=a.session, question=a.question,
+                                                resolved=resolved, intent=out.data["intent"], summary=out.summary,
+                                                answer=out.data["answer"], about=about, sources=cited)
+    out.queries.append(run)
+    return out
+
+
+def _history(ctx: ToolContext, ans: _Answer, a: AskArgs, question: str, base: dict[str, Any]) -> ToolOutput:
+    """ask, "what did I ask about X": the asker's earlier questions from the graph (user_questions, every session of
+    theirs), newest first: those ABOUT the entities the question names, else those containing the words after
+    "about", else all. A recall is not itself recorded."""
+    if not a.user:
+        return ToolOutput(summary="No conversation history without a user", queries=ans.queries, data={
+            **base, "intent": "history", "questions": [], "answer": "No conversation history: pass user (e.g. "
+            "person:hana-costa) with each question and it is remembered in your session."})
+    q = padded(question)
+    ents = link(ans.read(ctx, "link_entities", q=q), q)
+    m = re.search(r"\babout\b(.*)$", question.lower())
+    text = re.sub(r"[^a-z0-9:@._ -]", "", m.group(1)).strip() if m and not ents else ""
+    rows = ans.read(ctx, "user_questions", user=a.user, session=None, ids=[e["id"] for e in ents],
+                    text=text or None, limit=10)
+    subject = ", ".join(_label(e) for e in ents) or (f"'{text}'" if text else "anything")
+    answer = (f"You asked {_n(len(rows), 'question')} about {subject}, newest first: "
+              + "; ".join(_recap(r) for r in rows) + "." if rows
+              else f"No earlier question of yours about {subject} is on record.")
+    linked = [{k: e[k] for k in ("id", "kind", "name", "matched")} | {"carried": False} for e in ents]
+    return ToolOutput(summary=f"{len(rows)} earlier question{'s' if len(rows) != 1 else ''} of {a.user} about "
+                              f"{subject}",
+                      data={**base, "intent": "history", "linked": linked, "questions": rows, "answer": answer},
+                      queries=ans.queries, highlight=Highlight(nodes=[e["id"] for e in ents]))
+
+
+def _label(e: dict[str, Any]) -> str:
+    return e["id"] if e["kind"] in ("change", "ticket") else e["name"]
+
+
+def _recap(r: dict[str, Any]) -> str:
+    read = f" (read as '{r['resolved']}')" if r.get("resolved") else ""
+    cited = [x["title"] or x["id"] for x in r["sources"]][:3]
+    with_ = f"; answered with {', '.join(repr(x) for x in cited)}" if cited else "; no sources"
+    return f"'{r['text']}'{read} ({r['intent']}, {_ts(r['at'])}{with_})"
+
+
+class QuestionsArgs(BaseModel):
+    user: str = Field(pattern=sessions.USER, description="Whose questions: the user given to ask, e.g. "
+                      "person:hana-costa")
+    about: str | None = Field(None, max_length=120, description="Only questions about this service, team, person, "
+                              "change or ticket (by name or id: payments-gw, chg:pgw-pool-1), else containing this "
+                              "text; default: every question")
+    session: str | None = Field(None, pattern=sessions.KEY, description="Only this session (the key given to ask); "
+                                "default: every session of the user")
+    limit: int = Field(10, ge=1, le=50, description="How many questions, newest first")
+
+    @field_validator("user", "session", mode="before")
+    @classmethod
+    def _lower(cls, v: Any) -> Any:
+        return sessions.lower(v)
+
+
+@tool(agent=False)
+def my_questions(ctx: ToolContext, a: QuestionsArgs) -> ToolOutput:
+    """Conversation memory: what a user asked the company brain before, newest first, each with what it was about,
+    how a pronoun in it was read, the answer given and the sources it cited. Filter to one subject ("what did I ask
+    about payments-gw") or one session. ask records a question when given a user; a tenant reset clears them."""
+    ans = _Answer()
+    ents: list[dict[str, Any]] = []
+    text = None
+    if a.about:
+        q = padded(a.about)
+        ents = link(ans.read(ctx, "link_entities", q=q), q)
+        text = None if ents else a.about.lower().strip()
+    rows = ans.read(ctx, "user_questions", user=a.user, session=a.session, ids=[e["id"] for e in ents], text=text,
+                    limit=a.limit)
+    what = (" about " + ", ".join(_label(e) for e in ents)) if ents else (f" containing '{text}'" if text else "")
+    where = f" in session {a.session}" if a.session else ""
+    return ToolOutput(summary=f"{len(rows)} question{'s' if len(rows) != 1 else ''} by {a.user}{what}{where}",
+                      data={"questions": rows, "linked": [{k: e[k] for k in ("id", "kind", "name", "matched")}
+                                                           for e in ents]},
+                      queries=ans.queries, highlight=Highlight(nodes=[e["id"] for e in ents]))
 
 def _support(words: list[str], ranked: list[dict], lead: list[str]) -> list[str]:
     """After a graph fact: quote the best source (by name if the fact already cited it), then the next two."""

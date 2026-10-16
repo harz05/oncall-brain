@@ -33,7 +33,9 @@ Three ways to use it:
 2. A question about the company: ask(tenant, question) answers "who owns kafka", "why was legacy-billing retired",
    "how do I roll back a bad deploy on cart", "what happened to auth" with sources. who_knows ranks the people who
    know a service; change_story traces a change to its ticket, chat, docs and author; dependency_path, blast_radius
-   and service_map answer structural questions.
+   and service_map answer structural questions. Pass user (a Person id such as person:hana-costa) and keep one
+   session key through a conversation: each question is then remembered in the graph, a follow-up can say "it" or
+   "them", and my_questions(tenant, user) or asking "what did I ask about payments-gw" recalls them with sources.
 3. Keeping the graph current: record_change (deploys, config changes), record_anomaly, raise_alert, add_dependency
    and retire_dependency write live facts; the next investigation sees them.
 Ids look like svc:checkout, alert:checkout-latency, inc:checkout-latency, chg:pgw-pool-1, person:sana-brandt. Every
@@ -88,7 +90,8 @@ USE_CASES: dict[str, tuple[str, type[BaseModel], bool, Handler]] = {
                          "status update text, and every step with who decided it. Use this for 'X is slow/erroring, "
                          "find out why' when an alert id exists (raise_alert creates one).", AlertArgs, True, _respond),
     "reset_tenant": ("Restore the company's pristine seeded graph (GRAPH.COPY), seeding the demo company first if it "
-                     "has none. Wipes incidents, memory and runbooks learned since. Use before a demo, never during "
+                     "has none. Wipes incidents, memory, runbooks and conversation history learned since. Use "
+                     "before a demo, never during "
                      "a real incident.", _NoArgs, True, _reset),
 }
 
@@ -105,7 +108,11 @@ PROMPTS: dict[str, types.Prompt] = {
         description="Answer a question about the company from its graph (owners, on-call, decisions, past incidents, "
                     "runbooks), leading with the answer and citing the sources.",
         arguments=[types.PromptArgument(name="tenant", description="Company graph, e.g. acme", required=True),
-                   types.PromptArgument(name="question", description="The question in plain words", required=True)]),
+                   types.PromptArgument(name="question", description="The question in plain words", required=True),
+                   types.PromptArgument(name="user", description="Who is asking, e.g. person:hana-costa: the "
+                                        "question is remembered in their session, so a follow-up can say 'it'"),
+                   types.PromptArgument(name="session", description="Session key for this conversation (default: "
+                                        "default)")]),
 }
 
 
@@ -121,10 +128,14 @@ def prompt_text(name: str, args: dict[str, str]) -> str:
                 "update text as written. Use ids exactly as returned. End by asking whether the cause is right; if I "
                 "say yes, call resolve_incident with the incident id and change id so the fix is remembered.")
     if name == "company_question":
+        who = (f" and user={a['user']!r}, session={a.get('session') or 'default'!r} (the question is then remembered "
+               "in that person's session, so a follow-up can say 'it', and 'what did I ask about X' works)"
+               if a.get("user") else "")
         return (f"Answer this question about company '{tenant}' from its graph: {a.get('question', '')}. Call ask "
-                "with that tenant and question. Lead with a one- or two-sentence answer, then list the sources it "
-                "returned (kind and title). If the question is about who owns or knows a service, who_knows adds "
-                "the ranking; if it is about why a change was made, change_story adds the ticket, chat and author.")
+                f"with that tenant and question{who}. Lead with a one- or two-sentence answer, then list the "
+                "sources it returned (kind and title). If the question is about who owns or knows a service, "
+                "who_knows adds the ranking; if it is about why a change was made, change_story adds the ticket, "
+                "chat and author.")
     raise ValueError(f"unknown prompt {name!r}")
 
 

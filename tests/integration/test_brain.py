@@ -40,7 +40,7 @@ def test_ask_who_owns_kafka_answers_from_owns_and_the_rotation(store, tenant):
     out = call("ask", ctx, {"question": "who owns kafka"})
     d = out.data
     assert d["intent"] == "owner" and d["linked"] == [{"id": "svc:kafka", "kind": "service", "name": "kafka",
-                                                        "matched": "kafka"}]
+                                                        "matched": "kafka", "carried": False}]
     latest = max(a["at"] for a in generate(7)["alerts"])  # no `at` given: the latest alert is "now"
     assert d["answer"].startswith(f"kafka is owned by Platform; {_on_call('team:platform', latest)} (")
     assert "latest alert in the graph" in d["answer"] and "People who know kafka:" in d["answer"]

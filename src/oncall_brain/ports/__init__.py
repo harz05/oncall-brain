@@ -23,8 +23,9 @@ class GraphRepository(Protocol):
         """Create the indexes the queries rely on (idempotent)."""
         ...
 
-    def lock(self) -> AbstractContextManager:
-        """Exclusive lock on this tenant for a whole agent run (see the adapter for why)."""
+    def lock(self, scope: str = "") -> AbstractContextManager:
+        """Exclusive lock on this tenant for a whole agent run (see the adapter for why); with a scope, a narrower
+        lock beside it for a part of the graph no run touches (a conversation session)."""
         ...
 
     def scratch(self, name: str) -> "GraphRepository":

@@ -256,7 +256,7 @@ Everything is under `src/oncall_brain/`. Dependencies point inwards: adapters an
 
 | Port (Protocol) | Methods | Adapter today | Test double / alternative |
 |---|---|---|---|
-| `GraphRepository` | `read(name, /, **params)` (RO), `write(name, /, **params)`, `ensure_schema()`, `lock()`, `tenant` | `FalkorRepository` | Integration tests use a real FalkorDB with throwaway tenants |
+| `GraphRepository` | `read(name, /, **params)` (RO), `write(name, /, **params)`, `ensure_schema()`, `lock(scope="")`, `tenant` | `FalkorRepository` | Integration tests use a real FalkorDB with throwaway tenants |
 | `GraphStore` | `tenant()`, `exists()`, `snapshot()`, `restore()`, `drop()`, `tenants()`, `lock()`, `clone_pristine()` | `FalkorGraphStore` | |
 | `LLMProvider` | `decide(role, board, tools) -> Decision`, `name` | `MockProvider` (default), OpenAI-compatible, Anthropic | Planner unit tests call `next_decision` on plain dicts |
 
@@ -326,11 +326,11 @@ Why no graph algorithm here: we first ranked the shared upstream with FalkorDB's
 `agents/registry.py` holds `REGISTRY: dict[str, Tool]`. A tool is a plain function `fn(ctx: ToolContext, args: SomeArgsModel) -> ToolOutput`, registered with `@tool(writes=..., agent=...)`. The decorator reads three things from the function itself: the name, the docstring (the description agents and MCP clients see), and the pydantic args model from the second parameter (its JSON schema is the tool's input schema). There is no second definition anywhere.
 
 The same registry feeds three surfaces:
-- the agent loop: `registry.call(d.tool, ctx, args)`, with `registry.specs(agents_only=True)` passed to the planner or LLM. Tools registered with `agent=False` (`resolve_incident` and the five event tools) are never offered to an agent run: an agent must not confirm its own fix or invent graph facts. The LLM adapters reject them if a model names one anyway, and the loop's `_call` refuses them too, whatever the planner;
-- the MCP server (`mcp_server/__init__.py::catalogue`): turns every registry tool into an MCP tool, adds a required `tenant` argument and marks read tools with `readOnlyHint`, then adds the two use cases `respond_to_alert` and `reset_tenant` (24 MCP tools). Calls go through `services/respond.py::run_tool()`. See [MCP.md](MCP.md);
-- the HTTP API: `GET /api/tools` returns `specs()` (all 23), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
+- the agent loop: `registry.call(d.tool, ctx, args)`, with `registry.specs(agents_only=True)` passed to the planner or LLM. Tools registered with `agent=False` (`resolve_incident`, `my_questions` and the five event tools) are never offered to an agent run: an agent must not confirm its own fix or invent graph facts. The LLM adapters reject them if a model names one anyway, and the loop's `_call` refuses them too, whatever the planner;
+- the MCP server (`mcp_server/__init__.py::catalogue`): turns every registry tool into an MCP tool, adds a required `tenant` argument and marks read tools with `readOnlyHint`, then adds the two use cases `respond_to_alert` and `reset_tenant` (27 MCP tools). Calls go through `services/respond.py::run_tool()`. See [MCP.md](MCP.md);
+- the HTTP API: `GET /api/tools` returns `specs()` (all 25), and `POST /api/tenants/{tenant}/tools/{name}` calls `run_tool()`.
 
-The 23 tools at the time of writing (`GET /api/tools` lists the live set), 17 of them offered to agents (`ask` is offered, but the deterministic planner never calls it; it is there for an LLM planner and for outside clients). "W" means the tool may write.
+The 25 tools at the time of writing (`GET /api/tools` lists the live set), 17 of them offered to agents (`ask` is offered, but the deterministic planner never calls it; it is there for an LLM planner and for outside clients). "W" means the tool may write.
 
 | Tool | W | Used by | Named queries (RO = read-only) |
 |---|---|---|---|
@@ -350,7 +350,8 @@ The 23 tools at the time of writing (`GET /api/tools` lists the live set), 17 of
 | `incident_board` | | MCP / API (the loop calls the same `load_board()` directly) | `incident_board` |
 | `who_knows` | (W) | comms; MCP / API and the UI's Ask tab (company brain) | `who_knows` (RO: owning team 3, each authored change 2, each incident paged for 1, docs / tickets / chat written about the service 1 each, at most 3), `record_consult` (only with an `incident_id`). Registered as a write tool for that reason, so it takes the tenant lock and MCP does not mark it read-only. |
 | `change_story` | | MCP / API and the UI's Ask tab (company brain) | `change_story` (author, team, the ticket that requested it, the docs and chat that mention it with their authors, incidents it caused) |
-| `ask` | | MCP / API and the UI's Ask tab (company brain): a free-form question | `search_knowledge` (full-text, RO), `knowledge_context` (RO) |
+| `ask` | (W) | MCP / API and the UI's Ask tab (company brain): a free-form question; with a `user`, a conversation (3.13) | `session_context` (RO, with a `user`: the previous question's entities, for "it"), `link_entities` (RO), the intent route's queries (`ownership`, `who_knows`, `decisions_about`, `change_story`, `service_runbooks`, `service_incidents`, all RO; `user_questions` for "what did I ask about X"), `search_knowledge` (full-text, RO), `knowledge_context` (RO), `record_question` (only with a `user`, under the session's lock rather than the tenant's: it writes the asker's own memory and no company fact, so the tool stays registered as a read tool and reads never wait for it) |
+| `my_questions` | | MCP / API (company brain): a user's earlier questions by subject or session; never offered to agents | `link_entities` (only with `about`), `user_questions` (RO) |
 | `service_map` | | API `/graph`, MCP | `service_map` |
 | `record_change` | W | MCP / API (live events); re-recording an id moves the change (old `CHANGED` / `AUTHORED_BY` dropped) | `record_change` |
 | `record_anomaly` | W | MCP / API (live events) | `record_anomaly` |
@@ -392,7 +393,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 | FalkorDB down | redis `ConnectionError` | 503. `GET /api/health` still answers with `"falkordb": false`. The store connects on first use, so the app starts without the database. |
 | A write sent through `read()` | FalkorDB rejects `GRAPH.RO_QUERY` | exception. This is a programming error, and a test proves it is caught. |
 | Planner never finishes a role | `run_role` after 40 steps | the role hands off to the next one with the reason "step budget (40) used up", and the run still ends with an update. It guards against a looping LLM. |
-| LLM call fails, times out, or picks an unknown tool, bad args, a step already on the board, a hypothesis id that is not open on the board, or a malformed service or change id | LLM adapter (`openai_compat.guarded`) | falls back to the deterministic planner's decision for the same board, with the reason prefixed "LLM fallback: ...". The run continues. `incident_id` is always the current incident. Tools registered with `agent=False` (`resolve_incident` and the five event tools) are never offered to the model and are rejected if it names one (by the adapter, and again by the loop), and handoffs only go forward. |
+| LLM call fails, times out, or picks an unknown tool, bad args, a step already on the board, a hypothesis id that is not open on the board, or a malformed service or change id | LLM adapter (`openai_compat.guarded`) | falls back to the deterministic planner's decision for the same board, with the reason prefixed "LLM fallback: ...". The run continues. `incident_id` is always the current incident. Tools registered with `agent=False` (`resolve_incident`, `my_questions` and the five event tools) are never offered to the model and are rejected if it names one (by the adapter, and again by the loop), and handoffs only go forward. |
 | A tool raises on the chosen args anyway | `run_role` | the deterministic planner picks that step ("fallback after tool error") |
 | FalkorDB returns an error (timeout, "could not fork", a bad parameter) | redis `RedisError` | 503 with the first line of the error, capped. The query text is not echoed. |
 | NUL character in the path or body | API middleware | 422 |
@@ -408,6 +409,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 - Node ids are also guarded by the database: `ensure_schema` creates a unique constraint on `id` for every indexed label, so even a raw `CREATE` cannot make a second `Service` with an existing id (DATA_MODEL, "Indexes and constraints"). FalkorDB has no constraint on relationships, and 12 clients racing `MERGE` on one edge still produced a duplicate in the benchmark, so the lock stays around anything that writes edges. Its waiters poll every 10 ms (redis-py's default is 100 ms), which cut the slowest of 600 contended writes from 1.3 s to about 0.3 to 0.5 s.
 - `reset` replaces the tenant graph without a gap: `restore()` copies the pristine graph to a staging key (`restoring_<tenant>`) and `RENAME`s it over `tenant_<tenant>`. Redis renames atomically and FalkorDB moves the graph, with its indexes and constraints, to the new key, so a read during a reset never gets `Invalid graph operation on empty key` (delete-then-copy failed 189 of 1,344 reads in the first benchmark run). Numbers for all of this are in PERF.md, "Concurrency"; the claims are tests in `tests/integration/test_concurrency.py`.
 - Single write-tool calls through `POST .../tools/{name}` or MCP take the same lock (`services/respond.py::run_tool`); read tools never do. Inside an agent run the lock is already held, so the loop calls the registry directly (the Redis lock is not re-entrant).
+- Conversation memory has a lock of its own: `ask` with a `user` appends the `Question` under `lock(scope=<session id>)` (`oncall_brain:lock:<tenant>:session:...`, 30 s lease), never under the tenant lock, so an engineer's question never waits for an investigation and an investigation never waits for a question; two questions in one session queue for milliseconds. `test_concurrent_questions_in_one_session_get_consecutive_numbers_and_one_chain` has 8 askers write 40 questions into one session and finds `seq` 1 to 40 and one `FOLLOWS` chain. A per-incident lock (4.2) would use the same scoped lock.
 - Every write `MERGE`s on a stable id, so repeating it is harmless:
   - ingest: `load()` runs `ingest_*` on `team:`, `person:`, `svc:`, `chg:` and other ids, so loading twice gives the same graph (tested);
   - `open_incident` on `inc:<alert suffix>`, `add_hypotheses` on `hyp:<incident>:<change>`, `record_evidence` on `ev:...`, `post_update` on `msg:update:<incident>`;
@@ -426,7 +428,7 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 - A reset that would create a new tenant beyond `MAX_TENANTS` (default 20) is refused with 429. Existing tenants can always reset.
 - A `ToolContext` holds one tenant's repository, and a repository holds one graph handle. A tool has no way to reach another tenant's graph.
 - This is data isolation, not access control. Tenants have no owners: any caller who can reach the API or the MCP server can name any tenant. `API_TOKEN` guards the whole API or nothing, and MCP over HTTP has no token.
-- Memory is per tenant: incidents, runbooks and agent history stay in that tenant's graph.
+- Memory is per tenant: incidents, runbooks and agent history stay in that tenant's graph. Conversation memory is per tenant and per user on top: `ask` records each question for the `user` it is given in that user's `Session` (3.13); another user's session is never read. `user` is a parameter the caller supplies, not an identity the server verifies.
 
 ### 3.9 Explainability
 
@@ -470,6 +472,10 @@ starts "LLM fallback:". `services/respond.py::RunBudget` wraps the provider per 
 reports (`last_usage`) pass `LLM_RUN_TOKEN_CAP` (default 300k; a full run on Claude is 60-100k), the rules finish the
 incident and the trace says so. Tests, CI and no-key runs use the planner (`tests/conftest.py` pins it). Measured:
 Opus 5.5 and Sonnet 5.5 each drive all three acts with 0 fallbacks and the right cause (`docs/LLM_RUN.md`).
+
+### 3.13 Conversation memory
+
+`ask` is stateless unless it is given a `user`. With one, every question it answers becomes a `Question` node in that user's `Session` (`services/sessions.py`, `queries/sessions.cypher`): `ASKED` by the session, `FOLLOWS` the previous question, `ABOUT` the entities it linked, `ANSWERED_WITH` the sources it cited, with the answer text on the node. Before answering, `session_context` reads the previous question's `ABOUT` edges, and a pronoun in the new question ("it", "its", "they", "them", "he", "she", ...) is replaced by the entities it can stand for (a service, change, ticket or team for "it"; people or teams for "they"; people for "she"): "and who knows it?" after "who owns payments-gw" becomes "and who knows payments-gw?", and the answer opens with `Taking "it" as payments-gw, from your earlier question "who owns payments-gw".` The entity is linked `ABOUT` with `carried = true`, so the next follow-up can lean on it too. "What did I ask about payments-gw" is the `history` intent: `user_questions` walks `Session -> Question -> ABOUT` for that user, newest first, with each question's sources; `my_questions` is the same as a tool with a structured result for MCP clients, filtered by subject or session. A recall is not itself recorded. Sessions are per tenant and per user (`test_memory_is_per_user_and_per_session`): another user's "it" never resolves from your questions, and a tenant reset clears them with the rest of the memory. The write runs under the session's own lock (3.7), so a question never waits for an investigation. `tests/integration/test_sessions.py` (3 tests) and `tests/unit/test_sessions.py` (2) cover it. The Claude Code `ask` skill passes `--as person:...` with the session key `claude-code`; the UI's Ask tab can pass the engineer as `user` once it has a chip for it.
 
 ## 4. Scale and reliability
 

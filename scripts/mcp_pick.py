@@ -36,6 +36,7 @@ REQUESTS = [
     ("monitoring says payments p99 latency is 4s since 10:05, note that down.", {"record_anomaly"}),
     ("a new alert: refunds returns 5xx above 1%, on refunds. Register it.", {"raise_alert"}),
     ("what did the agents do on inc:checkout-latency so far?", {"incident_board"}),
+    ("I'm person:hana-costa. What did I ask you about payments-gw earlier?", {"my_questions", "ask"}),
 ]
 
 

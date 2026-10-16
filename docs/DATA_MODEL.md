@@ -52,18 +52,26 @@ flowchart LR
   Incident -->|LOGGED| AgentStep
   Incident -->|HAS_UPDATE| Message
   Message -->|"CITES (change, ticket, chat, doc, runbook, person)"| Change
+  Person -->|OPENED| Session
+  Session -->|ASKED| Question
+  Question -->|FOLLOWS| Question
+  Question -->|"ABOUT (matched, carried: service, team, person, change, ticket)"| Service
+  Question -->|"ANSWERED_WITH (rank: doc, ticket, chat, runbook, incident)"| Doc
   Meta["Meta (version, seed)"]
 
   classDef semantic fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b45
   classDef episodic fill:#fdecea,stroke:#b5523b,color:#45201a
   classDef procedural fill:#e6f4ea,stroke:#3d8b5a,color:#173a24
+  classDef conversational fill:#fff4e0,stroke:#b8860b,color:#3d2e00
   class Team,Person,Service,Change,Ticket,Doc,Alert,Anomaly semantic
   class Incident,Hypothesis,Evidence,AgentStep,Message episodic
   class Runbook procedural
+  class Session,Question conversational
 ```
 
 Blue nodes hold semantic facts about the company, red nodes hold episodic memory of incidents, and the green node
-holds procedural memory. `Message` is drawn red because the status updates the agents write are episodic. Seeded chat
+holds procedural memory, and the orange nodes hold conversational memory: what each engineer asked the company brain
+(`Session`, `Question`). `Message` is drawn red because the status updates the agents write are episodic. Seeded chat
 messages are semantic source material, like `Doc` and `Ticket`. `Meta` is not memory: it is one unconnected node that
 fingerprints the seed data.
 
@@ -91,6 +99,8 @@ semantic facts current after seeding.
 | `Ticket` | `id`, `title`, `text`, `at` | A change request or other work item (`CR-881`, `PAY-412`, `PLAT-233`, ...), which a status update can cite and `ask` can find (`title` and `text` are full-text indexed). | seed `ingest_tickets` |
 | `Doc` | `id`, `kind` (`postmortem` / `design` / `decision` / `runbook`), `title`, `text`, `at` | A written page: a postmortem, a design note, a decision record (ADR) or a runbook page. Company-brain source material; `title` and `text` are full-text indexed for `ask`. Not the same as `Runbook`, which is procedural memory the agents act on. | seed `ingest_docs`, `ingest_doc_links` |
 | `AgentStep` | `id`, `seq`, `role` (`triage` / `investigator` / `comms`), `tool` (tool name or `handoff`), `target`, `reason`, `summary`, `rows`, `ms`, `writes` | One step of one agent: what it did, why, and what it cost. Handoffs between roles are steps too. | agent loop (`agents/loop.record`) → `log_step` |
+| `Session` | `id`, `user` (the asker as given to `ask`: a Person id, a handle or any stable name, lowercased), `key` (the conversation key, default `default`), `started_at`, `last_at` | One engineer's conversation with the company brain. A user can have several (a chat, a terminal); a pronoun is read within one. Created on first use; the Person `OPENED` it when the user is one. | `ask` (with a `user`) → `record_question` |
+| `Question` | `id`, `seq` (position in the session), `text` (as asked), `resolved` (the question with its pronoun replaced, when one was; absent otherwise), `intent` (the `ask` route that answered: `owner`, `expert`, `why`, `how`, `happened` or `search`), `at`, `summary`, `answer` | One question `ask` answered for a named user, with the answer it gave. A recall ("what did I ask about X") is not recorded. | `ask` (with a `user`) → `record_question` |
 | `Meta` | `id` (always `meta`), `version` (fingerprint of the generated data), `seed` | Which generator built this graph. `reset()` restores the pristine copy only if its `version` matches the current generator run with this `seed`, else it re-seeds with the same seed. | seed `ingest_meta` |
 
 ## Relationships
@@ -126,6 +136,11 @@ semantic facts current after seeding.
 | `(Incident)-[:LOGGED]->(AgentStep)` | | The incident's agent history, in `seq` order. | agent loop → `log_step` |
 | `(Incident)-[:HAS_UPDATE]->(Message)` | | The status update written for the incident (stored here; not sent anywhere). | `post_update` → `post_update` |
 | `(Message)-[:CITES]->(Change\|Ticket\|Message\|Doc\|Runbook\|Person)` | | Every claim in a status update links to its source node, including the person it says to ask (act 1 cites `chg:pgw-pool-1`, `ticket:CR-881`, `msg:pay-deploys-1`, `doc:cost-review-pgw` and `person:sana-brandt`). A rewrite drops stale citations. | `post_update` → `post_update` |
+| `(Person)-[:OPENED]->(Session)` | | The engineer behind a session, when the `user` given to `ask` is a Person id or handle in the graph; a session under any other name has no edge and still works. | `ask` → `record_question` |
+| `(Session)-[:ASKED]->(Question)` | | The session's questions; `Question.seq` orders them. | `ask` → `record_question` |
+| `(Question)-[:FOLLOWS]->(Question)` | | The question asked just before this one in the session: the conversation is a chain the graph can walk. | `ask` → `record_question` |
+| `(Question)-[:ABOUT]->(Service\|Team\|Person\|Change\|Ticket)` | `matched`, `carried` | What the question was about: the entities `ask` linked in its text (`carried` false), or read a pronoun as (`carried` true: "it" in "and who knows it?" after "who owns payments-gw"). `session_context` reads the latest question's `ABOUT` edges to resolve the next pronoun; `user_questions` filters on them for "what did I ask about payments-gw". | `ask` → `record_question` |
+| `(Question)-[:ANSWERED_WITH]->(Doc\|Ticket\|Message\|Runbook\|Incident)` | `rank` | The sources the answer cited, in the order it listed them. | `ask` → `record_question` |
 
 ## Ids
 
@@ -147,13 +162,15 @@ Ids are stable and human-readable, so writes can `MERGE` on them and a trace can
 | Ticket | `ticket:<key>` | `ticket:CR-881`, `ticket:PAY-412` |
 | Doc | `doc:<slug>`; a past incident's postmortem is `doc:pm-<incident number>` | `doc:cost-review-pgw`, `doc:adr-012`, `doc:pm-0911` |
 | AgentStep | `<incident id>#<seq>` | `inc:refunds-latency#7` |
+| Session | `session:<user without the person: or @ prefix>:<key>` | `session:hana-costa:default`, `session:hana.costa:claude-code` |
+| Question | `<session id>#<seq>` | `session:hana-costa:default#2` |
 | Meta | `meta` (one per graph) | `meta` |
 
 ## Indexes and constraints
 
 `FalkorRepository.ensure_schema` (run by every seed) creates one range index per label on `id`:
 `CREATE INDEX FOR (n:<Label>) ON (n.id)` for Team, Person, Service, Change, Alert, Anomaly, Incident, Hypothesis,
-Evidence, Runbook, Message, Ticket, Doc and AgentStep (`repository.INDEXED_LABELS`). The single `Meta` node is not
+Evidence, Runbook, Message, Ticket, Doc, AgentStep, Session and Question (`repository.INDEXED_LABELS`). The single `Meta` node is not
 indexed. The agent's queries anchor on an id first, for example `(:Incident {id: $incident_id})` or
 `(:Service {id: $service})`. The index finds the start node, and the traversal then runs over adjacency.
 
@@ -178,8 +195,10 @@ restore so a copy made before the constraints existed gets them
 (`test_every_label_has_a_unique_id_constraint_that_reset_keeps_and_the_database_enforces`). FalkorDB has no
 constraint on relationships, and `MERGE` on an edge is not safe under concurrency (two writers can both miss it and
 both create it; measured in the same benchmark), so every agent run and write tool holds a per-tenant lock (see
-ARCHITECTURE 3.7). The one `CREATE` is `log_step`: agent steps are an append-only log whose `seq` is the incident's
-current step count + 1, and the lock makes the running agent its only writer.
+ARCHITECTURE 3.7). The `CREATE`s are `log_step` and `record_question`: append-only logs whose `seq` is the
+current count + 1, each with one writer at a time (the tenant lock for agent steps, the session's own lock for
+questions, see ARCHITECTURE 3.7), and the unique constraints on `AgentStep.id` and `Question.id` are the backstop
+should a writer ever skip the lock.
 
 ## Memory, mapped to the model
 
@@ -188,6 +207,7 @@ current step count + 1, and the lock makes the running agent its only writer.
 | **Episodic**: what happened | `Incident` with `TRIGGERED_BY`, `CORRELATED_WITH`, `SHARED_UPSTREAM`, `IMPACTS`, `PAGED`, `CONSULTED`, `HAS_HYPOTHESIS` → `Hypothesis` ← `SUPPORTS`/`REFUTES` `Evidence`, `CAUSED_BY` → `Change`, `HAS_UPDATE`, and the `LOGGED` → `AgentStep` history; `RECALLS` links incidents to each other | by the agents during the incident, and by `resolve_incident` when a human confirms the cause | `recall_similar` finds past incidents by structure: their cause service is on today's live dependency path. Text similarity is not used. `incident_board` replays the board for the planner. |
 | **Semantic**: how the company works | `Team`, `Person`, `Service`, `MEMBER_OF`, `OWNS`, `DEPENDS_ON {valid_from, valid_to}`, `ON_CALL {start, end}`, `Change` + `CHANGED` / `AUTHORED_BY`, sources (`Doc`, `Ticket`, chat `Message`, linked by `REQUESTED`, `MENTIONS`, `DECIDES`, `SUPERSEDES`, `AUTHORED_BY`) | by seed / ingest, then kept current by the event tools (docs, tickets and chat are seeded only; there is no event tool for them yet) | Every traversal filters time-bounded edges to the alert time, so the graph answers "who depended on what, and who was on call, at that moment". `ask`, `who_knows` and `change_story` answer company-brain questions with sources; `SUPERSEDES` says which doc is current. |
 | **Procedural**: what fixes it | `Runbook {kind, steps, uses, successes}` + `FOR_SERVICE` + `FIXED_WITH` | `resolve_incident` learns `rb:<service>:<kind>` from a confirmed fix, or adds 1 to `uses` and `successes` if it already exists. `record_evidence` adds 1 to `uses` when a check refutes the runbook's suggestion, so its confidence drops. | `memory_suspects` follows `RECALLS` → `FIXED_WITH` → `Runbook` → `FOR_SERVICE` and suspects in-window changes of the runbook's kind on that service, most trusted runbook first. `update_facts` adds the runbook memory used for the cause (`h.runbook`), or the one the incident was `FIXED_WITH`, to the status update as its "Next action". A runbook that only shares the service and change kind is not suggested: it may fix a different failure. |
+| **Conversational**: what each engineer asked | `Session` + `Question` per user and conversation, `OPENED`, `ASKED`, `FOLLOWS`, `ABOUT {carried}`, `ANSWERED_WITH {rank}` | `ask`, when given a `user`, appends every question it answers (`record_question`) with the entities it linked, the sources it cited and the answer. Per tenant and per user: another user's questions are never read, and a tenant reset clears them with the rest of the memory. | `session_context` gives the previous question's entities, so "and who is on call for it?" is read as "... for payments-gw" and the answer says so. `user_questions` answers "what did I ask about payments-gw" (the `ask` history route and the `my_questions` tool), newest first, with each question's sources. |
 
 Act 2 shows the three kinds working together. The refunds alert recalls the checkout incident because its cause
 service (`payments-gw`) is still on refunds' live dependency path (semantic). The runbook that fixed it is for config

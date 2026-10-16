@@ -2,8 +2,8 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 23 registry tools plus two use-case tools,
-26 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 25 registry tools plus two use-case tools,
+27 in all.
 
 | Tool | What it does |
 |---|---|
@@ -11,7 +11,7 @@ the MCP Inspector or any other MCP client can call the tools directly: 23 regist
 | `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, `co_causes`, ruled-out suspects with their tags, both no-graph baselines, who was paged, the status update text, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. The same-incident memory ablation (`?compare=memory`) is on the HTTP endpoint only. |
 | agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` (writes the update for #incidents onto the incident; nothing is sent to Slack) |
 | human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
-| company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; read-only, no LLM), `who_knows`, `change_story` |
+| company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; no LLM. With a `user` and a `session` key the question is remembered in that person's session in the graph, a follow-up can say "it" or "them", and "what did I ask about payments-gw" is answered from it), `my_questions` (the same recall as a tool: a user's earlier questions, newest first, with what each was about and the sources it cited, by subject or session), `who_knows`, `change_story` |
 | read tools | `dependency_path`, `service_map`, `incident_board` |
 | live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
@@ -52,7 +52,7 @@ and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the
 | Prompt | Arguments | Expands to |
 |---|---|---|
 | `work_alert` | `tenant`, `alert_id` | "Call respond_to_alert ... report the likely cause with its confidence, who is paged, the fix, what was ruled out, the update; then offer resolve_incident" |
-| `company_question` | `tenant`, `question` | "Call ask ... lead with the answer, then the sources; who_knows / change_story when they add something" |
+| `company_question` | `tenant`, `question`, optional `user` and `session` | "Call ask (with user and session when given, so the question is remembered and a follow-up can say 'it') ... lead with the answer, then the sources; who_knows / change_story when they add something" |
 
 `python -m scripts.mcp_pick` gives Claude only what an MCP client gets (instructions + tool list) and 14 plain
 requests ("who owns kafka?", "we just deployed cart v3.2.0, record that", "inc:checkout-latency is confirmed:
@@ -100,13 +100,13 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 | `plugin/bin/oncall-brain-mcp` | Launcher: runs `<checkout>/.venv/bin/python -m oncall_brain.mcp_server` from the checkout (the plugin's parent directory, or `$ONCALL_BRAIN_HOME`), so `.env` is found. Arguments pass through (`--http --port 8001`). |
 | `plugin/skills/incident/SKILL.md` | `/oncall-brain:incident <alert_id> [tenant]`: the `work_alert` flow, with the heads-up and the confirm step. |
 | `plugin/skills/who-owns/SKILL.md` | `/oncall-brain:who-owns <service> [tenant]`: `who_knows`, then `ask`, then the rotation. |
-| `plugin/skills/ask/SKILL.md` | `/oncall-brain:ask <question> [--tenant t]`: the `company_question` flow, plus `change_story` / `dependency_path` when they add something. |
+| `plugin/skills/ask/SKILL.md` | `/oncall-brain:ask <question> [--tenant t] [--as person:...]`: the `company_question` flow, with the asker's session when `--as` is given (a follow-up can say "it"; "what did I ask about X" recalls), plus `change_story` / `dependency_path` when they add something. |
 | `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace, so `/plugin install oncall-brain --marketplace <owner>/<repo>` works once the repo is on GitHub. |
 
 From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 26 tools, 2 prompts, and the who-owns skill's three calls on a
+the server through the launcher with an MCP client: 27 tools, 2 prompts, and the who-owns skill's three calls on a
 freshly reset tenant, every answer carrying its Cypher.
 
 ## Claude Desktop
@@ -179,7 +179,7 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
 
 ## Example: ask the company brain
 
-`ask` reads only (two `GRAPH.RO_QUERY` calls), so it needs no incident. Response from a freshly reset tenant, trimmed:
+`ask` reads only (two `GRAPH.RO_QUERY` calls; given a `user` it also appends the question to that person's session), so it needs no incident. Response from a freshly reset tenant, trimmed:
 
 ```text
 > ask {"tenant": "demo", "question": "Why was the payments gateway pool lowered?"}

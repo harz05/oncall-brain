@@ -16,7 +16,7 @@ PREFIX, PRISTINE, RESTORING, SCRATCH = "tenant_", "pristine_", "restoring_", "sc
 # Index every label we MERGE or look up by id, and give each a UNIQUE constraint on `id` (ensure_schema), so the
 # database itself refuses a second node with an id that exists. FalkorDB raises if an index already exists; that's fine.
 INDEXED_LABELS = ["Team", "Person", "Service", "Change", "Alert", "Anomaly", "Incident", "Hypothesis",
-                  "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep"]
+                  "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep", "Session", "Question"]
 TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window filters scan these
 FULLTEXT = {"Doc": ["title", "text"], "Ticket": ["title", "text"], "Message": ["text"]}  # what `ask` searches
 
@@ -44,8 +44,11 @@ class FalkorRepository:
         if self._graph.name in self._db.list_graphs():
             self._graph.delete()
 
-    def lock(self):
+    def lock(self, scope: str = ""):
         """One agent run per tenant at a time, across processes (API, MCP, scripts): a Redis lock next to the graph.
+        With a scope, a narrower lock beside it (`oncall_brain:lock:<tenant>:<scope>`, 30 s lease) for a part of the
+        graph no agent run touches, such as one engineer's conversation session: its writers queue on it, never on
+        the investigation.
         Each write query commits atomically, but MERGE is not a uniqueness guarantee under concurrency: in our test
         (12 clients x 100 concurrent `MERGE (:N {id:7})` on an unconstrained label) FalkorDB created 2 nodes. Node ids
         are now guarded by unique constraints (`_ensure_unique_ids`), but FalkorDB has no edge constraint, and
@@ -55,8 +58,8 @@ class FalkorRepository:
         # The lease outlives any sane run (an LLM planner can take minutes); a crashed holder frees it after 15 min.
         # Waiters poll every 10 ms, not redis-py's default 100 ms: with 8 writers on one tenant the slowest write
         # fell from 1.3 s to 0.3 s and p99 from 400 ms to 225 ms (scripts/concurrency.py, PERF.md "Concurrency").
-        return self._db.connection.lock(f"oncall_brain:lock:{self.tenant}", timeout=900, blocking_timeout=120,
-                                        sleep=0.01)
+        key = f"oncall_brain:lock:{self.tenant}" + (f":{scope}" if scope else "")
+        return self._db.connection.lock(key, timeout=30 if scope else 900, blocking_timeout=120, sleep=0.01)
 
     def _run(self, name: str, params: dict[str, Any], readonly: bool) -> QueryRun:
         q = queries.get(name)
