@@ -1,9 +1,16 @@
 // name: path_suspects_reference
-// purpose: Reference implementation (the pre-rewrite path_suspects, kept verbatim): used only by tests/integration/test_query_equivalence.py and scripts/bench.py, never by the product.
-MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
+// purpose: Reference implementation (the pre-rewrite, path-enumerating path_suspects, plus the storm rule the rewrite has: a change on a folded alert's live paths counts too, at the origin's distance when the origin reaches it, else at the nearest folded alert's): used only by tests/integration/test_query_equivalence.py and scripts/bench.py, never by the product.
+MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o0:Service)
+OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)
+WITH a, o0, collect(DISTINCT cs) AS folded
+WITH a, o0, [o0] + folded AS origins
+UNWIND origins AS o
+WITH DISTINCT a, o0, o
 MATCH p = (o)-[:DEPENDS_ON*0..6]->(s:Service)
 WHERE all(r IN relationships(p) WHERE r.valid_from <= a.at AND (r.valid_to IS NULL OR r.valid_to > a.at))
-WITH a, s, min(length(p)) AS hops
+WITH a, o0, o, s, min(length(p)) AS hops
+WITH a, s, min(CASE WHEN o = o0 THEN hops END) AS own, min(hops) AS nearest
+WITH a, s, coalesce(own, nearest) AS hops
 MATCH (c:Change)-[:CHANGED]->(s)
 WHERE c.at >= a.at - $window AND c.at <= a.at
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops

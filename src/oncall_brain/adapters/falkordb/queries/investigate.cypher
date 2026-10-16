@@ -60,13 +60,17 @@ RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, hops,
 ORDER BY toFloat(successes) / uses DESC, at DESC
 
 // name: path_suspects
-// purpose: Multi-hop suspects: every change in the alert window on a service the alerting service depends on at alert time, nearest first. Starts from the few in-window changes (Change.at range index), not from every dependency path.
-MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
-WITH o, a.at AS alert_at
+// purpose: Multi-hop suspects: every change in the alert window on a service that the alerting service, or any alerting service folded into the incident (CORRELATED_WITH), depends on at alert time, nearest alerting service first. Starts from the few in-window changes (Change.at range index), not from every dependency path.
+MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o0:Service)
+OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)
+WITH o0, a.at AS alert_at, collect(DISTINCT cs) AS folded
+WITH o0, alert_at, [o0] + folded AS origins
 MATCH (c:Change)
 WHERE c.at >= alert_at - $window AND c.at <= alert_at
 MATCH (c)-[:CHANGED]->(s:Service)
-WITH o, s, alert_at, collect(c) AS changes
+WITH o0, origins, s, alert_at, collect(c) AS changes
+UNWIND origins AS o
+WITH DISTINCT o0, o, s, alert_at, changes
 CALL {
   // Live hops o -> s: the fewest DEPENDS_ON hops (0..6) over edges valid at alert_at, without listing paths.
   // shortestPath ignores validity, so it is only a lower bound: kept when every edge on it is live at alert_at.
@@ -84,6 +88,10 @@ CALL {
   WHERE hops IS NOT NULL
   RETURN hops
 }
+// A change counts once: at its distance from the alert that opened the incident when that alert reaches it (so a
+// storm never reorders the origin's own suspects), else from the nearest folded alert.
+WITH s, changes, min(CASE WHEN o = o0 THEN hops END) AS own, min(hops) AS nearest
+WITH s, changes, coalesce(own, nearest) AS hops
 UNWIND changes AS c
 RETURN c.id AS change, s.id AS service, c.kind AS kind, c.at AS at, c.summary AS summary, hops
 ORDER BY hops, at DESC, change

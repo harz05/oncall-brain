@@ -3,7 +3,7 @@
 
 import secrets
 import time
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -189,10 +189,11 @@ def page_on_call(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
 
 @tool(writes=True)
 def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Alert storm: of the alerts from the last 15 minutes, fold into this incident the ones that share with it an
-    upstream service which went red, find the services all of them depend on (shared upstream) and rank those by
-    convergence (fewest total hops from the alerting services). Suspects there are checked first, and each supported
-    suspect records which alerting services it explains."""
+    """Alert storm: of the alerts from the last 15 minutes, fold into this incident the ones connected to it through
+    upstream services that went red (algo.WCC on a projection of the alerting services and their red upstreams, so
+    chains count and the other components are reported as separate storms), find the services all of them depend on
+    (shared upstream) and rank those by convergence (fewest total hops from the alerting services). Suspects there are
+    checked first, and each supported suspect records which alerting services it explains."""
     head, qs = _head(ctx, a.incident_id)
     storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, window=STORM_WINDOW)
     qs.append(storm)
@@ -209,15 +210,29 @@ def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
         cover.setdefault(r["service"], {})[r["alerting"]] = r["hops"]
         if r["red"]:
             red.add(r["service"])
-    # Related = shares with this alert an upstream service that actually went red (an alert on this alert's own service
-    # counts, as long as something went red). Alerts that only share a quiet piece of infrastructure (a cache everyone
-    # uses) stay separate incidents. Related alerts need not have one cause: each suspect later records which alerting
-    # services it explains, and conclude keeps co-causes instead of ruling them out.
-    related = {s for u in red if origin in cover[u] for s in cover[u]}
-    alerts = [r for r in storm.rows if r["service"] in related]
+    # Which alerts belong together is the algorithm's call: the alerting services and the upstream services that went
+    # red are projected into a scratch graph, joined by "depends on it at alert time", and algo.WCC splits the storm
+    # into components. The origin's component is this incident, chains included (search and reporting share no red
+    # service, but each shares one with checkout: one storm); the other components are separate storms. An alert on
+    # this alert's own service counts, as long as something went red; alerts that only share a quiet piece of
+    # infrastructure (a cache everyone uses) are not connected at all. Related alerts need not have one cause: each
+    # suspect later records which alerting services it explains, and conclude keeps co-causes instead of ruling
+    # them out.
+    alerting = {origin, *(r["service"] for r in storm.rows)}
+    edges = [{"alerting": s, "red": u} for u in sorted(red) for s in sorted(cover[u]) if s in alerting]
+    component = _storm_components(ctx, edges, qs) if edges else {}
+    mine = component.get(origin)
+    related = {s for s in alerting if component.get(s) == mine} if mine is not None else set()
+    others: dict[Any, list[str]] = {}
+    for s in sorted(alerting - related - {origin}):
+        others.setdefault(component.get(s, s), []).append(s)
+    separate = sorted(others.values())
+    alerts = [r for r in storm.rows if r["service"] in related]  # another alert on the origin's own service counts
     if not alerts:
         return ToolOutput(summary=f"{len(storm.rows)} other alert(s) in the window share no upstream service that "
-                          "went red; investigating this one on its own", data={"alerts": [], "shared": []}, queries=qs)
+                          f"went red with this one, directly or through another alert ({len(separate)} separate "
+                          f"storm{'s' * (len(separate) != 1)}); investigating this one on its own",
+                          data={"alerts": [], "shared": [], "separate": separate}, queries=qs)
     group = {origin, *(r["service"] for r in alerts)}
     shared = sorted((u for u, c in cover.items() if group <= c.keys()),
                     key=lambda u: (sum(cover[u][s] for s in group), u))
@@ -229,10 +244,27 @@ def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     summary = (f"{len(alerts) + 1} related alerts on {len(group)} service{'s' * (len(group) > 1)} ({names})" + (
         f"; {len(ranked)} upstream services are shared by all of them, nearest to all first: "
         f"{', '.join(r['service'].removeprefix('svc:') for r in ranked[:3])}" if ranked and len(group) > 1
-        else "; no single service sits upstream of all of them" if len(group) > 1 else ""))
+        else "; no single service sits upstream of all of them" if len(group) > 1 else "") + (
+        f"; {sum(map(len, separate))} other alert(s) form {len(separate)} separate storm{'s' * (len(separate) != 1)}"
+        if separate else ""))
     hl = Highlight(nodes=sorted(group) + [r["service"] for r in ranked],
                    edges=[(a.incident_id, r["alert"], "CORRELATED_WITH") for r in alerts])
-    return ToolOutput(summary=summary, data={"alerts": alerts, "shared": ranked}, queries=qs, highlight=hl)
+    return ToolOutput(summary=summary, data={"alerts": alerts, "shared": ranked, "separate": separate}, queries=qs,
+                      highlight=hl)
+
+
+def _storm_components(ctx: ToolContext, edges: list[dict], qs: list) -> dict[str, Any]:
+    """Component id per alerting and red service: the storm projection (alerting -> red upstream it depends on) goes
+    into a scratch graph (`scratch_<tenant>_storm_<nonce>`), `algo.WCC` runs there, and the projection is dropped.
+    Every step is in the trace."""
+    scratch = ctx.repo.scratch("storm_" + secrets.token_hex(4))
+    try:
+        qs.append(scratch.write("project_storm", edges=edges))
+        parts = scratch.read("storm_components")
+        qs.append(parts)
+    finally:
+        scratch.drop_graph()
+    return {r["service"]: r["component"] for r in parts.rows}
 
 
 @tool(writes=True)
@@ -311,13 +343,29 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         raise ValueError(f"unknown hypothesis {a.hypothesis_id!r}")
     f = fq.rows[0]
     qs = [fq]
-    live = ctx.repo.read("live_paths", origin=f["origin"], target=f["service"], at=f["at"])
+    origin = f["origin"]
+    live = ctx.repo.read("live_paths", origin=origin, target=f["service"], at=f["at"])
     qs.append(live)
     paths = [r["path"] for r in live.rows]
+    others = [x for x in f["storm_services"] if x != f["origin"]]  # other alerting services folded into this incident
+    unexplained: list[str] = []
+    if others:  # alert storm: which of the other alerting services can this change reach?
+        sq = ctx.repo.read("storm_unexplained", services=others, target=f["service"], at=f["at"])
+        qs.append(sq)
+        unexplained = [r["service"] for r in sq.rows]
+    reach = [x for x in others if x not in unexplained]
+    if not paths and reach:
+        # No live path from the alert that opened the incident, but another alerting service in the storm (WCC put
+        # them together through a shared red upstream) does depend on the changed service: judge the suspect from
+        # that alert instead of refuting it. If it holds, it is a co-cause that explains those alerts, not this one.
+        origin = reach[0]
+        live = ctx.repo.read("live_paths", origin=origin, target=f["service"], at=f["at"])
+        qs.append(live)
+        paths = [r["path"] for r in live.rows]
     any_path: list[str] = []
     not_yet_live = False
     if not paths:
-        anyq = ctx.repo.read("any_path", origin=f["origin"], target=f["service"])
+        anyq = ctx.repo.read("any_path", origin=origin, target=f["service"])
         qs.append(anyq)
         any_path = anyq.rows[0]["path"] if anyq.rows else []
         not_yet_live = bool(anyq.rows) and any(t > f["at"] for t in anyq.rows[0]["live_from"] if t is not None)
@@ -329,13 +377,7 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         anomalous = {r["service"] for r in an.rows}
     # The symptom may have travelled any live path; judge the one it lit up most (shortest on ties).
     live_path = min(paths, key=lambda p: (sum(s not in anomalous for s in p[1:-1]), len(p))) if paths else []
-    unexplained: list[str] = []
-    others = [x for x in f["storm_services"] if x != f["origin"]]  # other alerting services folded into this incident
-    if paths and others:  # alert storm: which of the other alerting services can this change reach?
-        sq = ctx.repo.read("storm_unexplained", services=others, target=f["service"], at=f["at"])
-        qs.append(sq)
-        unexplained = [r["service"] for r in sq.rows]
-    explained = sorted({f["origin"], *others} - set(unexplained)) if paths else []
+    explained = sorted(({f["origin"]} if origin == f["origin"] else set()) | set(reach)) if paths else []
     onset = next((r["first_at"] for r in an.rows if r["service"] == f["service"]), None) if paths else None
     red_before = None
     if paths:  # was the changed service already failing before this change landed? (a cascade victim)
@@ -343,14 +385,15 @@ def check_hypothesis(ctx: ToolContext, a: HypothesisArgs) -> ToolOutput:
         qs.append(rq)
         red_before = rq.rows[0]["at"] if rq.rows else None
     facts = CheckFacts(
-        change_service=f["service"], alert_service=f["origin"],
+        change_service=f["service"], alert_service=origin,
         rolled_back_before_alert=bool(f["rolled_back_at"]) and f["rolled_back_at"] <= f["at"],
         live_path=live_path, any_path=any_path, anomalous=anomalous, not_yet_live=not_yet_live)
     v = judge(facts)
     reason = v.reason
     if v.verdict == "supports" and others:
+        not_these = sorted({f["origin"], *others} - set(explained))
         reason += f"; explains {len(explained)} of {len(others) + 1} alerting services" + (
-            f" (not {', '.join(x.removeprefix('svc:') for x in unexplained)})" if unexplained else "")
+            f" (not {', '.join(x.removeprefix('svc:') for x in not_these)})" if not_these else "")
     qs.append(ctx.repo.write("record_evidence", hypothesis_id=a.hypothesis_id,
                              evidence_id="ev:" + a.hypothesis_id.removeprefix("hyp:"), verdict=v.verdict,
                              reason=reason, tag=v.tag, path=live_path or any_path, at=f["at"], explained=explained,

@@ -114,3 +114,39 @@ def test_concurrent_responders_to_one_storm_make_one_incident(store, tenant):
     assert incidents[0][0] == 1
     teams = [p["team_name"] for p in o["paged"]]
     assert len(teams) == len(set(teams))  # one page per team
+
+
+def test_a_chained_storm_is_one_incident_by_wcc_and_the_far_cause_is_a_co_cause(storm):
+    """search and reporting share no red service, but each shares one with checkout (redis-cache, kafka): WCC on the
+    projection puts the three alerts in one incident; legacy-billing, red on its own, is a separate storm. The
+    investigation follows: suspects come from every folded alert, and kafka-x, unreachable from search, is judged
+    from reporting and kept as the co-cause that alone explains it."""
+    repo, s = storm
+    s.change("redis-cache", 40, "redis-x", "config"), s.red("redis-cache", 35)
+    s.change("kafka", 38, "kafka-x"), s.red("kafka", 33), s.red("analytics", 30)
+    s.red("search", 12), s.red("checkout", 10), s.red("reporting", 9)
+    s.change("legacy-billing", 30, "lb-x"), s.red("legacy-billing", 20, "errors")
+    origin = s.alert("search", 8)
+    s.alert("checkout", 6), s.alert("reporting", 5)
+    lb = s.alert("legacy-billing", 4, "errors")
+    run = respond(repo, origin, MockProvider())
+    o = run["outcome"]
+    assert {a["service"] for a in o["storm"]["alerts"]} == {"svc:checkout", "svc:reporting"}
+    step = next(x for x in run["steps"] if x.tool == "correlate_alerts")
+    assert [q.name for q in step.queries][-4:] == ["storm_upstream", "project_storm", "storm_components",
+                                                   "record_correlation"]
+    assert step.summary.endswith("; 1 other alert(s) form 1 separate storm")
+    assert o["root_cause"]["change"] == "chg:redis-x" and o["root_cause"]["explained"] == ["svc:checkout", "svc:search"]
+    assert [(c["change"], c["reason"]) for c in o["co_causes"]] == [("chg:kafka-x", "also needed: it alone explains "
+                                                                                    "reporting")]
+    assert [(r["change"], r["tag"]) for r in o["refuted"]] == [("chg:lb-x", "no dependency path")]
+    assert o["confidence"]["why"] == ("it explains 2 of 3 alerting services; 1 other change also needed to explain "
+                                      "every alert")
+    update = repo.read("incident_update", incident_id=run["incident_id"]).rows[0]["text"]
+    assert "Also contributing: kafka-x on kafka (it alone explains reporting)" in update
+    # Seen from legacy-billing's alert, the other three are one separate storm and it is investigated on its own.
+    inc = call("open_incident", s.ctx, {"alert_id": lb}).data["incident"]
+    out = call("correlate_alerts", s.ctx, {"incident_id": inc})
+    assert out.data == {"alerts": [], "shared": [], "separate": [["svc:checkout", "svc:reporting", "svc:search"]]}
+    assert out.summary.startswith("3 other alert(s) in the window share no upstream service that went red with this "
+                                  "one, directly or through another alert (1 separate storm)")

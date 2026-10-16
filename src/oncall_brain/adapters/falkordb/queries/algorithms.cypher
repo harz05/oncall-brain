@@ -51,3 +51,17 @@ RETURN count(w) AS warned
 MATCH (i:Incident {id: $incident_id})-[w:WARNED]->(p:Person)-[:MEMBER_OF]->(t:Team)
 RETURN p.id AS person, p.name AS name, p.handle AS handle, t.name AS team, w.for_service AS service, w.rank AS rank
 ORDER BY w.rank, p.id
+
+// name: project_storm
+// purpose: Build the storm projection on the scratch graph scratch_<tenant>_storm_<nonce>: a node per alerting service and per upstream service that went red in the window, and a VIA_RED edge from each alerting service to each red upstream it depended on at alert time (storm_upstream rows). Which alerts belong together is then algo.WCC's call (storm_components).
+UNWIND $edges AS e
+MERGE (a:Service {id: e.alerting})
+MERGE (u:Service {id: e.red})
+MERGE (a)-[:VIA_RED]->(u)
+RETURN count(*) AS edges
+
+// name: storm_components
+// purpose: Weakly connected components of the storm projection: alerting services joined through the red upstreams they depend on, directly or through other alerting services (a chain search - redis-cache - checkout - kafka - reporting is one component). The origin alert's component is the incident; the other components are separate storms.
+CALL algo.WCC({nodeLabels: ['Service'], relationshipTypes: ['VIA_RED']}) YIELD node, componentId
+RETURN node.id AS service, componentId AS component
+ORDER BY component, service

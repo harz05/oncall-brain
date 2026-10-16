@@ -2,7 +2,7 @@
 
 Written by the cloud helper from snapshot `f98571a` (2026-10-16, 04:20 IST), run from a clean checkout on Ubuntu 24.04
 with `falkordblite` 0.10 (`make setup` 18 s, `make seed` 0.7 s, `make demo` DEMO OK in 2.2 s, `make test` 167 passed in
-52 s, `make lint` clean; re-checked after each helper patch, last from `34ee6b5` plus rival-007 and rival-008: 197 passed in 75 s, DEMO OK). One row per item the judges' pages name. Every row points at code a judge can open.
+52 s, `make lint` clean; re-checked after each helper patch, last from `34ee6b5` plus rival-007, rival-008 and rival-009: 198 passed in 77 s, DEMO OK). One row per item the judges' pages name. Every row points at code a judge can open.
 
 Scores: **0** absent. **1** present but thin, or not something the agents decide with. **2** real and tested, with a gap
 a judge would notice. **3** strong, with evidence in a tool, a `.cypher` statement, a test and the UI.
@@ -27,7 +27,7 @@ Ask the brain chat and the Connect page.
 | # | Item | Score | Evidence | Gap |
 |---|---|---|---|---|
 | T1-1 | Multi-hop reasoning | 3 | `path_suspects` (0..6 hops, `valid_from`/`valid_to` per edge), `check_hypothesis` (live path + anomaly propagation along it, `verdict.judge`), cascade rule in `verdict.leading`; eval 186/200 vs 134 (anomaly-aware log), 57 (keyword), 0 (newest change), `docs/EVAL.md`; `tests/integration/test_causality.py` | None that a judge would miss. |
-| T1-2 | Graph queries and algorithms as agent tools | 2 | Queries: 96 named statements, `shortestPath` in `WITH` (`live_paths`, `any_path`, `recall_similar`), breadth-first closures with `CALL {}`. Algorithm: `algo.pageRank` as criticality (`algorithms.cypher: criticality`) on a point-in-time projection of the live `DEPENDS_ON` edges (`topology_at`, `project_topology` into `scratch_<tenant>_topology_<nonce>`); `blast_radius` orders the impacted services by it (tier first) and records `IMPACTS.rank`; comms' `warn_owners` sends the heads-up to the top-ranked unpaged teams (`WARNED`, the update's "Heads-up" line); every query in the trace; `tests/integration/test_algorithms.py` (retired and future edges add no rank; heads-up order, paged teams skipped, idempotent). ARCHITECTURE 3.10 | One algorithm, one decision. The storm split (`correlate_alerts`) is still pairwise Python over `storm_upstream` rows; `algo.WCC` on the same kind of projection (alerting services plus their red upstreams) would make incident membership an algorithm's call and handle chained storms transitively. `algo.betweenness` stays out (sampled). Local runs FalkorDB v4.22.0 and this was verified on 4.18.3: `algo.pageRank('Service', 'DEPENDS_ON')` is the two-argument form, re-run `make test` there. |
+| T1-2 | Graph queries and algorithms as agent tools | 3 | Queries: 98 named statements, `shortestPath` in `WITH` (`live_paths`, `any_path`, `recall_similar`), breadth-first closures with `CALL {}`. Algorithm: `algo.pageRank` as criticality (`algorithms.cypher: criticality`) on a point-in-time projection of the live `DEPENDS_ON` edges (`topology_at`, `project_topology` into `scratch_<tenant>_topology_<nonce>`); `blast_radius` orders the impacted services by it (tier first) and records `IMPACTS.rank`; comms' `warn_owners` sends the heads-up to the top-ranked unpaged teams (`WARNED`, the update's "Heads-up" line); every query in the trace; `tests/integration/test_algorithms.py` (retired and future edges add no rank; heads-up order, paged teams skipped, idempotent). Second algorithm: `algo.WCC` splits an alert storm on a projection of the alerting services and their red upstreams (`algorithms.cypher: project_storm, storm_components`; `correlate_alerts`): the origin's component is the incident, chains fold transitively, the other components are separate storms, and the investigation follows (`path_suspects` from every folded alert, `check_hypothesis` judges a suspect from the folded alert that reaches it, so the far cause becomes a co-cause); `test_a_chained_storm_is_one_incident_by_wcc_and_the_far_cause_is_a_co_cause`. ARCHITECTURE 3.5, 3.11 | `algo.betweenness` stays out (sampled). Local runs FalkorDB v4.22.0 and this was verified on 4.18.3: `algo.pageRank('Service', 'DEPENDS_ON')` is the two-argument form and `algo.WCC` takes `{nodeLabels, relationshipTypes}`, re-run `make test` there. |
 | T1-3 | Tool selection through MCP | 3 | 28 MCP tools generated from the registry (`mcp_server/__init__.py: catalogue`): docstring, pydantic JSON schema with every argument described (`tests/unit/test_mcp_surface.py` fails the build otherwise), `readOnlyHint`, a required `tenant`; server `instructions`; two prompts (`work_alert`, `company_question`); stdio and Streamable HTTP with Host/Origin checks and a bearer token when `API_TOKEN` is set; the tool-pick test: Claude Opus 5.5, given only the tool list, picks the right tool 14/14 (`scripts/mcp_pick.py`, `docs/MCP_PICK.md`); a Claude Code plugin (`plugin/`: manifest, `.mcp.json`, stdio launcher, skills `/oncall-brain:incident`, `/oncall-brain:who-owns`, `/oncall-brain:ask`; root `.claude-plugin/marketplace.json`), validated by `claude plugin validate --strict` and driven end to end by an MCP client in `tests/integration/test_plugin.py`; `docs/MCP.md`, README "Use it from Claude Code in one minute" | The marketplace install needs the repo on GitHub (`claude --plugin-dir ./plugin` works from the checkout). The tool-pick test needs an Anthropic key, so it is a script with a committed result, not a test. |
 | T1-4 | Actions based on what the graph shows | 3 | Writes caused by graph results: `PAGED` (`record_page`), `IMPACTS` (`record_impacts`), `CONSULTED` (`record_consult`), `Hypothesis`/`Evidence` (`add_hypotheses`, `record_evidence`), `CORRELATED_WITH`/`SHARED_UPSTREAM`, the status `Message` that `CITES` its sources (`post_update`), memory on confirm (`resolve_incident`), optional Slack post (`adapters/slack.py`); the planner branches on the board (`domain/planner.py`); `test_live_events_drive_a_new_investigation` | Pages and warnings are graph writes and an optional Slack text; there is no outbound pager integration (fine for the demo, say so in the README). |
 | T1-5 | Explainable results | 3 | Reason per step, verdict reason and short tag per suspect, `conclude` records why each loser lost (`record_outranked`), both no-graph baselines and the memory and correlation ablations are printed by `make demo` and shown in the UI; `tests/unit/test_verdict.py` | None. |
@@ -65,20 +65,22 @@ Ask the brain chat and the Connect page.
 | Group | Score |
 |---|---|
 | Challenge (C1-C5) | 14 / 15 |
-| Track 01 (T1-1..5) | 14 / 15 |
+| Track 01 (T1-1..5) | 15 / 15 |
 | Track 02 (T2-1..7) | 20 / 21 |
 | Track 03 (T3-1..5) | 15 / 15 |
 | Rule 3 | 3 / 3 |
-| **All** | **66 / 69** |
+| **All** | **67 / 69** |
 
 ## Weakest rows, in the order to close them
 
 1. **T2-6 concurrency (1, now 2).** Done: unique constraints on `id` for every label, `scripts/concurrency.py` with
    p50/p95/p99 and duplicate counts in `docs/PERF.md`, an atomic reset, 5 tests. Left: a per-incident lock so two
    incidents on one tenant can be investigated at once.
-2. **T1-2 algorithms (1, now 2).** Done: PageRank criticality on a point-in-time projection decides who gets the
-   heads-up first, verified against retired and future edges, shown in the trace. Left: WCC on a projection of the
-   alerting services and their red upstreams to split a storm.
+2. **T1-2 algorithms (1, now 3).** Done: PageRank criticality on a point-in-time projection decides who gets the
+   heads-up first, verified against retired and future edges, shown in the trace; (rival-009) WCC on a projection
+   of the alerting services and their red upstreams decides which alerts are one incident, chains included, and
+   the investigation follows it (suspects from every folded alert, the far cause kept as a co-cause). Left:
+   nothing a judge would miss; community detection over the dependency map would be decoration.
 3. **T2-4 conversation history (1, now 3) + T2-7 per-user memory (2, now 3).** Done: `Session` and `Question` nodes
    per engineer and session, pronoun resolution in `ask`, the `history` route and `my_questions`, 5 tests. Left: the
    Ask tab's user chip (web/), and references richer than a pronoun ("that deploy", "the second one").
