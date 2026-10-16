@@ -65,8 +65,12 @@ chg:pgw-pool-1 caused it"...). Result: **14/14 right on claude-opus-5-5**, table
 ```bash
 curl -X POST 'http://localhost:8000/api/tenants/acme/alerts?respond=true' \
   -H 'content-type: application/json' \
-  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s"}'
+  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s", "at": 1792036800}'
 ```
+
+`at` (epoch seconds) pins this sample to the demo story's act-1 time, where the demo company's changes sit, so it finds
+the payments-gw pool change. A real alerting tool leaves `at` out and the alert is stamped now; on the demo graph that
+honestly answers "No cause found", because nothing changed recently.
 
 records the alert (`raise_alert`), runs the three agents, writes the incident, its evidence and the status update
 into the graph, and, with `SLACK_WEBHOOK_URL` set, posts the update to your channel. The response is the same run

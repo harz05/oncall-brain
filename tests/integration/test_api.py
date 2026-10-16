@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -187,3 +188,18 @@ def test_inbox_stream_webhook_and_stored_incident(api):
     stored = c.get(f"{base}/incidents/{run['incident_id']}").json()
     assert stored["outcome"]["confidence"]["level"] in ("none", "high", "medium")
     assert c.post(f"{base}/alerts", json={"service": "svc:nope", "symptom": "errors", "name": "x"}).status_code == 404
+
+
+def test_the_documented_webhook_sample_finds_the_cause_on_the_demo_company(api):
+    """The curl on the Connect page and in docs/MCP.md is what a judge pastes first: it must land on the story."""
+    c, base = api
+    c.post(f"{base}/reset")
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    samples = [re.search(r"-d '(\{.*?\})'", open(os.path.join(root, f)).read()).group(1)
+               for f in ("docs/MCP.md", "web/app.js")]
+    assert samples[0] == samples[1]  # the docs and the page show the same body
+    body = json.loads(samples[0])
+    assert body["at"] == T1
+    run = c.post(f"{base}/alerts", params={"respond": "true"}, json=body).json()
+    assert run["outcome"]["root_cause"]["change"] == "chg:pgw-pool-1"
+    assert run["outcome"]["confidence"]["level"] == "high"

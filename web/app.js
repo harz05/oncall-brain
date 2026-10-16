@@ -994,11 +994,15 @@ async function askQ(q) {
 // ---------- connect ----------
 function renderConnect() {
   const origin = OFFLINE ? 'http://localhost:8000' : location.origin;
+  // On a deployment (not localhost) the plugin card also shows remote mode: nothing local but the plugin.
+  const deployed = !OFFLINE && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   const code = (text) => h('div', { class: 'code-wrap' }, h('pre', { class: 'code' }, text), copyBtn(text));
   const card = (title, ...kids) => h('div', { class: 'card connect-card' }, h('h3', {}, title), ...kids);
   const hl = state.health;
   const pill = (label, value, ok) => h('span', { class: `status-pill ${ok ? 'confirmed' : 'open'}` }, `${label} · ${value}`);
-  const curl = `curl -X POST '${origin}${T()}/alerts?respond=true' \\\n  -H 'content-type: application/json' \\\n  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s"}'`;
+  // "at" pins the sample to the demo company's act-1 time (datagen.T1), where its changes sit; without it the alert is
+  // stamped now and the demo graph has nothing recent to blame. A real alerting tool leaves it out.
+  const curl = `curl -X POST '${origin}${T()}/alerts?respond=true' \\\n  -H 'content-type: application/json' \\\n  -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s", "at": 1792036800}'`;
   set('connect',
     h('div', { class: 'connect-intro' }, h('h2', {}, 'Plug it into your stack'),
       h('p', { class: 'muted' }, 'Every agent tool is defined once and exposed three ways: to the agents, over MCP, and over HTTP.'),
@@ -1009,11 +1013,13 @@ function renderConnect() {
         pill('Steps chosen by', plannerLabel(), modelDecides()))),
     h('div', { class: 'connect-grid' },
       card('Send alerts in (webhook)',
-        h('p', {}, 'Point your alerting tool at this endpoint and map its payload to service, symptom (latency, errors or saturation) and name. With respond=true the agents start right away; new alerts show up in the inbox.'),
+        h('p', {}, 'Point your alerting tool at this endpoint and map its payload to service, symptom (latency, errors or saturation) and name. With respond=true the agents start right away; new alerts show up in the inbox. The sample pins "at" to the demo story\'s time; leave it out and the alert is stamped now.'),
         code(curl)),
       card('Use it from Claude Code (plugin)',
         h('p', {}, 'The plugin ships the MCP server (the same graph tools the agents use, plus “respond to alert”) and three skills. From the repo:'),
         code('claude --plugin-dir ./plugin\n/oncall-brain:incident alert:checkout-latency\n/oncall-brain:who-owns kafka'),
+        deployed ? h('p', { class: 'small' }, 'Against this deployment, with nothing local but the plugin (the token is the MCP_TOKEN set on the host):') : null,
+        deployed ? code(`ONCALL_BRAIN_URL=${origin} ONCALL_BRAIN_TOKEN=<MCP_TOKEN> claude --plugin-dir ./plugin`) : null,
         h('p', { class: 'muted small' }, 'Or install it: /plugin install oncall-brain --marketplace <owner>/<repo>. Any other MCP client: ', h('code', {}, 'python -m oncall_brain.mcp_server'), ' (stdio) or ', h('code', {}, '--http --port 8001'), '.')),
       card('Post updates to Slack',
         hl?.slack ? h('p', { class: 'ok-line' }, 'Connected: every status update is also posted to your channel.')
