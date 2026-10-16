@@ -39,7 +39,8 @@ hostname Render or Railway set) on any bind address, which blocks DNS rebinding.
 which also guards the HTTP API) and every request must carry `Authorization: Bearer <token>`, which is what a remote
 client needs. A deployment ([DEPLOY.md](DEPLOY.md)) serves the same endpoint at `https://<host>/mcp` from the one app
 container (`oncall_brain.serve`, also `make serve`), where the token is required: without one `/mcp` answers 401
-while the UI and API keep working. There is no per-user auth: anyone with the token can use any tenant.
+while the UI and API keep working. `/mcp/` (a trailing slash, which some clients add) is the same endpoint on both
+servers, not a redirect. There is no per-user auth: anyone with the token can use any tenant.
 
 `<venv>/bin/python` below is the interpreter `make setup` created (`<repo>/.venv/bin/python`, or wherever your
 `VIRTUAL_ENV` points).

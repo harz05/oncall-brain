@@ -40,5 +40,7 @@ def test_remote_mcp_requires_the_token_when_one_is_set(monkeypatch):
         with TestClient(http_app("127.0.0.1")) as c:  # the context runs the lifespan the session manager needs
             assert c.post("/mcp", json=body, headers=headers).status_code == 401
             assert c.post("/mcp", json=body, headers={**headers, "authorization": "Bearer s3cret"}).status_code != 401
+            with_slash = c.post("/mcp/", json=body, headers={**headers, "authorization": "Bearer s3cret"})
+            assert with_slash.status_code not in (307, 308, 404)  # /mcp/ is the same endpoint, not a redirect
     finally:
         get_settings.cache_clear()

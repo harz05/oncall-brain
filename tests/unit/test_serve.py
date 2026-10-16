@@ -38,7 +38,7 @@ def test_mcp_is_refused_until_a_token_is_set_while_the_ui_and_api_stay_up(env):
         assert "MCP_TOKEN" in refused.json()["error"]
 
 
-def test_the_token_opens_mcp_at_the_exact_path_and_the_api_needs_none(env):
+def test_the_token_opens_mcp_with_or_without_the_trailing_slash_and_the_api_needs_none(env):
     env(MCP_TOKEN="t0k3n")
     with TestClient(serve.app) as c:
         assert c.get("/health").json()["mcp"] == "/mcp"
@@ -47,7 +47,8 @@ def test_the_token_opens_mcp_at_the_exact_path_and_the_api_needs_none(env):
         assert wrong.status_code == 401
         ok = c.post("/mcp", json=INITIALIZE, headers={**MCP_HEADERS, "authorization": "Bearer t0k3n"})
         assert ok.status_code == 200 and "oncall-brain" in ok.text  # the initialize result names the server
-        assert c.post("/mcp/", json=INITIALIZE, headers=MCP_HEADERS).status_code == 404  # no redirect games
+        slash = c.post("/mcp/", json=INITIALIZE, headers={**MCP_HEADERS, "authorization": "Bearer t0k3n"})
+        assert slash.status_code == 200  # a client that normalises to a trailing slash gets the same endpoint
 
 
 def test_one_token_can_guard_both_halves(env):

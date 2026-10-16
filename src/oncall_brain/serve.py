@@ -53,5 +53,7 @@ async def lifespan(_: Starlette):
 
 
 # Route("/mcp", <ASGI app>) keeps the exact path; a Mount would answer POST /mcp with a redirect to /mcp/, which MCP
-# clients do not follow. The API is mounted last and takes everything else (the UI at /web/, / redirects there).
-app = Starlette(routes=[Route("/health", health), Route("/mcp", mcp), Mount("/", app=api)], lifespan=lifespan)
+# clients do not follow. /mcp/ reaches the same half (it rewrites the path). The API is mounted last and takes
+# everything else (the UI at /web/, / redirects there).
+app = Starlette(routes=[Route("/health", health), Route("/mcp", mcp), Route("/mcp/", mcp), Mount("/", app=api)],
+                lifespan=lifespan)

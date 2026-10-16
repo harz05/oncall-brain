@@ -91,6 +91,7 @@ def test_one_process_serves_the_ui_the_api_health_and_a_token_guarded_mcp_endpoi
         tools, ask = anyio.run(_mcp, f"{base}/mcp", token, tenant)
         assert tools == set(registry.REGISTRY) | {"respond_to_alert", "reset_tenant"}
         assert "Platform" in json.dumps(ask) and all(q["cypher"] for q in ask["queries"])
+        assert anyio.run(_mcp, f"{base}/mcp/", token, tenant)[0] == tools  # a trailing slash is the same endpoint
         req = urllib.request.Request(f"{base}/mcp", data=b"{}", method="POST", headers={
             "Authorization": "Bearer nope", "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream"})

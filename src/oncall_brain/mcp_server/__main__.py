@@ -44,6 +44,19 @@ class BearerToken(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AcceptTrailingSlash:
+    """`/mcp/` is `/mcp`: some MCP clients normalise the endpoint to a trailing slash, and the SDK app's answer to
+    that (a redirect) is not followed on a POST. Rewrites the path before routing."""
+
+    def __init__(self, app, path: str = "/mcp"):
+        self.app, self.path = app, path
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") == self.path + "/":
+            scope = {**scope, "path": self.path, "raw_path": self.path.encode()}
+        await self.app(scope, receive, send)
+
+
 def http_app(host: str, require_token: bool = False) -> Starlette:
     """DNS-rebinding protection on any bind address: the SDK only turns it on for a localhost bind, but the docker
     service binds 0.0.0.0. Host and Origin must name ALLOWED_HOSTS (plus the local defaults and the hostname Render
@@ -54,6 +67,7 @@ def http_app(host: str, require_token: bool = False) -> Starlette:
                                          allowed_origins=[f"{s}://{n}" for s in ("http", "https") for n in names])
     app = build_server().streamable_http_app(host=host, transport_security=security)
     app.add_middleware(BearerToken, required=require_token)
+    app.add_middleware(AcceptTrailingSlash)
     return app
 
 
