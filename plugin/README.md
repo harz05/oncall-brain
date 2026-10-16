@@ -34,7 +34,7 @@ transport):
 
 ```bash
 export ONCALL_BRAIN_URL=https://oncall.example.com      # the deployment; the plugin adds /mcp
-export ONCALL_BRAIN_TOKEN=<that deployment's API_TOKEN>  # sent as "Authorization: Bearer ..."
+export ONCALL_BRAIN_TOKEN=<that deployment's MCP_TOKEN>  # sent as "Authorization: Bearer ..."
 claude --plugin-dir ./plugin                            # or, installed from GitHub:
 /plugin install oncall-brain --marketplace <owner>/<repo>
 ```
@@ -43,6 +43,7 @@ Claude Code expands `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` and `Bearer
 environment when it starts the plugin's servers, so with neither variable set the entry reaches a local `make mcp-http`.
 Both servers publish the same 28 tools and the skills work with either. With no checkout next to the plugin the stdio
 server `oncall-brain` cannot start; Claude Code reports it as failed and the remote server carries on. The round trip
-is tested in `tests/integration/test_plugin.py` against a local `--http` server started with `API_TOKEN`.
+is tested in `tests/integration/test_plugin.py` against a local `--http` server started with `API_TOKEN`, and in
+`tests/integration/test_deploy.py` against the deployment app (`docs/DEPLOY.md`), where the token is required.
 
 Try: `/oncall-brain:incident alert:checkout-latency`, then `/oncall-brain:who-owns kafka`.

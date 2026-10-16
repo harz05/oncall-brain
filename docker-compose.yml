@@ -1,5 +1,6 @@
-# docker compose up --build              -> UI + API on http://localhost:8000, FalkorDB Browser on http://localhost:3000
-# docker compose --profile mcp up --build -> also the MCP server (streamable HTTP) on http://localhost:8001/mcp
+# docker compose up --build              -> UI + API on http://localhost:8000, FalkorDB Browser on http://localhost:3000;
+#                                           the MCP server at http://localhost:8000/mcp once MCP_TOKEN is set
+# docker compose --profile mcp up --build -> also the standalone MCP server (no token needed) on http://localhost:8001/mcp
 # Every port is published on 127.0.0.1 only. To expose one on purpose, drop its "127.0.0.1:" prefix, add the public
 # name to ALLOWED_HOSTS and set API_TOKEN (see .env.example). FalkorDB itself has no password here: keep it local.
 x-app-env: &app-env
@@ -11,6 +12,7 @@ x-app-env: &app-env
   LLM_API_KEY: ${LLM_API_KEY:-}
   ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
   API_TOKEN: ${API_TOKEN:-}
+  MCP_TOKEN: ${MCP_TOKEN:-}  # the app container's /mcp answers only with this (or API_TOKEN) set
   MAX_TENANTS: ${MAX_TENANTS:-20}
 
 services:

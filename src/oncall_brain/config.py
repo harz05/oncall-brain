@@ -45,14 +45,25 @@ class Settings(BaseSettings):
 
     # HTTP hardening (api/app.py, MCP over HTTP); see .env.example.
     allowed_hosts: str = ""  # extra Host names, comma-separated, on top of LOCAL_HOSTS; "*" accepts any
+    # Public hostnames the container host sets by itself (Render, Railway): accepted without listing them.
+    render_external_hostname: str = ""
+    railway_public_domain: str = ""
     api_token: str = _secret()  # when set, /api/* except /api/health needs "Authorization: Bearer <token>"
+    # The token the MCP endpoint of a deployment requires (oncall_brain.serve, the Dockerfile); API_TOKEN when empty.
+    mcp_token: str = _secret()
     max_tenants: int = 20  # most tenant graphs a reset may create (~5 MB each)
 
     # Optional: post each status update to Slack through an incoming webhook (adapters/slack.py).
     slack_webhook_url: str = _secret()
 
     def hosts(self) -> list[str]:
-        return LOCAL_HOSTS + [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+        names = [h.strip() for h in self.allowed_hosts.split(",")] + [self.render_external_hostname,
+                                                                     self.railway_public_domain]
+        return LOCAL_HOSTS + [h for h in names if h and h not in LOCAL_HOSTS]
+
+    def mcp_bearer(self) -> str:
+        """The bearer token MCP over HTTP checks: MCP_TOKEN, else API_TOKEN (one token for the API and MCP)."""
+        return self.mcp_token or self.api_token
 
     def api_key(self) -> str:
         """LLM_API_KEY, else the selected vendor's usual variable (so an existing GEMINI_API_KEY just works)."""

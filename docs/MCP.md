@@ -34,11 +34,12 @@ python -m oncall_brain.mcp_server          # or: make mcp
 python -m oncall_brain.mcp_server --http --port 8001
 ```
 
-Over HTTP the server checks the `Host` and `Origin` headers against `ALLOWED_HOSTS` (plus the local names) on any
-bind address, which blocks DNS rebinding. Set `API_TOKEN` and every request must carry
-`Authorization: Bearer <token>` (the same token guards the HTTP API), which is what a remote connector for Claude
-Desktop or claude.ai needs. There is no per-user auth: anyone with the token can use any tenant. See
-[DEPLOY.md](DEPLOY.md) before exposing it.
+Over HTTP the server checks the `Host` and `Origin` headers against `ALLOWED_HOSTS` (plus the local names and the
+hostname Render or Railway set) on any bind address, which blocks DNS rebinding. Set `MCP_TOKEN` (or `API_TOKEN`,
+which also guards the HTTP API) and every request must carry `Authorization: Bearer <token>`, which is what a remote
+client needs. A deployment ([DEPLOY.md](DEPLOY.md)) serves the same endpoint at `https://<host>/mcp` from the one app
+container (`oncall_brain.serve`, also `make serve`), where the token is required: without one `/mcp` answers 401
+while the UI and API keep working. There is no per-user auth: anyone with the token can use any tenant.
 
 `<venv>/bin/python` below is the interpreter `make setup` created (`<repo>/.venv/bin/python`, or wherever your
 `VIRTUAL_ENV` points).
@@ -238,3 +239,7 @@ seeds a throwaway tenant through `reset_tenant` and calls `blast_radius` on it; 
 reachable. `test_mcp_over_http_refuses_foreign_host_and_origin` checks that MCP over HTTP answers a foreign `Host`
 with 421 and a foreign `Origin` with 403. `tests/unit/test_mcp_surface.py` checks every tool and argument is
 described, the prompts render, and the remote transport refuses requests without the token when `API_TOKEN` is set.
+`tests/unit/test_serve.py` covers the deployment app: `/mcp` refused until a token is set while the API stays open,
+opened by `MCP_TOKEN` at the exact path, one `API_TOKEN` guarding both halves, the platform hostnames accepted;
+`tests/integration/test_deploy.py` starts it as the Dockerfile does and drives it from outside (`/health`, the UI,
+the Host checks, 28 tools and an `ask` over `/mcp`, 401 on a wrong token).

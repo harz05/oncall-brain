@@ -22,11 +22,20 @@ async def _stdio() -> None:
 
 
 class BearerToken(BaseHTTPMiddleware):
-    """When API_TOKEN is set, every request to the remote MCP endpoint needs "Authorization: Bearer <token>"
-    (the same token the HTTP API uses), so a server exposed for Claude Desktop / claude.ai is not open to the world."""
+    """When a token is set (MCP_TOKEN, else API_TOKEN, so one token can guard the HTTP API and MCP), every request
+    to the remote MCP endpoint needs "Authorization: Bearer <token>": a server exposed for Claude Code, Claude
+    Desktop or claude.ai is not open to the world. With required=True (a deployment, oncall_brain.serve) the
+    endpoint answers 401 until a token is configured, so a public /mcp is never open by mistake."""
+
+    def __init__(self, app, required: bool = False):
+        super().__init__(app)
+        self.required = required
 
     async def dispatch(self, request, call_next):
-        token = get_settings().api_token
+        token = get_settings().mcp_bearer()
+        if self.required and not token:
+            return JSONResponse({"error": "MCP_TOKEN is not set; a deployment serves /mcp only with a bearer token"},
+                                status_code=401, headers={"WWW-Authenticate": "Bearer"})
         if token:
             sent = request.headers.get("authorization", "").encode("latin-1")
             if not secrets.compare_digest(sent, f"Bearer {token}".encode()):
@@ -35,15 +44,16 @@ class BearerToken(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def http_app(host: str) -> Starlette:
+def http_app(host: str, require_token: bool = False) -> Starlette:
     """DNS-rebinding protection on any bind address: the SDK only turns it on for a localhost bind, but the docker
-    service binds 0.0.0.0. Host and Origin must name ALLOWED_HOSTS (plus the local defaults); "*" turns it off.
-    API_TOKEN, when set, is required as a bearer token (BearerToken)."""
+    service binds 0.0.0.0. Host and Origin must name ALLOWED_HOSTS (plus the local defaults and the hostname Render
+    or Railway set); "*" turns it off. MCP_TOKEN (else API_TOKEN), when set, is required as a bearer token; with
+    require_token the endpoint is not served at all without one (BearerToken)."""
     names = [p for h in get_settings().hosts() for p in (h, f"{h}:*")]
     security = TransportSecuritySettings(enable_dns_rebinding_protection="*" not in names, allowed_hosts=names,
                                          allowed_origins=[f"{s}://{n}" for s in ("http", "https") for n in names])
     app = build_server().streamable_http_app(host=host, transport_security=security)
-    app.add_middleware(BearerToken)
+    app.add_middleware(BearerToken, required=require_token)
     return app
 
 

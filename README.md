@@ -175,7 +175,7 @@ Or, with nothing local, point the plugin at a deployed instance ([docs/DEPLOY.md
 entry, `oncall-brain-remote`, connects over Streamable HTTP with the URL and token from your environment.
 
 ```bash
-ONCALL_BRAIN_URL=https://oncall.example.com ONCALL_BRAIN_TOKEN=<its API_TOKEN> claude --plugin-dir ./plugin
+ONCALL_BRAIN_URL=https://oncall.example.com ONCALL_BRAIN_TOKEN=<its MCP_TOKEN> claude --plugin-dir ./plugin
 ```
 
 Or install it from the marketplace this repo carries (Claude Code 2.1.275 or later), then start `claude` anywhere:
@@ -220,7 +220,7 @@ Streamable HTTP transport with `API_TOKEN`; everything is in [docs/MCP.md](docs/
 docker compose up --build    # falkordb/falkordb:v4.22.0 + the app on :8000 (+ FalkorDB Browser on :3000)
 ```
 
-Ports are published on 127.0.0.1 only. The app container seeds the default tenant if its graph is missing, then serves on `$PORT` (default 8000). For a live deployment (FalkorDB Cloud + Render via `render.yaml`, or any Docker VM), see [docs/DEPLOY.md](docs/DEPLOY.md).
+Ports are published on 127.0.0.1 only. The app container seeds the default tenant if its graph is missing, then serves the UI and API, the MCP endpoint at `/mcp` (with `MCP_TOKEN` set) and `/health` on `$PORT` (default 8000) from one process (`oncall_brain.serve`). For a live deployment (FalkorDB Cloud + Render via `render.yaml`, a checklist of sign-ins and pastes; or any Docker VM), see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## How each track is covered
 

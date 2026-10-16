@@ -8,7 +8,7 @@ E := [ -f $(ENV_SH) ] && . $(ENV_SH); \
 TENANT ?= acme
 PORT ?= 8000
 
-.PHONY: setup falkordb-bin db db-stop seed dev mcp mcp-http headless test test-unit lint demo eval docs snapshot
+.PHONY: setup falkordb-bin db db-stop seed dev mcp mcp-http serve headless test test-unit lint demo eval docs snapshot
 
 setup:
 	$(E) if command -v uv >/dev/null; then uv venv -q --allow-existing --python 3.12 $$VIRTUAL_ENV && uv pip install -q --python $$VIRTUAL_ENV/bin/python -e ".[dev]"; \
@@ -39,6 +39,11 @@ mcp:
 # Remote MCP (Claude Desktop / claude.ai connectors): Streamable HTTP on :8001, bearer token when API_TOKEN is set.
 mcp-http:
 	$(E) python -m oncall_brain.mcp_server --http --port 8001
+
+# A deployment in one process (what the Dockerfile runs): UI + API at /, the MCP server at /mcp, /health. /mcp answers
+# only with MCP_TOKEN (or API_TOKEN) set.
+serve:
+	$(E) uvicorn oncall_brain.serve:app --port $(PORT)
 
 # The headless flow against a running `make dev`: alert in through the webhook, agents, status update out.
 headless:
