@@ -14,7 +14,7 @@ from oncall_brain.domain.models import QueryRun
 
 USER = r"^[a-z0-9:@._-]{1,60}$"  # a Person id (person:hana-costa), a handle (@hana.costa) or any stable name
 KEY = r"^[a-z0-9_.-]{1,40}$"
-THINGS, PEOPLE, EITHER = ("service", "change", "ticket", "team"), ("person",), ("person", "team")
+THINGS, PEOPLE, EITHER = ("service", "change", "ticket", "incident", "team"), ("person",), ("person", "team")
 # Which of the previous question's entities a pronoun can stand for: the first class with a match wins; "it" and
 # "they" fall back to everything the previous question was about, "he" and "she" never stand for a service.
 PRONOUNS = {"it": THINGS, "its": THINGS, "they": EITHER, "them": EITHER, "their": EITHER, "theirs": EITHER,
@@ -33,7 +33,10 @@ def session_id(user: str, key: str) -> str:
 
 def mention(e: dict[str, Any]) -> str:
     """How an entity is written back into a question so `link_entities` finds it again: a service, team or person
-    by name; a change or ticket by the part of its id after the colon (pgw-pool-1, CR-881)."""
+    by name; a change or ticket by the part of its id after the colon (pgw-pool-1, CR-881); an incident by its id
+    (inc:0911: the part after the colon alone would read as a number)."""
+    if e["kind"] == "incident":
+        return e["id"]
     return e["id"].split(":", 1)[-1] if e["kind"] in ("change", "ticket") else e["name"]
 
 

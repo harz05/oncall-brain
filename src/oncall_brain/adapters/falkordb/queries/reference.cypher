@@ -71,7 +71,8 @@ WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NUL
 WITH caller, p
 ORDER BY length(p)
 WITH caller, collect(p)[0] AS p
-MATCH (t:Team)-[:OWNS]->(caller)
+MATCH (t:Team)-[o:OWNS]->(caller)
+WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 RETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path
 ORDER BY hops, service
 

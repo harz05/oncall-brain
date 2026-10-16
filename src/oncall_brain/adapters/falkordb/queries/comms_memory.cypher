@@ -111,8 +111,10 @@ WITH alerts, x, u ORDER BY x.rank
 RETURN alerts, collect({service: u.id, hops: x.hops, rank: x.rank}) AS shared
 
 // name: service_map
-// purpose: Services, owners and dependency edges (flagged live or retired at $at) for the UI.
-MATCH (t:Team)-[:OWNS]->(s:Service)
+// purpose: Services, the team that owned each at $at (OWNS valid then; null if none) and dependency edges (flagged live or retired at $at) for the UI.
+MATCH (s:Service)
+OPTIONAL MATCH (t:Team)-[o:OWNS]->(s)
+WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 OPTIONAL MATCH (s)-[d:DEPENDS_ON]->(x:Service)
 RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
        collect({to: x.id, live: d.valid_from <= $at AND (d.valid_to IS NULL OR d.valid_to > $at)}) AS deps

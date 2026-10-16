@@ -1,8 +1,9 @@
 """Company brain: answer a free-form question from the graph first, then from the docs, tickets and chat in it.
 
-1. Entity linking (link_entities): the services, teams, people, changes and tickets the question names.
+1. Entity linking (link_entities): the services, teams, people, changes, tickets and incidents the question names.
 2. Intent routing by plain keyword rules (INTENTS, first match wins), answered from edges about the linked entities:
-   owner -> OWNS, members, ON_CALL, who_knows; expert -> who_knows; why -> DECIDES / SUPERSEDES decision records and
+   owner -> OWNS valid at the time asked (a named incident's time, else the live edge, with the owners before and
+   after), members, ON_CALL, who_knows; expert -> who_knows; why -> DECIDES / SUPERSEDES decision records and
    change_story; how -> Runbook FOR_SERVICE, runbook pages, incidents FIXED_WITH; happened -> incidents IMPACTS /
    CAUSED_BY. No intent, or nothing linked of the kind it needs: the full-text answer alone.
 3. FalkorDB's full-text indexes find the supporting docs, tickets and chat; on equal coverage of the question, those
@@ -44,15 +45,16 @@ INTENTS = (
     ("happened", re.compile(r"\bwhat happened\b|\bincident|\boutage")),
 )
 # Same words, two entities (service and team 'checkout'): keep the more specific one; the team comes via OWNS.
-KIND_RANK = {"change": 0, "ticket": 1, "service": 2, "person": 3, "team": 4}
+KIND_RANK = {"change": 0, "ticket": 1, "incident": 2, "service": 3, "person": 4, "team": 5}
 
 
 class AskArgs(BaseModel):
-    question: str = Field(max_length=300, description="A question in plain words, e.g. who owns kafka? why was "
-                          "legacy-billing retired? how do I roll back a bad deploy on cart? As a follow-up: and who "
-                          "is on call for it? To recall: what did I ask about payments-gw?")
-    at: int | None = Field(None, description="Epoch seconds for 'who is on call'; default: the latest alert in the "
-                           "graph")
+    question: str = Field(max_length=300, description="A question in plain words, e.g. who owns kafka? who owned "
+                          "payments-gw at the time of inc:0911? why was legacy-billing retired? how do I roll back a "
+                          "bad deploy on cart? As a follow-up: and who is on call for it? To recall: what did I ask "
+                          "about payments-gw?")
+    at: int | None = Field(None, description="Epoch seconds for 'who owned' and 'who was on call'; default: a "
+                           "named incident's time for the owner, the latest alert in the graph for the rotation")
     user: str | None = Field(None, pattern=sessions.USER, description="Who is asking, e.g. person:hana-costa (a "
                              "Person id or @handle). The question is then remembered in that person's session in the "
                              "graph: a follow-up can say 'it' or 'them', and 'what did I ask about X' works. Without "
@@ -166,7 +168,8 @@ def _experts(ctx: ToolContext, ans: _Answer, svc: dict) -> None:
     for r in rows:
         ans.related.setdefault(r["person"], {"id": r["person"], "kind": "person", "name": r["name"],
                                              "via": f"who_knows {svc['id']} (score {r['score']})"})
-    why = [", ".join(x for x in ("owning team" if r["on_owning_team"] else "", _n(r["changes"], "change"),
+    why = [", ".join(x for x in ("owning team" if r["on_owning_team"] else "",
+                                 "owned it before" if r["on_former_owning_team"] else "", _n(r["changes"], "change"),
                                  _n(r["incidents"], "incident") + " paged for" if r["incidents"] else "",
                                  _n(r["docs"], "doc")) if x) for r in rows]
     ans.parts.append(f"People who know {svc['name']}: " + "; ".join(
@@ -174,26 +177,51 @@ def _experts(ctx: ToolContext, ans: _Answer, svc: dict) -> None:
                      if rows else f"Nobody on record knows {svc['name']}.")
 
 
+def _span(x: dict, name_it: bool) -> str:
+    """One service's ownership history around the OWNS edge the answer used: the owner before it (the edge that ended
+    when this one began) and the one after it (the edge that began when this one ended)."""
+    out = []
+    if x["before"]:
+        b = max(x["before"], key=lambda e: e["until"])
+        out.append(f"since {_ts(x['since'])}, before that {b['name']}")
+    if x["after"]:
+        n = min(x["after"], key=lambda e: e["from"])
+        out.append(f"until {_ts(x['until'])}, then {n['name']}")
+    return (f"{x['service_name']} " if name_it else "") + ", ".join(out) if out else ""
+
+
 def _owner(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], at: int | None) -> None:
     ids = {e["id"] for e in _of(ents, "service", "team")}
     if not ids:
         return
+    # "who owned payments-gw at the time of inc:0911": a named incident sets the time asked, unless one was given.
+    inc = next((e for e in _of(ents, "incident") if e.get("at")), None)
+    if at is None and inc:
+        at = inc["at"]
     rows = ans.read(ctx, "ownership", ids=sorted(ids), at=at)
     for team in dict.fromkeys(r["team"] for r in rows):
         rs = [r for r in rows if r["team"] == team]
         r = rs[0]
-        named = [x["service_name"] for x in rs if x["service"] in ids or team in ids]
+        mine = [x for x in rs if x["service"] in ids or team in ids]
+        named = [x["service_name"] for x in mine]
         svcs = ", ".join(named)
         for x in rs:
             ans.link(team, "OWNS", x["service"], team, "team", r["team_name"])
+        past = r["clock"] == "given"  # a time was asked about: say it in the past tense, with the handovers around it
         when = {"given": f"at {_ts(r['at'])}", "latest alert": f"as of the latest alert in the graph ({_ts(r['at'])})",
                 "clock": "now"}[r["clock"]]
-        duty = f"nobody is on call {when}"
+        be = "was" if past else "is"
+        duty = f"nobody {be} on call {when}"
         if r["on_call"]:
             ans.link(r["on_call"], "ON_CALL", team, r["on_call"], "person", r["on_call_name"])
-            duty = f"{r['on_call_name']} ({r['handle']}) is on call {when}"
-        head = (f"{r['team_name']} owns {svcs}" if team in ids else
-                f"{svcs} {'is' if len(named) == 1 else 'are'} owned by {r['team_name']}")
+            duty = f"{r['on_call_name']} ({r['handle']}) {be} on call {when}"
+        one = len(named) == 1
+        head = (f"{r['team_name']} {'owned' if past else 'owns'} {svcs}" if team in ids else
+                f"{svcs} {('was' if one else 'were') if past else ('is' if one else 'are')} owned by {r['team_name']}")
+        if past:
+            head += f" {when}" + (f", the time of {inc['id']}" if inc and at == inc["at"] else "")
+        if history := [h for h in (_span(x, len(mine) > 1) for x in mine) if h]:
+            head += f" ({'; '.join(history)})"
         ans.people += [m["id"] for m in r["members"]]
         ans.parts.append(f"{head}; {duty}; members: {', '.join(sorted(m['name'] for m in r['members']))}.")
     for svc in _of(ents, "service")[:1]:
@@ -298,11 +326,12 @@ def _how(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], at:
 
 
 def _happened(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], at: int | None) -> None:
-    if not (xs := _of(ents, "service", "change")):
+    if not (xs := _of(ents, "service", "change", "incident")):
         return
     names = ", ".join(e["name"] if e["kind"] == "service" else e["id"] for e in xs)
     rows = ans.read(ctx, "service_incidents", ids=[e["id"] for e in xs])[:3]
-    ans.parts.append(f"Incidents on {names}, newest first: {_incidents(ans, rows)}." if rows
+    what = f"What happened in {names}" if all(e["kind"] == "incident" for e in xs) else f"Incidents on {names}"
+    ans.parts.append(f"{what}, newest first: {_incidents(ans, rows)}." if rows
                      else f"No incidents on record for {names}.")
 
 
@@ -316,8 +345,10 @@ def _ts(at: int) -> str:
 @tool()
 def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     """Company brain: answer a free-form question from the graph, then from docs (postmortems, design notes,
-    decision records, runbook pages), tickets and chat. Links the services, teams, people, changes and tickets the
-    question names; by intent answers from the graph first (who owns -> OWNS + on call; who knows -> expertise
+    decision records, runbook pages), tickets and chat. Links the services, teams, people, changes, tickets and
+    incidents the question names; by intent answers from the graph first (who owns -> OWNS + on call, at a named
+    incident's time ("who owned payments-gw at the time of inc:0911"), with the owners before and after; who knows ->
+    expertise
     ranking; why -> decisions of record + change story; how do I -> runbooks + past fixes; what happened ->
     incidents), then full-text search finds supporting sources, preferring those tied to a linked entity, flags
     docs a newer doc superseded, and lists every source. Given a user, the question is remembered in that person's
@@ -445,7 +476,7 @@ def _history(ctx: ToolContext, ans: _Answer, a: AskArgs, question: str, base: di
 
 
 def _label(e: dict[str, Any]) -> str:
-    return e["id"] if e["kind"] in ("change", "ticket") else e["name"]
+    return e["id"] if e["kind"] in ("change", "ticket", "incident") else e["name"]
 
 
 def _recap(r: dict[str, Any]) -> str:

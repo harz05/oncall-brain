@@ -35,7 +35,8 @@ OPTIONAL MATCH (et:Team {id: e.id})
 OPTIONAL MATCH (ep:Person {id: e.id})
 OPTIONAL MATCH (ec:Change {id: e.id})
 OPTIONAL MATCH (ek:Ticket {id: e.id})
-WITH q, e, coalesce(es, et, ep, ec, ek) AS x
+OPTIONAL MATCH (ei:Incident {id: e.id})
+WITH q, e, coalesce(es, et, ep, ec, ek, ei) AS x
 FOREACH (_ IN CASE WHEN x IS NULL THEN [] ELSE [1] END |
   MERGE (q)-[:ABOUT {matched: e.matched, carried: e.carried}]->(x))
 WITH DISTINCT q

@@ -104,7 +104,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
                                 "team": f"team:{tid}"})
         for s in services:
             d["services"].append({"id": _svc(s), "name": s, "tier": 1 if s in TIER1 else 2,
-                                  "team": f"team:{tid}"})
+                                  "team": f"team:{tid}", "since": EPOCH})
     for a, b in DEPS:
         d["depends_on"].append({"src": _svc(a), "dst": _svc(b), "valid_from": EPOCH, "valid_to": None})
     for a, b, vf, vt in RETIRED_DEPS:

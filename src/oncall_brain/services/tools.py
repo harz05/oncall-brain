@@ -487,8 +487,9 @@ class ExpertArgs(BaseModel):
 
 @tool(writes=True)  # writes CONSULTED when given an incident; a plain question only reads
 def who_knows(ctx: ToolContext, a: ExpertArgs) -> ToolOutput:
-    """Company brain: who knows this service, ranked by evidence in the graph (owning team, changes they
-    authored, incidents they were paged for), with the evidence counts as the explanation. With an incident,
+    """Company brain: who knows this service, ranked by evidence in the graph (owning team, the team that owned
+    it before a handover, changes they authored, incidents they were paged for), with the evidence counts as the
+    explanation. With an incident,
     the top person is recorded as CONSULTED so the status update can say who to ask."""
     q = ctx.repo.read("who_knows", service=a.service)
     qs = [q]
@@ -498,7 +499,9 @@ def who_knows(ctx: ToolContext, a: ExpertArgs) -> ToolOutput:
         qs.append(ctx.repo.write("record_consult", incident_id=a.incident_id, person=top["person"],
                                  service=a.service, score=top["score"]))
     summary = (f"{top['name']} ({top['team']}): {top['changes']} changes, {top['incidents']} incidents"
-               + (", on the owning team" if top["on_owning_team"] else "")) if top else "nobody on record"
+               + (", on the owning team" if top["on_owning_team"] else "")
+               + (", on the team that owned it before" if top["on_former_owning_team"] else "")
+               ) if top else "nobody on record"
     return ToolOutput(summary=summary, data=q.rows, queries=qs, highlight=hl)
 
 
@@ -530,6 +533,7 @@ def service_map(ctx: ToolContext, a: AtArgs) -> ToolOutput:
 # --- Keeping knowledge current: events any client (MCP, HTTP) can push into the graph -------------------
 
 SVC = r"^svc:[a-z0-9-]{1,60}$"
+TEAM = r"^team:[a-z0-9-]{1,60}$"
 SYMPTOM = Literal["latency", "errors", "saturation"]
 
 
@@ -577,6 +581,12 @@ class DocEvent(BaseModel):
     at: int | None = Field(None, description="Epoch seconds the doc was written; defaults to now")
     id: str | None = Field(None, pattern=r"^doc:[\w.-]{1,80}$",
                            description="Your own id for the doc, e.g. doc:adr-015 (optional; generated if omitted)")
+
+
+class OwnershipEvent(BaseModel):
+    service: str = Field(pattern=SVC, description="The service changing hands, e.g. svc:payments-gw")
+    team: str = Field(pattern=TEAM, description="The team that takes it over, e.g. team:platform")
+    at: int | None = Field(None, description="Epoch seconds the handover took effect; defaults to now")
 
 
 class DependencyEvent(BaseModel):
@@ -667,3 +677,20 @@ def record_doc(ctx: ToolContext, a: DocEvent) -> ToolOutput:
     return ToolOutput(summary=what + (f"; it supersedes {a.supersedes}" if a.supersedes else ""),
                       data={"doc": did, "at": at, "decides": a.decides, "supersedes": a.supersedes}, queries=[q],
                       highlight=Highlight(nodes=[a.decides] if a.decides else []))
+
+
+@tool(writes=True, agent=False)
+def transfer_ownership(ctx: ToolContext, a: OwnershipEvent) -> ToolOutput:
+    """Record that `team` took over `service` at `at` (a reorg, a handover). The previous owner's OWNS edge is closed
+    (valid_to), never deleted: paging, blast radius, who_knows and ask use the owner at the time asked, so "who owned
+    payments-gw at the time of inc:0911" still names the old team and an alert after the handover pages the new one."""
+    at = a.at or int(time.time())
+    q = ctx.repo.write("transfer_ownership", service=a.service, team=a.team, at=at)
+    if not q.rows:
+        raise ValueError(f"unknown service {a.service!r} or team {a.team!r}")
+    r = dict(q.rows[0])
+    r["history"] = sorted(r["history"], key=lambda e: e["from"])
+    summary = (f"{a.service}: {r['previous'] or 'nobody'} -> {a.team} from {at}" if r["transferred"]
+               else f"{a.team} already owns {a.service}")
+    return ToolOutput(summary=summary, data={**r, "at": at}, queries=[q],
+                      highlight=Highlight(nodes=[a.service, a.team], edges=[(a.team, a.service, "OWNS")]))

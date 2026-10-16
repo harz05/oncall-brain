@@ -37,6 +37,7 @@ REQUESTS = [
     ("a new alert: refunds returns 5xx above 1%, on refunds. Register it.", {"raise_alert"}),
     ("what did the agents do on inc:checkout-latency so far?", {"incident_board"}),
     ("I'm person:hana-costa. What did I ask you about payments-gw earlier?", {"my_questions", "ask"}),
+    ("payments-gw moves to the Platform team as of today, record that.", {"transfer_ownership"}),
 ]
 
 

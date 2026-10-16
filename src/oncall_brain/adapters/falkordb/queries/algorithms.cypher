@@ -27,12 +27,13 @@ SET x.rank = r.rank, x.score = r.score
 RETURN count(x) AS ranked
 
 // name: warn_candidates
-// purpose: Who to warn: for every impacted service with a criticality rank, the on-call at $at of the team that owns it, best rank first, skipping teams the incident already paged (they know).
+// purpose: Who to warn: for every impacted service with a criticality rank, the on-call at $at of the team that owned it at $at, best rank first, skipping teams the incident already paged (they know).
 MATCH (i:Incident {id: $incident_id})
 OPTIONAL MATCH (i)-[:PAGED]->(:Person)-[:MEMBER_OF]->(pt:Team)
 WITH i, collect(DISTINCT pt.id) AS paged_teams
-MATCH (i)-[x:IMPACTS]->(s:Service)<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
-WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND oc.start <= $at AND oc.end > $at
+MATCH (i)-[x:IMPACTS]->(s:Service)<-[o:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
+WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+  AND oc.start <= $at AND oc.end > $at
 RETURN t.id AS team, t.name AS team_name, p.id AS person, p.name AS name, p.handle AS handle,
        s.id AS service, s.tier AS tier, x.rank AS rank, x.score AS score
 ORDER BY x.rank, s.id

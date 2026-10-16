@@ -50,7 +50,8 @@ CALL { WITH f5 UNWIND range(0, size(f5) - 1) AS i WITH i, f5[i] AS path, f5[i][0
 UNWIND [f1, f2, f3, f4, f5, f6] AS level
 UNWIND level AS path
 WITH path[0] AS caller, collect(path)[0] AS path
-MATCH (t:Team)-[:OWNS]->(caller)
+MATCH (t:Team)-[o:OWNS]->(caller)
+WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 RETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path
 ORDER BY hops, service
 
@@ -62,9 +63,9 @@ MERGE (i)-[x:IMPACTS]->(s)
 ON CREATE SET x.hops = r.hops, x.via = $via
 
 // name: on_call_for
-// purpose: Who is on call at $at for the team that owns $service (rotation edges carry start/end).
-MATCH (s:Service {id: $service})<-[:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
-WHERE oc.start <= $at AND oc.end > $at
+// purpose: Who is on call at $at for the team that owned $service at $at (OWNS and ON_CALL edges carry their validity): after a transfer_ownership, an alert from before the handover still pages the old owner.
+MATCH (s:Service {id: $service})<-[o:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
+WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at) AND oc.start <= $at AND oc.end > $at
 RETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name AS team_name
 
 // name: record_page

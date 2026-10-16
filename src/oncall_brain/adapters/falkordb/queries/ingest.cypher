@@ -14,13 +14,14 @@ MATCH (t:Team {id: r.team})
 MERGE (p)-[:MEMBER_OF]->(t)
 
 // name: ingest_services
-// purpose: Upsert services and which team owns each.
+// purpose: Upsert services and which team owns each. OWNS carries valid_from (r.since: when the company started, unless the row says otherwise) and, once transfer_ownership closes it, valid_to; an edge seeded before validity existed gets its valid_from on the next seed.
 UNWIND $rows AS r
 MERGE (s:Service {id: r.id})
 SET s.name = r.name, s.tier = r.tier
 WITH s, r
 MATCH (t:Team {id: r.team})
-MERGE (t)-[:OWNS]->(s)
+MERGE (t)-[o:OWNS]->(s)
+SET o.valid_from = coalesce(o.valid_from, r.since, 0)
 
 // name: ingest_depends_on
 // purpose: Upsert caller -> callee dependencies. valid_from / valid_to make the dependency map temporal.

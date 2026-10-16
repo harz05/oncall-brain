@@ -20,7 +20,7 @@ Conventions:
 flowchart LR
   Person -->|MEMBER_OF| Team
   Person -->|"ON_CALL (start, end)"| Team
-  Team -->|OWNS| Service
+  Team -->|"OWNS (valid_from, valid_to)"| Service
   Service -->|"DEPENDS_ON (valid_from, valid_to)"| Service
   Change -->|CHANGED| Service
   Change -->|AUTHORED_BY| Person
@@ -79,9 +79,9 @@ fingerprints the seed data.
 
 "Seed" means `services/seeding.py` writes it through the named `ingest_*` statement. `tool` → `statement` means
 that tool (defined in `services/tools.py`, registered once in `agents/registry.py` and exposed to the agent
-loop, the HTTP API and MCP) writes it by running that named write statement. The five event tools (`record_change`,
-`record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, queries in `events.cypher`) keep the
-semantic facts current after seeding.
+loop, the HTTP API and MCP) writes it by running that named write statement. The seven event tools (`record_change`,
+`record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc`, `transfer_ownership`, queries
+in `events.cypher`) keep the semantic facts current after seeding.
 
 | Label | Key properties | Meaning | Written by |
 |---|---|---|---|
@@ -109,7 +109,7 @@ semantic facts current after seeding.
 |---|---|---|---|
 | `(Person)-[:MEMBER_OF]->(Team)` | | Team membership. | seed `ingest_people` |
 | `(Person)-[:ON_CALL]->(Team)` | `start`, `end` (end exclusive) | One on-call shift. The rotation is weekly and covers all three acts. | seed `ingest_on_call` |
-| `(Team)-[:OWNS]->(Service)` | | Ownership. | seed `ingest_services` |
+| `(Team)-[:OWNS]->(Service)` | `valid_from`, `valid_to` (absent = still the owner) | Ownership during that window. A service has one live owner at a time: `transfer_ownership` closes the live edge (`valid_to`) and creates the new team's edge, so paging (`on_call_for`), `blast_radius`, `warn_candidates`, `service_map` and `ask` use the owner at the time asked, `who_knows` still credits the team that ran it, and "who owned payments-gw at the time of inc:0911" reads the history. | seed `ingest_services` (`valid_from` = when the company started); `transfer_ownership` → `transfer_ownership` |
 | `(Service)-[:DEPENDS_ON]->(Service)` | `valid_from`, `valid_to` (absent = still live) | The caller calls the callee during that window. A pair has at most one live edge: `add_dependency` creates a new edge only if none is live, so a dependency that is retired and later re-added gets a new edge with its own window. Adding a live one again only moves its `valid_from` earlier, if the new time is earlier. | seed `ingest_depends_on` (`MERGE` on `valid_from`); `add_dependency` → `add_dependency`; `retire_dependency` → `retire_dependency` (sets `valid_to` on the live edge) |
 | `(Change)-[:CHANGED]->(Service)` | | The service the change touched. | seed `ingest_changes`; `record_change` → `record_change` |
 | `(Change\|Ticket\|Message\|Doc)-[:AUTHORED_BY]->(Person)` | | Who made the change, filed the ticket, wrote the chat message or the doc. `who_knows` counts the docs, tickets and chat someone wrote that mention or decide a service (at most 3 points, so writing about a service never outweighs hands-on evidence). | seed `ingest_changes`, `ingest_tickets`, `ingest_messages`, `ingest_docs`; `record_change` (if an author is given) |
@@ -205,7 +205,7 @@ should a writer ever skip the lock.
 | Memory kind | In the graph | Written | Read |
 |---|---|---|---|
 | **Episodic**: what happened | `Incident` with `TRIGGERED_BY`, `CORRELATED_WITH`, `SHARED_UPSTREAM`, `IMPACTS`, `PAGED`, `CONSULTED`, `HAS_HYPOTHESIS` → `Hypothesis` ← `SUPPORTS`/`REFUTES` `Evidence`, `CAUSED_BY` → `Change`, `HAS_UPDATE`, and the `LOGGED` → `AgentStep` history; `RECALLS` links incidents to each other | by the agents during the incident, and by `resolve_incident` when a human confirms the cause | `recall_similar` finds past incidents by structure: their cause service is on today's live dependency path. Text similarity is not used. `incident_board` replays the board for the planner. |
-| **Semantic**: how the company works | `Team`, `Person`, `Service`, `MEMBER_OF`, `OWNS`, `DEPENDS_ON {valid_from, valid_to}`, `ON_CALL {start, end}`, `Change` + `CHANGED` / `AUTHORED_BY`, sources (`Doc`, `Ticket`, chat `Message`, linked by `REQUESTED`, `MENTIONS`, `DECIDES`, `SUPERSEDES`, `AUTHORED_BY`) | by seed / ingest, then kept current by the event tools (docs, tickets and chat are seeded only; there is no event tool for them yet) | Every traversal filters time-bounded edges to the alert time, so the graph answers "who depended on what, and who was on call, at that moment". `ask`, `who_knows` and `change_story` answer company-brain questions with sources; `SUPERSEDES` says which doc is current. |
+| **Semantic**: how the company works | `Team`, `Person`, `Service`, `MEMBER_OF`, `OWNS {valid_from, valid_to}`, `DEPENDS_ON {valid_from, valid_to}`, `ON_CALL {start, end}`, `Change` + `CHANGED` / `AUTHORED_BY`, sources (`Doc`, `Ticket`, chat `Message`, linked by `REQUESTED`, `MENTIONS`, `DECIDES`, `SUPERSEDES`, `AUTHORED_BY`) | by seed / ingest, then kept current by the event tools (docs, tickets and chat are seeded only; there is no event tool for them yet) | Every traversal filters time-bounded edges to the alert time, so the graph answers "who depended on what, and who was on call, at that moment". `ask`, `who_knows` and `change_story` answer company-brain questions with sources; `SUPERSEDES` says which doc is current. |
 | **Procedural**: what fixes it | `Runbook {kind, steps, uses, successes}` + `FOR_SERVICE` + `FIXED_WITH` | `resolve_incident` learns `rb:<service>:<kind>` from a confirmed fix, or adds 1 to `uses` and `successes` if it already exists. `record_evidence` adds 1 to `uses` when a check refutes the runbook's suggestion, so its confidence drops. | `memory_suspects` follows `RECALLS` → `FIXED_WITH` → `Runbook` → `FOR_SERVICE` and suspects in-window changes of the runbook's kind on that service, most trusted runbook first. `update_facts` adds the runbook memory used for the cause (`h.runbook`), or the one the incident was `FIXED_WITH`, to the status update as its "Next action". A runbook that only shares the service and change kind is not suggested: it may fix a different failure. |
 | **Conversational**: what each engineer asked | `Session` + `Question` per user and conversation, `OPENED`, `ASKED`, `FOLLOWS`, `ABOUT {carried}`, `ANSWERED_WITH {rank}` | `ask`, when given a `user`, appends every question it answers (`record_question`) with the entities it linked, the sources it cited and the answer. Per tenant and per user: another user's questions are never read, and a tenant reset clears them with the rest of the memory. | `session_context` gives the previous question's entities, so "and who is on call for it?" is read as "... for payments-gw" and the answer says so. `user_questions` answers "what did I ask about payments-gw" (the `ask` history route and the `my_questions` tool), newest first, with each question's sources. |
 

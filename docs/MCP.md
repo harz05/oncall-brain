@@ -2,8 +2,8 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 25 registry tools plus two use-case tools,
-27 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 26 registry tools plus two use-case tools,
+28 in all.
 
 | Tool | What it does |
 |---|---|
@@ -13,7 +13,7 @@ the MCP Inspector or any other MCP client can call the tools directly: 25 regist
 | human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
 | company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; no LLM. With a `user` and a `session` key the question is remembered in that person's session in the graph, a follow-up can say "it" or "them", and "what did I ask about payments-gw" is answered from it), `my_questions` (the same recall as a tool: a user's earlier questions, newest first, with what each was about and the sources it cited, by subject or session), `who_knows`, `change_story` |
 | read tools | `dependency_path`, `service_map`, `incident_board` |
-| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
+| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision), `transfer_ownership` (a team takes over a service: the old owner's `OWNS` edge is closed, never deleted, so an alert from before the handover still pages the old team and "who owned payments-gw at the time of inc:0911" still names it): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
 Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
@@ -45,7 +45,7 @@ Desktop or claude.ai needs. There is no per-user auth: anyone with the token can
 
 ## What an outside model sees, and whether it picks right
 
-The server publishes `instructions` (the three ways to use it and what ids look like), 26 tools with a description
+The server publishes `instructions` (the three ways to use it and what ids look like), 28 tools with a description
 and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
 `readOnlyHint` annotations, and two prompts:
 
@@ -106,7 +106,7 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 27 tools, 2 prompts, and the who-owns skill's three calls on a
+the server through the launcher with an MCP client: 28 tools, 2 prompts, and the who-owns skill's three calls on a
 freshly reset tenant, every answer carrying its Cypher.
 
 ## Claude Desktop
