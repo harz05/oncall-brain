@@ -962,6 +962,10 @@ function renderChat() {
   log.scrollTop = Math.max(0, (question || last)?.offsetTop - log.offsetTop - 8 || 0);
 }
 
+// One conversation per browser tab: ask remembers it in the graph (Session and Question nodes), so a follow-up can
+// say "it" and "what did I ask about X" works. Keys match services/sessions.py (USER and KEY).
+const CHAT = { user: 'web', session: `web-${Math.random().toString(36).slice(2, 10)}` };
+
 async function askQ(q) {
   if (!q || state.asking || OFFLINE) return;
   state.asking = true;
@@ -970,7 +974,7 @@ async function askQ(q) {
   state.chat.push({ who: 'you', text: q }, m);
   renderChat();
   try {
-    const r = await api('POST', `${T()}/tools/ask`, { question: q });
+    const r = await api('POST', `${T()}/tools/ask`, { question: q, user: CHAT.user, session: CHAT.session });
     Object.assign(m, { pending: false, data: r.data, queries: r.queries });
     learnNames({ tool: 'ask', data: r.data });
     announce(splitAnswer(r.data.answer)[0]);
