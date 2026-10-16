@@ -110,7 +110,11 @@ the server through the launcher with an MCP client: 28 tools, 2 prompts, and the
 freshly reset tenant, every answer carrying its Cypher. Remote mode is tested the same way: the `oncall-brain-remote`
 entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 28 tools
 and answers `ask`; a wrong token gets 401
-(`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`).
+(`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`). Claude Code itself agrees:
+`claude --plugin-dir ./plugin mcp list` (2.1.301) shows `plugin:oncall-brain:oncall-brain` Connected over stdio and,
+with `ONCALL_BRAIN_URL` and `ONCALL_BRAIN_TOKEN` pointing at a `--http` server started with `API_TOKEN`,
+`plugin:oncall-brain:oncall-brain-remote` Connected too; with a wrong token it reports the server's 401 ("missing or
+wrong API token"); with neither variable set it tries `http://127.0.0.1:8001/mcp`, which is `make mcp-http`.
 
 ## Claude Desktop
 
