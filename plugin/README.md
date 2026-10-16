@@ -25,4 +25,22 @@ interpreter (`$VIRTUAL_ENV/bin/python`, or `ONCALL_BRAIN_PYTHON` if set), else t
 creates. Settings (`.env`) are read from the checkout; the deterministic planner needs no key, `LLM_PROVIDER` picks a
 model for the agents.
 
+## Remote mode: nothing local
+
+`.mcp.json` carries a second server, `oncall-brain-remote`, that connects over Streamable HTTP to a deployed
+On-call Brain instead of launching one from a checkout (`docs/DEPLOY.md` for the deploy, `docs/MCP.md` for the
+transport):
+
+```bash
+export ONCALL_BRAIN_URL=https://oncall.example.com      # the deployment; the plugin adds /mcp
+export ONCALL_BRAIN_TOKEN=<that deployment's API_TOKEN>  # sent as "Authorization: Bearer ..."
+claude --plugin-dir ./plugin                            # or /plugin install oncall-brain --marketplace <owner>/<repo>
+```
+
+Claude Code expands `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` and `Bearer ${ONCALL_BRAIN_TOKEN}` from your
+environment when it starts the plugin's servers, so with neither variable set the entry reaches a local `make mcp-http`.
+Both servers publish the same 28 tools and the skills work with either. With no checkout next to the plugin the stdio
+server `oncall-brain` cannot start; Claude Code reports it as failed and the remote server carries on. The round trip
+is tested in `tests/integration/test_plugin.py` against a local `--http` server started with `API_TOKEN`.
+
 Try: `/oncall-brain:incident alert:checkout-latency`, then `/oncall-brain:who-owns kafka`.

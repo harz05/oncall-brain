@@ -171,6 +171,13 @@ make setup && make db && make seed                     # the venv, FalkorDB and 
 claude --plugin-dir ./plugin                           # Claude Code with the oncall-brain plugin, from this checkout
 ```
 
+Or, with nothing local, point the plugin at a deployed instance ([docs/DEPLOY.md](docs/DEPLOY.md)): its second server
+entry, `oncall-brain-remote`, connects over Streamable HTTP with the URL and token from your environment.
+
+```bash
+ONCALL_BRAIN_URL=https://oncall.example.com ONCALL_BRAIN_TOKEN=<its API_TOKEN> claude --plugin-dir ./plugin
+```
+
 Or install it from the marketplace this repo carries (Claude Code 2.1.275 or later), then start `claude` anywhere:
 
 ```
@@ -178,12 +185,14 @@ Or install it from the marketplace this repo carries (Claude Code 2.1.275 or lat
 ```
 
 The plugin (`plugin/`) ships the MCP server (launched over stdio by `plugin/bin/oncall-brain-mcp`; set
-`ONCALL_BRAIN_HOME` to the checkout when the plugin lives elsewhere) and three skills:
+`ONCALL_BRAIN_HOME` to the checkout when the plugin lives elsewhere; or reached over Streamable HTTP by the
+`oncall-brain-remote` entry when `ONCALL_BRAIN_URL` and `ONCALL_BRAIN_TOKEN` are set) and three skills:
 `/oncall-brain:incident alert:checkout-latency`, `/oncall-brain:who-owns kafka`,
 `/oncall-brain:ask why was legacy-billing retired from the checkout path`. Without the plugin, the server alone:
 `claude mcp add --transport stdio oncall-brain -- <venv>/bin/python -m oncall_brain.mcp_server`.
 `tests/integration/test_plugin.py` validates the manifests (with `claude plugin validate --strict` when the CLI is
-installed) and drives the server through the plugin's launcher with an MCP client, following the who-owns skill.
+installed), drives the server through the plugin's launcher with an MCP client, following the who-owns skill, and
+reaches a local `--http` server started with `API_TOKEN` through the remote entry, expanded as Claude Code expands it.
 
 Then, in Claude Code: *"checkout is slow and alert:checkout-latency just fired on tenant acme. Find out why."* Claude
 calls `respond_to_alert`, reads the outcome (likely cause with a confidence label, who was paged, what was ruled out

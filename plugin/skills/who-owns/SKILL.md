@@ -5,7 +5,7 @@ argument-hint: <service> [tenant]
 ---
 
 Answer who owns or knows the service named in `$ARGUMENTS` from the company graph, with the On-call Brain MCP
-tools (server `oncall-brain`). The first word is the service (a name like `kafka` or an id like `svc:kafka`;
+tools (server `oncall-brain`, or `oncall-brain-remote` when the plugin points at a deployed instance). The first word is the service (a name like `kafka` or an id like `svc:kafka`;
 ids are `svc:<name>`); the second, if present, is the tenant, default `acme`.
 
 1. Call `who_knows` with the tenant and the service id. It ranks people by evidence: owning team, changes they

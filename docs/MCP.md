@@ -96,7 +96,7 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 | File | What it is |
 |---|---|
 | `plugin/.claude-plugin/plugin.json` | The manifest: name `oncall-brain`, points at `.mcp.json`. |
-| `plugin/.mcp.json` | The MCP server entry: `${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp` over stdio. |
+| `plugin/.mcp.json` | Two MCP server entries: `oncall-brain` (stdio: `${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp`) and `oncall-brain-remote` (`type: http`, `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` with `Authorization: Bearer ${ONCALL_BRAIN_TOKEN}`). Claude Code expands `${VAR}` and `${VAR:-default}` in a plugin server's `url` and `headers`, so a deployed instance needs nothing local; with neither variable set the entry reaches a local `make mcp-http`. |
 | `plugin/bin/oncall-brain-mcp` | Launcher: runs `<checkout>/.venv/bin/python -m oncall_brain.mcp_server` from the checkout (the plugin's parent directory, or `$ONCALL_BRAIN_HOME`), so `.env` is found. Arguments pass through (`--http --port 8001`). |
 | `plugin/skills/incident/SKILL.md` | `/oncall-brain:incident <alert_id> [tenant]`: the `work_alert` flow, with the heads-up and the confirm step. |
 | `plugin/skills/who-owns/SKILL.md` | `/oncall-brain:who-owns <service> [tenant]`: `who_knows`, then `ask`, then the rotation. |
@@ -107,7 +107,10 @@ From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
 the server through the launcher with an MCP client: 28 tools, 2 prompts, and the who-owns skill's three calls on a
-freshly reset tenant, every answer carrying its Cypher.
+freshly reset tenant, every answer carrying its Cypher. Remote mode is tested the same way: the `oncall-brain-remote`
+entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 28 tools
+and answers `ask`; a wrong token gets 401
+(`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`).
 
 ## Claude Desktop
 

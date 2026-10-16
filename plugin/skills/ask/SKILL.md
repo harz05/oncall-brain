@@ -5,7 +5,7 @@ argument-hint: <question> [--tenant <tenant>] [--as <person id>]
 ---
 
 Answer the question in `$ARGUMENTS` from the company graph with the On-call Brain MCP tools (server
-`oncall-brain`). The tenant is `acme` unless `--tenant <name>` is given.
+`oncall-brain`, or `oncall-brain-remote` when the plugin points at a deployed instance). The tenant is `acme` unless `--tenant <name>` is given.
 
 1. Call `ask` with the tenant and the question. It runs a FalkorDB full-text search over docs, tickets and chat,
    expands around the hits in the graph, and returns an answer with every source cited.

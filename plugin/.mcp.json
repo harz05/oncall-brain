@@ -2,8 +2,17 @@
   "mcpServers": {
     "oncall-brain": {
       "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp"
+      ],
       "env": {}
+    },
+    "oncall-brain-remote": {
+      "type": "http",
+      "url": "${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ONCALL_BRAIN_TOKEN}"
+      }
     }
   }
 }

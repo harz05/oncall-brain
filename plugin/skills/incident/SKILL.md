@@ -4,7 +4,7 @@ description: Work an alert end to end with On-call Brain. Use when an alert fire
 argument-hint: <alert_id> [tenant]
 ---
 
-Work the alert given in `$ARGUMENTS` with the On-call Brain MCP tools (server `oncall-brain`). The first word is
+Work the alert given in `$ARGUMENTS` with the On-call Brain MCP tools (server `oncall-brain`, or `oncall-brain-remote` when the plugin points at a deployed instance). The first word is
 the alert id (like `alert:checkout-latency`); the second, if present, is the tenant (the company graph), default
 `acme`. If no alert id was given, call `service_map` for the tenant, list the alerts it knows about, and ask which
 one.
