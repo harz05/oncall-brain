@@ -53,7 +53,8 @@ OPTIONAL MATCH (msg:Message {id: cid})
 OPTIONAL MATCH (rb:Runbook {id: cid})
 OPTIONAL MATCH (p:Person {id: cid})
 OPTIONAL MATCH (d:Doc {id: cid})
-WITH m, coalesce(c, t, msg, rb, p, d) AS n
+OPTIONAL MATCH (ini:Initiative {id: cid})
+WITH m, coalesce(c, t, msg, rb, p, d, ini) AS n
 WHERE n IS NOT NULL
 MERGE (m)-[:CITES]->(n)
 RETURN count(n) AS cited
@@ -142,6 +143,19 @@ WITH DISTINCT d, max(CASE WHEN x = c THEN 1 ELSE 0 END) AS about_change,
 RETURN d.id AS id, d.title AS title, d.kind AS kind, d.at AS at, about_change, weighty
 ORDER BY about_change DESC, weighty DESC, at DESC
 LIMIT 2
+
+// name: cause_initiative
+// purpose: The work behind the leading cause: the ticket that REQUESTED the change and the initiative it is PART_OF, with the team that DRIVES it, the person who LEADS it and its due date, so the status update says which project the incident traces back to (and cites it).
+MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)
+WHERE h.status IN ['confirmed', 'supported']
+WITH h, c ORDER BY h.status
+LIMIT 1
+MATCH (t:Ticket)-[:REQUESTED]->(c), (t)-[:PART_OF]->(i:Initiative)
+OPTIONAL MATCH (team:Team)-[:DRIVES]->(i)
+OPTIONAL MATCH (lead:Person)-[:LEADS]->(i)
+RETURN c.id AS change, t.id AS ticket, t.title AS ticket_title, i.id AS initiative, i.name AS name, i.goal AS goal,
+       i.status AS status, i.due AS due, team.name AS team, lead.name AS lead, lead.handle AS lead_handle
+LIMIT 1
 
 // name: incident_memory
 // purpose: What memory did for an incident, read back from the graph (a stored incident has no live trace): the past incidents it recalled (RECALLS, best score first) with their fix, and whether its leading cause came from a memory-derived hypothesis.

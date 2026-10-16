@@ -170,7 +170,7 @@ def test_fulltext_index_is_idempotent_survives_reset_and_scenarios_still_load(st
     assert data["docs"]
     load(repo, data)
     rows = repo.read("knowledge_context", ids=["doc:cost-review-pgw"]).rows
-    assert rows and {r["label"] for r in rows} <= {"Service", "Person", "Doc", "Message", "Ticket"}
+    assert rows and {r["label"] for r in rows} <= {"Service", "Person", "Doc", "Message", "Ticket", "Initiative"}
 
 
 def test_a_new_decision_record_flips_the_ask_answer_and_flags_the_old_one(store, tenant):

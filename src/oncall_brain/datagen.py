@@ -80,7 +80,7 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     rng = random.Random(seed)
     d: dict[str, list[dict]] = {k: [] for k in (
         "teams", "people", "services", "depends_on", "on_call", "changes", "alerts", "anomalies",
-        "runbooks", "incidents", "tickets", "messages", "docs")}
+        "runbooks", "incidents", "tickets", "messages", "docs", "initiatives")}
 
     # --- org: teams, people, services, dependencies -------------------------------------------------
     names = rng.sample([f"{f} {last}" for f in FIRST for last in LAST], 24)
@@ -146,7 +146,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     anomaly("anom:legacy-1", "legacy-billing", T1 - 45 * MIN, "errors", "5xx on /invoice")
     d["tickets"].append({"id": "ticket:CR-881", "change": "chg:pgw-pool-1", "author": pay[1], "at": T1 - 2 * DAY,
                          "title": "CR-881 Reduce idle connections on payments-gw",
-                         "text": "Cost review: pool is mostly idle overnight. Lower max_connections to 20."})
+                         "text": "Cost review: pool is mostly idle overnight. Lower max_connections to 20.",
+                         "initiative": "init:q4-cost-review"})
     d["messages"].append({"id": "msg:pay-deploys-1", "change": "chg:pgw-pool-1", "author": pay[1],
                           "at": T1 - 41 * MIN, "channel": "#payments-deploys",
                           "text": "Rolling CR-881 now: payments-gw pool max_connections 200 -> 20."})
@@ -168,7 +169,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     anomaly("anom:refunds-2", "refunds", T2 - 25 * MIN, "latency", "p99 4.4s on POST /refunds")
     d["tickets"].append({"id": "ticket:CR-902", "change": "chg:pgw-pool-2", "author": pay[3], "at": T2 - DAY,
                          "title": "CR-902 Roll out config template 2026.10.18",
-                         "text": "Quarterly config template rollout across payments services."})
+                         "text": "Quarterly config template rollout across payments services.",
+                         "initiative": "init:config-templates"})
 
     # --- act 3: alert storm --------------------------------------------------------------------------
     for aid, svc, dt in (("alert:checkout-latency-3", "checkout", 4), ("alert:refunds-latency-3", "refunds", 2),
@@ -189,7 +191,8 @@ def generate(seed: int = 7) -> dict[str, list[dict]]:
     anomaly("anom:subs-3", "subscriptions", T3 - 1 * MIN, "latency", "p99 3.9s on renewals")
     d["tickets"].append({"id": "ticket:CR-917", "change": "chg:pg-conn-3", "author": team_people["platform"][1],
                          "at": T3 - DAY, "title": "CR-917 Lower postgres-orders max_connections",
-                         "text": "Memory pressure on the primary; cap connections at 150."})
+                         "text": "Memory pressure on the primary; cap connections at 150.",
+                         "initiative": "init:pg-capacity"})
 
     # --- history: past incidents with runbooks (episodic + procedural memory already on file) ----------
     owner_of = {s: tid for tid, (_, services) in TEAMS.items() for s in services}
@@ -266,14 +269,28 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
                           "mentions": _ids(mentions), "decides": decides and _svc(decides),
                           "supersedes": supersedes and f"doc:{supersedes}"})
 
-    def ticket(key, title, author, at, text, mentions, change=None):
+    def ticket(key, title, author, at, text, mentions, change=None, initiative=None):
         d["tickets"].append({"id": f"ticket:{key}", "title": f"{key} {title}", "author": author, "at": at,
-                             "text": text, "change": change, "mentions": _ids(mentions)})
+                             "text": text, "change": change, "mentions": _ids(mentions), "initiative": initiative})
 
     def msg(chan, author, at, text, mentions):
         d["messages"].append({"id": f"msg:chat-{len(d['messages']):03d}", "channel": chan, "author": author, "at": at,
                               "text": text, "change": None, "mentions": _ids(mentions)})
 
+    # --- initiatives: the work behind the story's changes (a team DRIVES one, a person LEADS it, tickets are
+    # PART_OF it, docs and chat MENTION it), so people, projects and decisions connect through the work --------
+    def initiative(key, name, goal, team, lead, since, due, status="active"):
+        d["initiatives"].append({"id": f"init:{key}", "name": name, "goal": goal, "team": f"team:{team}",
+                                 "lead": lead, "since": since, "due": due, "status": status})
+
+    initiative("q4-cost-review", "Q4 cost review", "Cut the infrastructure bill by 15% before the end of Q4 without "
+               "a load-test regression on any tier 1 service.", "payments", pay[0], ago(30), T1 + 77 * DAY)
+    initiative("config-templates", "Config template rollout 2026.10", "One config template for every payments "
+               "service, rolled out on the 18th; per-service overrides go back to the template defaults.",
+               "payments", pay[3], ago(14), T2 + 3 * DAY)
+    initiative("pg-capacity", "postgres-orders capacity plan", "Keep the postgres-orders primary out of swap: lower "
+               "max_connections to 150 and put PgBouncer in front of it before the peak season.", "platform",
+               plat[0], ago(160), T3 + 30 * DAY)
     # --- planted: why the payments-gw pool went from 200 to 20 (act 1's cause) -------------------------------
     doc("pm-load-test-pgw", "postmortem", "Postmortem: payments gateway pool exhausted in the peak load test", pay[3],
         ago(210), "In the peak-season load test payments-gw (the payments gateway) ran with a connection pool of "
@@ -291,7 +308,7 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
         "connections but uses fewer than 20 overnight. Decision: lower the pool max_connections from 200 to 20, which "
         "cuts the gateway bill by about 40%. Requested as CR-881. Known risk: the peak load test postmortem asked for "
         "at least 150 at peak; we accept it and will raise the pool again if payments p99 moves.",
-        ["payments-gw", "payments", "chg:pgw-pool-1"], decides="payments-gw")
+        ["payments-gw", "payments", "chg:pgw-pool-1", "init:q4-cost-review"], decides="payments-gw")
     # --- planted: who designed the checkout retries (v2 supersedes v1, different authors) ----------------------
     doc("design-retries-v1", "design", "Design: checkout payment retries (v1, fixed interval)", co[3], ago(330),
         "checkout retries a failed payments call 5 times at a fixed 500 ms interval. Simple, but when payments is slow "
@@ -310,8 +327,8 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
         "legacy-billing returned 5xx on /invoice every week, added 300 ms to each checkout and has had no owner since "
         "the billing team merged into payments. Consequence: from today checkout no longer depends on legacy-billing, "
         "so a legacy-billing deploy cannot slow checkout. legacy-billing keeps running for old subscription invoices "
-        "until Q1. Work tracked in PAY-412.", ["legacy-billing", "checkout", "payments"], decides="legacy-billing",
-        supersedes="design-invoicing")
+        "until Q1. Work tracked in PAY-412.", ["legacy-billing", "checkout", "payments", "init:q4-cost-review"],
+        decides="legacy-billing", supersedes="design-invoicing")
     # --- planted: the postgres-orders connection limit debate (act 3's cause) ----------------------------------
     doc("pm-pg-failover", "postmortem", "Postmortem: postgres-orders connection storm after failover", plat[0],
         ago(160), "After a failover every client reconnected at once and postgres-orders hit its connection limit "
@@ -322,13 +339,14 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
         "Status: accepted, not started. Decision: every service reaches postgres-orders through PgBouncer in "
         "transaction mode, so the server-side connection limit can drop from 500 to 150 without starving callers. "
         "Until then payments, refunds and inventory each need up to 60 server connections at peak. Tracked in "
-        "PLAT-233.", ["postgres-orders", "payments", "refunds", "inventory"], decides="postgres-orders")
+        "PLAT-233.", ["postgres-orders", "payments", "refunds", "inventory", "init:pg-capacity"],
+        decides="postgres-orders")
     doc("pg-conn-budget", "design", "Design note: postgres-orders memory and connection limit", plat[1], ago(2),
         "Each postgres-orders connection costs about 10 MB, so 500 connections leave too little memory for the buffer "
         "cache and the primary swaps under load. Proposal: lower max_connections from 500 to 150 (CR-917). Risk "
         "raised in #platform: payments, refunds and inventory open up to 60 connections each at peak, so 150 is tight "
         "until PgBouncer (PLAT-233, ADR-014) lands.",
-        ["postgres-orders", "payments", "refunds", "inventory", "chg:pg-conn-3"])
+        ["postgres-orders", "payments", "refunds", "inventory", "chg:pg-conn-3", "init:pg-capacity"])
     # --- the rest of the company's paperwork ---------------------------------------------------------------
     doc("adr-006", "decision", "ADR-006: Kafka retention of 3 days", plat[2], ago(300),
         "Status: superseded. Keep 3 days of events on kafka; consumers that fall further behind re-read from "
@@ -416,10 +434,10 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
            "Status: open.", ["payments-gw", "doc:pm-load-test-pgw"])
     ticket("PAY-412", "Remove checkout calls to legacy-billing", co[1], ago(6),
            "Per ADR-012: checkout gets invoices from payments; delete the legacy-billing client. Status: done.",
-           ["checkout", "legacy-billing", "doc:adr-012"])
+           ["checkout", "legacy-billing", "doc:adr-012"], initiative="init:q4-cost-review")
     ticket("PLAT-233", "Put PgBouncer in front of postgres-orders", plat[0], ago(158),
            "Action item from the failover postmortem, decided in ADR-014. Status: open, not started.",
-           ["postgres-orders", "doc:adr-014", "doc:pm-pg-failover"])
+           ["postgres-orders", "doc:adr-014", "doc:pm-pg-failover"], initiative="init:pg-capacity")
     ticket("CHK-301", "Checkout retries v2: backoff, jitter, idempotency keys", co[0], ago(118),
            "Implements the checkout retries v2 design. Status: done.", ["checkout", "payments-gw",
                                                                         "doc:design-retries-v2"])
@@ -443,10 +461,11 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
         ("#payments", pay[3], ago(8, 20), "The peak load test postmortem says keep the gateway pool at 150 or more. "
          "20 is fine at night, not at the lunch peak.", ["payments-gw", "doc:pm-load-test-pgw"]),
         ("#payments", pay[1], ago(8, 35), "Finance wants the saving this quarter. Going with 20; we can raise it "
-         "again if payments p99 moves.", ["payments-gw"]),
+         "again if payments p99 moves.", ["payments-gw", "init:q4-cost-review"]),
         ("#payments", pay[0], ago(2), "CR-881 approved in the weekly change review.", ["ticket:CR-881"]),
         ("#payments", pay[3], ago(-1), "Config template 2026.10.18 goes out on the 18th across payments services; it "
-         "resets per-service overrides to the template defaults.", ["payments-gw", "payments", "ticket:CR-902"]),
+         "resets per-service overrides to the template defaults.",
+         ["payments-gw", "payments", "ticket:CR-902", "init:config-templates"]),
         ("#checkout-eng", co[0], ago(121), "Retries v2 design is up: backoff with jitter, 3 attempts, idempotency "
          "keys on every charge. It replaces the fixed 500 ms retries.", ["checkout", "doc:design-retries-v2"]),
         ("#checkout-eng", co[3], ago(120), "+1. The fixed-interval retries from my v1 design hammered payments "
@@ -462,7 +481,8 @@ def _corpus(d: dict[str, list[dict]], tp: dict[str, list[str]], outside: Callabl
          "the primary swaps under load. Proposing max_connections 500 -> 150.",
          ["postgres-orders", "doc:pg-conn-budget"]),
         ("#platform", plat[0], ago(2, 40), "150 is too low for payments, refunds and inventory at peak without "
-         "PgBouncer. Can PLAT-233 land first?", ["postgres-orders", "payments", "ticket:PLAT-233"]),
+         "PgBouncer. Can PLAT-233 land first?",
+         ["postgres-orders", "payments", "ticket:PLAT-233", "init:pg-capacity"]),
         ("#platform", plat[1], ago(2, 55), "Memory pressure is real; going with 150 under CR-917 and watching "
          "connection slots.", ["postgres-orders", "ticket:CR-917"]),
         ("#payments", pay[2], ago(-1, -300), "FYI for CR-917: payments opens up to 60 connections to postgres-orders "

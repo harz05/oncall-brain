@@ -1,6 +1,6 @@
 ---
 name: ask
-description: Ask the company brain a free-form question with On-call Brain, such as "why was legacy-billing retired from the checkout path", "how do I roll back a bad deploy on cart", "what happened to auth last month" or, as a follow-up, "and who is on call for it". Use when the answer lives in the company's docs, tickets, chat, changes or incidents, or when the person wants to recall what they asked before.
+description: Ask the company brain a free-form question with On-call Brain, such as "why was legacy-billing retired from the checkout path", "how do I roll back a bad deploy on cart", "what happened to auth last month", "what is the Q4 cost review changing and who is on it" or, as a follow-up, "and who is on call for it". Use when the answer lives in the company's docs, tickets, chat, changes or incidents, or when the person wants to recall what they asked before.
 argument-hint: <question> [--tenant <tenant>] [--as <person id>]
 ---
 

@@ -16,7 +16,7 @@ PREFIX, PRISTINE, RESTORING, SCRATCH = "tenant_", "pristine_", "restoring_", "sc
 # Index every label we MERGE or look up by id, and give each a UNIQUE constraint on `id` (ensure_schema), so the
 # database itself refuses a second node with an id that exists. FalkorDB raises if an index already exists; that's fine.
 INDEXED_LABELS = ["Team", "Person", "Service", "Change", "Alert", "Anomaly", "Incident", "Hypothesis",
-                  "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep", "Session", "Question"]
+                  "Evidence", "Runbook", "Message", "Ticket", "Doc", "AgentStep", "Session", "Question", "Initiative"]
 TIME_INDEXED = ["Change", "Anomaly"]  # range index on .at: the alert-window filters scan these
 FULLTEXT = {"Doc": ["title", "text"], "Ticket": ["title", "text"], "Message": ["text"]}  # what `ask` searches
 

@@ -31,8 +31,9 @@ Three ways to use it:
    the status update. When a human confirms the cause, call resolve_incident(tenant, incident_id, change_id) so the
    fix becomes memory for the next incident. raise_alert records a new alert first if it is not in the graph yet.
 2. A question about the company: ask(tenant, question) answers "who owns kafka", "why was legacy-billing retired",
-   "how do I roll back a bad deploy on cart", "what happened to auth" with sources. who_knows ranks the people who
-   know a service; change_story traces a change to its ticket, chat, docs and author; dependency_path, blast_radius
+   "how do I roll back a bad deploy on cart", "what happened to auth", "what is the Q4 cost review changing and who
+   is on it" with sources. who_knows ranks the people who know a service; change_story traces a change to its
+   ticket, chat, docs and author; dependency_path, blast_radius
    and service_map answer structural questions. Pass user (a Person id such as person:hana-costa) and keep one
    session key through a conversation: each question is then remembered in the graph, a follow-up can say "it" or
    "them", and my_questions(tenant, user) or asking "what did I ask about payments-gw" recalls them with sources.

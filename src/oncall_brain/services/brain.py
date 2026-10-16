@@ -1,11 +1,14 @@
 """Company brain: answer a free-form question from the graph first, then from the docs, tickets and chat in it.
 
-1. Entity linking (link_entities): the services, teams, people, changes, tickets and incidents the question names.
+1. Entity linking (link_entities): the services, teams, people, changes, tickets, incidents and initiatives the
+   question names.
 2. Intent routing by plain keyword rules (INTENTS, first match wins), answered from edges about the linked entities:
    owner -> OWNS valid at the time asked (a named incident's time, else the live edge, with the owners before and
    after), members, ON_CALL, who_knows; expert -> who_knows; why -> DECIDES / SUPERSEDES decision records and
    change_story; how -> Runbook FOR_SERVICE, runbook pages, incidents FIXED_WITH; happened -> incidents IMPACTS /
-   CAUSED_BY. No intent, or nothing linked of the kind it needs: the full-text answer alone.
+   CAUSED_BY; project / members -> an Initiative's DRIVES team, LEADS person, PART_OF tickets with their REQUESTED
+   changes and the incidents those are blamed for, and the docs that MENTION it. No intent, or nothing linked of the
+   kind it needs: the full-text answer alone (a linked initiative with no rule is answered as "project").
 3. FalkorDB's full-text indexes find the supporting docs, tickets and chat; on equal coverage of the question, those
    that MENTION (DECIDE, REQUESTED, were AUTHORED_BY) a linked entity or a person the fact named go first. The
    graph around them (MENTIONS, AUTHORED_BY, DECIDES, SUPERSEDES, REQUESTED, CITES, HAS_UPDATE, a change's CHANGED
@@ -39,20 +42,25 @@ INTENTS = (
     ("history", re.compile(r"\bwhat (did|have) i ask|\bdid i ask\b|\bmy (last|previous|earlier|recent|past) "
                            r"questions?\b|\bwhat was i asking\b|\bmy questions\b")),
     ("owner", re.compile(r"\bown(s|ed|er|ers)?\b|\bwhose\b|\bwhich team\b|\bon[ -]call\b")),
+    # After owner, so "who is on call" stays ownership; "who is on the Q4 cost review" is its people.
+    ("members", re.compile(r"\bwho('s| is| are| was| were) (on|in|behind|working on|leading|driving|running)\b"
+                           r"|\bwho (leads|drives|works on)\b")),
+    ("project", re.compile(r"\bwhat('s| is| are| was| were) .*\b(changing|delivering|covering)\b|\binitiative"
+                           r"|\bproject|\bprogramme?\b|\bwhen is .* due\b|\bdue (date|by|on|in)\b|\bdeadline")),
     ("expert", re.compile(r"\bwho knows\b|\bexperts?\b|\bask\b")),
     ("why", re.compile(r"\bwhy\b|\bdecid|\bdecision")),
     ("how", re.compile(r"\bhow (do|can|should|to)\b|\broll ?back|\brevert|\bfix|\brunbook")),
     ("happened", re.compile(r"\bwhat happened\b|\bincident|\boutage")),
 )
 # Same words, two entities (service and team 'checkout'): keep the more specific one; the team comes via OWNS.
-KIND_RANK = {"change": 0, "ticket": 1, "incident": 2, "service": 3, "person": 4, "team": 5}
+KIND_RANK = {"change": 0, "ticket": 1, "incident": 2, "initiative": 3, "service": 4, "person": 5, "team": 6}
 
 
 class AskArgs(BaseModel):
     question: str = Field(max_length=300, description="A question in plain words, e.g. who owns kafka? who owned "
                           "payments-gw at the time of inc:0911? why was legacy-billing retired? how do I roll back a "
-                          "bad deploy on cart? As a follow-up: and who is on call for it? To recall: what did I ask "
-                          "about payments-gw?")
+                          "bad deploy on cart? what is the Q4 cost review changing and who is on it? As a follow-up: "
+                          "and who is on call for it? To recall: what did I ask about payments-gw?")
     at: int | None = Field(None, description="Epoch seconds for 'who owned' and 'who was on call'; default: a "
                            "named incident's time for the owner, the latest alert in the graph for the rotation")
     user: str | None = Field(None, pattern=sessions.USER, description="Who is asking, e.g. person:hana-costa (a "
@@ -335,7 +343,73 @@ def _happened(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str]
                      else f"No incidents on record for {names}.")
 
 
-ROUTES = {"owner": _owner, "expert": _expert, "why": _why, "how": _how, "happened": _happened}
+def _project(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], at: int | None,
+             who_first: bool = False) -> None:
+    """An initiative as the graph has it: goal, the team driving and the person leading it, its tickets with the
+    change each requested and the incidents that change is blamed for, who is on it (lead, filers, change authors),
+    and the decision records and design notes that mention it (current ones first)."""
+    if not (inits := _of(ents, "initiative")):
+        return
+    for r in ans.read(ctx, "initiative_story", ids=[e["id"] for e in inits])[:2]:
+        people: dict[str, tuple[str, list[str]]] = {}
+        if r["team"]:
+            ans.link(r["team"], "DRIVES", r["id"], r["team"], "team", r["team_name"])
+        if r["lead"]:
+            ans.link(r["lead"], "LEADS", r["id"], r["lead"], "person", r["lead_name"])
+            ans.people.append(r["lead"])
+            people[r["lead"]] = (r["lead_name"], ["lead"])
+        head = (f"'{r['name']}' is {r['status']}" + (f", driven by {r['team_name']}" if r["team"] else "")
+                + (f", led by {r['lead_name']}" if r["lead"] else "") + (f", due {_day(r['due'])}" if r["due"] else "")
+                + f": {r['goal']}")
+        work = []
+        for t in sorted(r["tickets"], key=lambda t: t["at"] or 0):
+            ans.sources.append(t["id"])
+            ans.edges.append((t["id"], r["id"], "PART_OF"))
+            if t["by_id"]:
+                ans.link(t["id"], "AUTHORED_BY", t["by_id"], t["by_id"], "person", t["by"])
+                people.setdefault(t["by_id"], (t["by"], []))[1].append(f"filed {t['id'].removeprefix('ticket:')}")
+            line = t["title"]
+            if t["change"]:
+                ans.link(t["id"], "REQUESTED", t["change"], t["change"], "change", t["summary"])
+                ans.link(t["change"], "CHANGED", t["service"], t["service"], "service", t["service_name"])
+                line += (f" -> {t['change']} ({t['kind']} on {t['service_name']}"
+                         + (f" by {t['change_by']}" if t["change_by"] else "")
+                         + (", rolled back" if t["rolled_back"] else "") + ")")
+                if t["change_by_id"]:
+                    people.setdefault(t["change_by_id"], (t["change_by"], []))[1].append(
+                        f"made {t['change'].removeprefix('chg:')}")
+                for inc in sorted(t["incidents"], key=lambda i: i["id"]):
+                    if inc["status"] == "confirmed":
+                        ans.link(inc["id"], "CAUSED_BY", t["change"], inc["id"], "incident", inc["title"])
+                    else:
+                        ans.related.setdefault(inc["id"], {"id": inc["id"], "kind": "incident", "name": inc["title"],
+                                                           "via": f"{inc['id']} HAS_HYPOTHESIS SUSPECTS {t['change']}"})
+                    line += f", {'caused' if inc['status'] == 'confirmed' else 'blamed for'} {inc['id']}"
+            else:
+                line += " (no change recorded)"
+            work.append(line)
+        docs = sorted((d for d in r["docs"] if d["kind"] in ("decision", "design")),
+                      key=lambda d: (d["superseded_by"] is not None, -(d["at"] or 0)))
+        for d in docs:
+            ans.sources.append(d["id"])
+            ans.edges.append((d["id"], r["id"], "MENTIONS"))
+        on_it = "On it: " + ", ".join(f"{name} ({', '.join(roles)})" for name, roles in people.values()) + "." if (
+            people) else "Nobody is recorded on it."
+        doing = "Work: " + "; ".join(work) + "." if work else "No ticket is part of it yet."
+        decided = ("Decisions: " + "; ".join(
+            f"'{d['title']}' ({KINDS[d['kind']]}{', by ' + d['by'] if d['by'] else ''}, {_day(d['at'])}"
+            + (f", superseded by {d['superseded_by']}" if d["superseded_by"] else "") + ")" for d in docs) + "."
+            if docs else "")
+        ans.parts += [p for p in ([head + ".", on_it, doing] if who_first else [head + ".", doing, on_it]) + [decided]
+                      if p]
+
+
+def _members(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], at: int | None) -> None:
+    _project(ctx, ans, ents, words, at, who_first=True)
+
+
+ROUTES = {"owner": _owner, "members": _members, "project": _project, "expert": _expert, "why": _why, "how": _how,
+          "happened": _happened}
 
 
 def _ts(at: int) -> str:
@@ -350,7 +424,8 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     incident's time ("who owned payments-gw at the time of inc:0911"), with the owners before and after; who knows ->
     expertise
     ranking; why -> decisions of record + change story; how do I -> runbooks + past fixes; what happened ->
-    incidents), then full-text search finds supporting sources, preferring those tied to a linked entity, flags
+    incidents; what is X changing / who is on X -> an initiative's tickets, changes, people, blamed incidents and
+    decisions), then full-text search finds supporting sources, preferring those tied to a linked entity, flags
     docs a newer doc superseded, and lists every source. Given a user, the question is remembered in that person's
     session in the graph: a follow-up can say "it" or "them" (read as what the previous question was about; the
     answer says so), and "what did I ask about payments-gw" lists their earlier questions with the sources cited."""
@@ -382,6 +457,9 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
         e["carried"] = bool(carried) and e["id"] in resolved["as"] and f" {e['matched']} " not in asked
     if intent and ents:
         ROUTES[intent](ctx, ans, ents, words, a.at)
+    elif _of(ents, "initiative"):  # no rule matched ("tell me about the Q4 cost review"): the initiative itself
+        intent = "project"
+        _project(ctx, ans, ents, words, a.at)
     lead = list(ans.sources)  # what the graph fact cites: those docs lead the hits
     boost = {e["id"] for e in ents} | set(ans.people)
     rows = ans.read(ctx, "search_knowledge", query="|".join(words), limit=PER_LABEL)

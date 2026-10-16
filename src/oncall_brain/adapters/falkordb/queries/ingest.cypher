@@ -92,8 +92,19 @@ FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
   MERGE (i)-[pg:PAGED]->(x)
   ON CREATE SET pg.at = r.opened_at, pg.for_service = r.paged_for)
 
+// name: ingest_initiatives
+// purpose: Upsert initiatives (a project, programme or review with a goal, a status and a due date): the team that DRIVES it and the person who LEADS it. Tickets join one in ingest_tickets (PART_OF); docs and chat can MENTION one; ask walks it for "what is the Q4 cost review changing and who is on it".
+UNWIND $rows AS r
+MERGE (i:Initiative {id: r.id})
+SET i.name = r.name, i.goal = r.goal, i.status = r.status, i.due = r.due, i.since = r.since
+WITH i, r
+OPTIONAL MATCH (t:Team {id: r.team})
+OPTIONAL MATCH (p:Person {id: r.lead})
+FOREACH (x IN CASE WHEN t IS NULL THEN [] ELSE [t] END | MERGE (x)-[:DRIVES]->(i))
+FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (x)-[:LEADS]->(i))
+
 // name: ingest_docs
-// purpose: Upsert docs (postmortems, design notes, decisions, runbook pages): who wrote each, the service a decision is about, and what it mentions (a runbook page that mentions no service is a general one, which ask offers for any service). Mention lookups are per label so the id indexes are used.
+// purpose: Upsert docs (postmortems, design notes, decisions, runbook pages): who wrote each, the service a decision is about, and what it mentions: services, changes, incidents and initiatives (a runbook page that mentions no service is a general one, which ask offers for any service). Mention lookups are per label so the id indexes are used.
 UNWIND $rows AS r
 MERGE (d:Doc {id: r.id})
 SET d.kind = r.kind, d.title = r.title, d.text = r.text, d.at = r.at
@@ -107,7 +118,8 @@ UNWIND r.mentions AS m
 OPTIONAL MATCH (s:Service {id: m})
 OPTIONAL MATCH (c:Change {id: m})
 OPTIONAL MATCH (i:Incident {id: m})
-WITH d, coalesce(s, c, i) AS x
+OPTIONAL MATCH (n:Initiative {id: m})
+WITH d, coalesce(s, c, i, n) AS x
 WHERE x IS NOT NULL
 MERGE (d)-[:MENTIONS]->(x)
 
@@ -118,15 +130,17 @@ MATCH (new:Doc {id: r.id}), (old:Doc {id: r.supersedes})
 MERGE (new)-[:SUPERSEDES]->(old)
 
 // name: ingest_tickets
-// purpose: Upsert tickets (change requests and other work, a source a status update can cite): the change each requested, its author, and the services and docs it mentions.
+// purpose: Upsert tickets (change requests and other work, a source a status update can cite): the change each requested, its author, the initiative it is PART_OF, and the services and docs it mentions.
 UNWIND $rows AS r
 MERGE (t:Ticket {id: r.id})
 SET t.title = r.title, t.text = r.text, t.at = r.at
 WITH t, r
 OPTIONAL MATCH (c:Change {id: r.change})
 OPTIONAL MATCH (p:Person {id: r.author})
+OPTIONAL MATCH (n:Initiative {id: r.initiative})
 FOREACH (x IN CASE WHEN c IS NULL THEN [] ELSE [c] END | MERGE (t)-[:REQUESTED]->(x))
 FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (t)-[:AUTHORED_BY]->(x))
+FOREACH (x IN CASE WHEN n IS NULL THEN [] ELSE [n] END | MERGE (t)-[:PART_OF]->(x))
 WITH t, r
 UNWIND coalesce(r.mentions, []) AS m
 OPTIONAL MATCH (s:Service {id: m})
@@ -137,7 +151,7 @@ WHERE x IS NOT NULL
 MERGE (t)-[:MENTIONS]->(x)
 
 // name: ingest_messages
-// purpose: Upsert chat messages (another citable source): the change one announces, its author, and the services, changes, incidents, docs and tickets it mentions.
+// purpose: Upsert chat messages (another citable source): the change one announces, its author, and the services, changes, incidents, docs, tickets and initiatives it mentions.
 UNWIND $rows AS r
 MERGE (m:Message {id: r.id})
 SET m.channel = r.channel, m.text = r.text, m.at = r.at, m.kind = 'chat'
@@ -153,7 +167,8 @@ OPTIONAL MATCH (c:Change {id: ref})
 OPTIONAL MATCH (i:Incident {id: ref})
 OPTIONAL MATCH (d:Doc {id: ref})
 OPTIONAL MATCH (t:Ticket {id: ref})
-WITH m, coalesce(s, c, i, d, t) AS x
+OPTIONAL MATCH (n:Initiative {id: ref})
+WITH m, coalesce(s, c, i, d, t, n) AS x
 WHERE x IS NOT NULL
 MERGE (m)-[:MENTIONS]->(x)
 

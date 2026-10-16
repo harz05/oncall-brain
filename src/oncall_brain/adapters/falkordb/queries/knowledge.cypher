@@ -30,7 +30,7 @@ RETURN c.id AS change, c.kind AS kind, c.summary AS summary, c.at AS at, s.id AS
        collect(DISTINCT i.id) AS incidents
 
 // name: link_entities
-// purpose: Entity linking for ask: the services, teams, people (full or first name), changes (id, or the part after 'chg:'), tickets (id or key) and incidents (id, or the part after 'inc:', with the time it opened, so "at the time of inc:0911" names a time) named in $q, the question lowered to space-separated tokens and padded with a space each side. A name must sit between spaces, so 'cart' never matches inside 'cartography'.
+// purpose: Entity linking for ask: the services, teams, people (full or first name), changes (id, or the part after 'chg:'), tickets (id or key), incidents (id, or the part after 'inc:', with the time it opened, so "at the time of inc:0911" names a time) and initiatives (name, id or the part after 'init:') named in $q, the question lowered to space-separated tokens and padded with a space each side. A name must sit between spaces, so 'cart' never matches inside 'cartography'.
 MATCH (s:Service)
 WHERE $q CONTAINS (' ' + toLower(s.name) + ' ')
 RETURN s.id AS id, 'service' AS kind, s.name AS name, toLower(s.name) AS matched, null AS at
@@ -58,6 +58,11 @@ MATCH (i:Incident)
 WITH i, [x IN [toLower(i.id), last(split(toLower(i.id), ':'))] WHERE $q CONTAINS (' ' + x + ' ')] AS found
 WHERE size(found) > 0
 RETURN i.id AS id, 'incident' AS kind, i.title AS name, found[0] AS matched, i.opened_at AS at
+UNION ALL
+MATCH (n:Initiative)
+WITH n, [x IN [toLower(n.name), toLower(n.id), last(split(toLower(n.id), ':'))] WHERE $q CONTAINS (' ' + x + ' ')] AS found
+WHERE size(found) > 0
+RETURN n.id AS id, 'initiative' AS kind, n.name AS name, found[0] AS matched, null AS at
 
 // name: ownership
 // purpose: ask, "who owns": the team whose OWNS edge to each linked service (or every service of a linked team) is valid at $at (the live edge when there is no $at), its members, who is ON_CALL for it at $at (with no $at: at the latest alert in the graph, the synthetic company's "now", or the wall clock if there is none; clock says which), and that edge's history: since and until when, the owner before it and the one after it, so "who owned payments-gw at the time of inc:0911" and "since when" are answered from the edges.
@@ -172,3 +177,33 @@ RETURN h.id AS hit, type(r) AS rel, startNode(r) = h AS outgoing, x.id AS id, la
 MATCH (i:Incident {id: $incident_id}), (p:Person {id: $person})
 MERGE (i)-[x:CONSULTED]->(p)
 ON CREATE SET x.for_service = $service, x.score = $score
+
+// name: initiative_story
+// purpose: ask, "what is X changing" / "who is on X": for each linked initiative its goal, status and due date, the team that DRIVES it, the person who LEADS it, its tickets (PART_OF) with who filed each, the change each REQUESTED (service, author, rolled back or not) and the incidents that change is blamed for (a supported, co-cause or confirmed hypothesis; confirmed means it caused them), and the docs that MENTION it with the newer doc that SUPERSEDES each. People, projects and decisions connect through the work.
+UNWIND $ids AS iid
+MATCH (i:Initiative {id: iid})
+OPTIONAL MATCH (team:Team)-[:DRIVES]->(i)
+OPTIONAL MATCH (lead:Person)-[:LEADS]->(i)
+OPTIONAL MATCH (t:Ticket)-[:PART_OF]->(i)
+OPTIONAL MATCH (t)-[:AUTHORED_BY]->(ta:Person)
+OPTIONAL MATCH (t)-[:REQUESTED]->(c:Change)-[:CHANGED]->(s:Service)
+OPTIONAL MATCH (c)-[:AUTHORED_BY]->(ca:Person)
+OPTIONAL MATCH (inc:Incident)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c)
+WHERE h.status IN ['supported', 'co-cause', 'confirmed']
+WITH i, team, lead, t, ta, c, s, ca, collect(DISTINCT {id: inc.id, title: inc.title, status: h.status}) AS blamed0
+WITH i, team, lead, t, ta, c, s, ca, [x IN blamed0 WHERE x.id IS NOT NULL] AS blamed
+WITH i, team, lead,
+     collect(DISTINCT {id: t.id, title: t.title, at: t.at, by: ta.name, by_id: ta.id, change: c.id, summary: c.summary,
+                       kind: c.kind, rolled_back: c.rolled_back_at IS NOT NULL, service: s.id, service_name: s.name,
+                       change_by: ca.name, change_by_id: ca.id, incidents: blamed}) AS tickets0
+WITH i, team, lead, [x IN tickets0 WHERE x.id IS NOT NULL] AS tickets
+OPTIONAL MATCH (d:Doc)-[:MENTIONS]->(i)
+OPTIONAL MATCH (d)-[:AUTHORED_BY]->(da:Person)
+OPTIONAL MATCH (newer:Doc)-[:SUPERSEDES]->(d)
+WITH i, team, lead, tickets,
+     collect(DISTINCT {id: d.id, kind: d.kind, title: d.title, at: d.at, by: da.name, by_id: da.id,
+                       superseded_by: newer.id}) AS docs0
+RETURN i.id AS id, i.name AS name, i.goal AS goal, i.status AS status, i.due AS due, i.since AS since,
+       team.id AS team, team.name AS team_name, lead.id AS lead, lead.name AS lead_name, tickets,
+       [x IN docs0 WHERE x.id IS NOT NULL] AS docs
+ORDER BY name

@@ -445,8 +445,8 @@ def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
 
 @tool(writes=True)
 def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
-    """Write the status update (impact, cause, ruled-out suspects, who was paged, runbook, sources) and
-    link it to every node it cites."""
+    """Write the status update (impact, cause, the initiative behind it, ruled-out suspects, who was paged,
+    runbook, sources) and link it to every node it cites."""
     head, qs = _head(ctx, a.incident_id)
     facts_q = ctx.repo.read("update_facts", incident_id=a.incident_id)
     ref_q = ctx.repo.read("refuted_hypotheses", incident_id=a.incident_id)
@@ -454,14 +454,16 @@ def post_update(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     co_q = ctx.repo.read("co_causes", incident_id=a.incident_id)
     cause_q = ctx.repo.read("cause_facts", incident_id=a.incident_id)
     ctx_q = ctx.repo.read("cause_context", incident_id=a.incident_id, at=head["at"])
-    qs += [co_q, cause_q, ctx_q]
-    facts = {**facts_q.rows[0], "context": ctx_q.rows}
+    ini_q = ctx.repo.read("cause_initiative", incident_id=a.incident_id)
+    qs += [co_q, cause_q, ctx_q, ini_q]
+    facts = {**facts_q.rows[0], "context": ctx_q.rows, "initiative": ini_q.rows[0] if ini_q.rows else None}
     path = (cause_q.rows[0]["live_path"] or []) if cause_q.rows else []
     text = update.status_update(facts, ref_q.rows, head["service"], co_q.rows, path)
     experts = [x for x in facts["experts"] if x.get("id")]
     runbooks = [r for r in facts["runbooks"] if r.get("id")]
     cites = [c for c in [facts["change"], *facts["sources"], *(r["id"] for r in runbooks),
-                         *(x["id"] for x in experts), *(d["id"] for d in ctx_q.rows)] if c]
+                         *(x["id"] for x in experts), *(d["id"] for d in ctx_q.rows),
+                         *(r["initiative"] for r in ini_q.rows)] if c]
     cites = list(dict.fromkeys(cites))
     qs.append(ctx.repo.write("post_update", incident_id=a.incident_id, message_id=f"msg:update:{a.incident_id}",
                              text=text, at=head["at"], cites=cites))

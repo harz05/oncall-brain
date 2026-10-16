@@ -25,11 +25,14 @@ flowchart LR
   Change -->|CHANGED| Service
   Change -->|AUTHORED_BY| Person
   Ticket -->|REQUESTED| Change
+  Ticket -->|PART_OF| Initiative
+  Team -->|DRIVES| Initiative
+  Person -->|LEADS| Initiative
   Ticket -->|AUTHORED_BY| Person
   Ticket -->|"MENTIONS (services, changes, docs)"| Doc
-  Message -->|"MENTIONS (services, changes, incidents, docs, tickets)"| Change
+  Message -->|"MENTIONS (services, changes, incidents, docs, tickets, initiatives)"| Change
   Message -->|AUTHORED_BY| Person
-  Doc -->|"MENTIONS (services, changes, incidents)"| Service
+  Doc -->|"MENTIONS (services, changes, incidents, initiatives)"| Service
   Doc -->|DECIDES| Service
   Doc -->|SUPERSEDES| Doc
   Doc -->|AUTHORED_BY| Person
@@ -63,7 +66,7 @@ flowchart LR
   classDef episodic fill:#fdecea,stroke:#b5523b,color:#45201a
   classDef procedural fill:#e6f4ea,stroke:#3d8b5a,color:#173a24
   classDef conversational fill:#fff4e0,stroke:#b8860b,color:#3d2e00
-  class Team,Person,Service,Change,Ticket,Doc,Alert,Anomaly semantic
+  class Team,Person,Service,Change,Ticket,Doc,Initiative,Alert,Anomaly semantic
   class Incident,Hypothesis,Evidence,AgentStep,Message episodic
   class Runbook procedural
   class Session,Question conversational
@@ -97,10 +100,11 @@ in `events.cypher`) keep the semantic facts current after seeding.
 | `Runbook` | `id`, `title`, `steps` (list), `kind` (change kind it fixes), `uses`, `successes`, `learned_from` (learned runbooks only) | A fix procedure for one service and one kind of change. Its confidence is `successes / uses`. | seed `ingest_runbooks`; `resolve_incident` → `resolve_incident` (learns, or adds 1 to `uses` and `successes`); `check_hypothesis` → `record_evidence` adds 1 to `uses` when the runbook's suggestion is refuted (once, on open → refuted) |
 | `Message` | `id`, `kind` (`chat` / `status_update`), `channel`, `text`, `at` | Seeded chat (change announcements, design debates, `#incidents` wrap-ups), or the status update the comms agent wrote for #incidents. The update is stored on the incident; nothing is sent to a chat tool. `text` is full-text indexed, so `ask` finds both. | seed `ingest_messages` (chat); `post_update` → `post_update` (status updates) |
 | `Ticket` | `id`, `title`, `text`, `at` | A change request or other work item (`CR-881`, `PAY-412`, `PLAT-233`, ...), which a status update can cite and `ask` can find (`title` and `text` are full-text indexed). | seed `ingest_tickets` |
+| `Initiative` | `id`, `name`, `goal`, `status` (`active` / `done`), `since`, `due` | A project, programme or review with a goal and a due date: the work behind changes. A team `DRIVES` it, a person `LEADS` it, tickets are `PART_OF` it, docs and chat `MENTION` it. `ask` walks it for "what is the Q4 cost review changing" and "who is on it" (`initiative_story`), and a status update names the initiative behind its cause (`cause_initiative`: the change's `REQUESTED` ticket, then `PART_OF`). | seed `ingest_initiatives` |
 | `Doc` | `id`, `kind` (`postmortem` / `design` / `decision` / `runbook`), `title`, `text`, `at` | A written page: a postmortem, a design note, a decision record (ADR) or a runbook page. Company-brain source material; `title` and `text` are full-text indexed for `ask`. Not the same as `Runbook`, which is procedural memory the agents act on. | seed `ingest_docs`, `ingest_doc_links` |
 | `AgentStep` | `id`, `seq`, `role` (`triage` / `investigator` / `comms`), `tool` (tool name or `handoff`), `target`, `reason`, `summary`, `rows`, `ms`, `writes` | One step of one agent: what it did, why, and what it cost. Handoffs between roles are steps too. | agent loop (`agents/loop.record`) → `log_step` |
 | `Session` | `id`, `user` (the asker as given to `ask`: a Person id, a handle or any stable name, lowercased), `key` (the conversation key, default `default`), `started_at`, `last_at` | One engineer's conversation with the company brain. A user can have several (a chat, a terminal); a pronoun is read within one. Created on first use; the Person `OPENED` it when the user is one. | `ask` (with a `user`) → `record_question` |
-| `Question` | `id`, `seq` (position in the session), `text` (as asked), `resolved` (the question with its pronoun replaced, when one was; absent otherwise), `intent` (the `ask` route that answered: `owner`, `expert`, `why`, `how`, `happened` or `search`), `at`, `summary`, `answer` | One question `ask` answered for a named user, with the answer it gave. A recall ("what did I ask about X") is not recorded. | `ask` (with a `user`) → `record_question` |
+| `Question` | `id`, `seq` (position in the session), `text` (as asked), `resolved` (the question with its pronoun replaced, when one was; absent otherwise), `intent` (the `ask` route that answered: `owner`, `expert`, `why`, `how`, `happened`, `project`, `members` or `search`), `at`, `summary`, `answer` | One question `ask` answered for a named user, with the answer it gave. A recall ("what did I ask about X") is not recorded. | `ask` (with a `user`) → `record_question` |
 | `Meta` | `id` (always `meta`), `version` (fingerprint of the generated data), `seed` | Which generator built this graph. `reset()` restores the pristine copy only if its `version` matches the current generator run with this `seed`, else it re-seeds with the same seed. | seed `ingest_meta` |
 
 ## Relationships
@@ -114,7 +118,9 @@ in `events.cypher`) keep the semantic facts current after seeding.
 | `(Change)-[:CHANGED]->(Service)` | | The service the change touched. | seed `ingest_changes`; `record_change` → `record_change` |
 | `(Change\|Ticket\|Message\|Doc)-[:AUTHORED_BY]->(Person)` | | Who made the change, filed the ticket, wrote the chat message or the doc. `who_knows` counts the docs, tickets and chat someone wrote that mention or decide a service (at most 3 points, so writing about a service never outweighs hands-on evidence). | seed `ingest_changes`, `ingest_tickets`, `ingest_messages`, `ingest_docs`; `record_change` (if an author is given) |
 | `(Ticket)-[:REQUESTED]->(Change)` | | The change request behind a change. | seed `ingest_tickets` |
-| `(Doc)-[:MENTIONS]->(Service\|Change\|Incident)`, `(Ticket)-[:MENTIONS]->(Service\|Change\|Doc)`, `(Message)-[:MENTIONS]->(Service\|Change\|Incident\|Doc\|Ticket)` | | What a doc, ticket or chat message talks about (a chat message that announced a change `MENTIONS` it). `ask` expands search hits along these edges; `change_story` lists every doc and chat that mentions a change. | seed `ingest_docs`, `ingest_tickets`, `ingest_messages` (each mention is looked up per label, so the id indexes are used) |
+| `(Ticket)-[:PART_OF]->(Initiative)` | | The initiative the ticket belongs to, so a change traces to the project behind it (`REQUESTED`, then `PART_OF`): the status update's "Behind it:" line and `ask`'s "what is the Q4 cost review changing" (its tickets, the change each requested, the incidents that change is blamed for). | seed `ingest_tickets` |
+| `(Team)-[:DRIVES]->(Initiative)`, `(Person)-[:LEADS]->(Initiative)` | | Who is behind an initiative: the sponsoring team and its lead. `ask`'s "who is on the Q4 cost review" lists the lead, then whoever filed its tickets or made their changes. | seed `ingest_initiatives` |
+| `(Doc)-[:MENTIONS]->(Service\|Change\|Incident\|Initiative)`, `(Ticket)-[:MENTIONS]->(Service\|Change\|Doc)`, `(Message)-[:MENTIONS]->(Service\|Change\|Incident\|Doc\|Ticket\|Initiative)` | | What a doc, ticket or chat message talks about (a chat message that announced a change `MENTIONS` it). `ask` expands search hits along these edges; `change_story` lists every doc and chat that mentions a change. | seed `ingest_docs`, `ingest_tickets`, `ingest_messages` (each mention is looked up per label, so the id indexes are used) |
 | `(Doc)-[:DECIDES]->(Service)` | | The doc is the decision of record for that service (a design note or decision record). `ask` says so in its answer, and `who_knows` counts it. | seed `ingest_docs` |
 | `(Doc)-[:SUPERSEDES]->(Doc)` | | The newer doc replaces the older one (e.g. ADR-011 Kafka retention of 7 days supersedes ADR-006). `ask` ranks a superseded doc below its replacement and flags it. | seed `ingest_doc_links` (after every doc exists) |
 | `(Alert)-[:FIRED_ON]->(Service)` | | Where the alert fired. | seed `ingest_alerts`; `raise_alert` → `raise_alert` |
@@ -135,11 +141,11 @@ in `events.cypher`) keep the semantic facts current after seeding.
 | `(Incident)-[:FIXED_WITH]->(Runbook)` | | The runbook that fixed the incident. | seed `ingest_incidents`; `resolve_incident` → `resolve_incident` |
 | `(Incident)-[:LOGGED]->(AgentStep)` | | The incident's agent history, in `seq` order. | agent loop → `log_step` |
 | `(Incident)-[:HAS_UPDATE]->(Message)` | | The status update written for the incident (stored here; not sent anywhere). | `post_update` → `post_update` |
-| `(Message)-[:CITES]->(Change\|Ticket\|Message\|Doc\|Runbook\|Person)` | | Every claim in a status update links to its source node, including the person it says to ask (act 1 cites `chg:pgw-pool-1`, `ticket:CR-881`, `msg:pay-deploys-1`, `doc:cost-review-pgw` and `person:sana-brandt`). A rewrite drops stale citations. | `post_update` → `post_update` |
+| `(Message)-[:CITES]->(Change\|Ticket\|Message\|Doc\|Runbook\|Person\|Initiative)` | | Every claim in a status update links to its source node, including the person it says to ask and the initiative behind the cause (act 1 cites `chg:pgw-pool-1`, `ticket:CR-881`, `msg:pay-deploys-1`, `doc:cost-review-pgw`, `person:sana-brandt` and `init:q4-cost-review`). A rewrite drops stale citations. | `post_update` → `post_update` |
 | `(Person)-[:OPENED]->(Session)` | | The engineer behind a session, when the `user` given to `ask` is a Person id or handle in the graph; a session under any other name has no edge and still works. | `ask` → `record_question` |
 | `(Session)-[:ASKED]->(Question)` | | The session's questions; `Question.seq` orders them. | `ask` → `record_question` |
 | `(Question)-[:FOLLOWS]->(Question)` | | The question asked just before this one in the session: the conversation is a chain the graph can walk. | `ask` → `record_question` |
-| `(Question)-[:ABOUT]->(Service\|Team\|Person\|Change\|Ticket)` | `matched`, `carried` | What the question was about: the entities `ask` linked in its text (`carried` false), or read a pronoun as (`carried` true: "it" in "and who knows it?" after "who owns payments-gw"). `session_context` reads the latest question's `ABOUT` edges to resolve the next pronoun; `user_questions` filters on them for "what did I ask about payments-gw". | `ask` → `record_question` |
+| `(Question)-[:ABOUT]->(Service\|Team\|Person\|Change\|Ticket\|Incident\|Initiative)` | `matched`, `carried` | What the question was about: the entities `ask` linked in its text (`carried` false), or read a pronoun as (`carried` true: "it" in "and who knows it?" after "who owns payments-gw"). `session_context` reads the latest question's `ABOUT` edges to resolve the next pronoun; `user_questions` filters on them for "what did I ask about payments-gw". | `ask` → `record_question` |
 | `(Question)-[:ANSWERED_WITH]->(Doc\|Ticket\|Message\|Runbook\|Incident)` | `rank` | The sources the answer cited, in the order it listed them. | `ask` → `record_question` |
 
 ## Ids

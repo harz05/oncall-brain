@@ -1,5 +1,6 @@
 """Templates for what agents write back: the status update and a learned runbook. Pure functions."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -23,6 +24,12 @@ def status_update(facts: dict[str, Any], refuted: list[dict[str, Any]], origin: 
         if facts.get("cause_gaps"):
             lines.append("Note: no anomaly was recorded on " + ", ".join(map(_short, facts["cause_gaps"]))
                          + " although the failure passed through it; check its monitoring")
+        if facts.get("initiative"):  # the project the change was made for: whose goal the fix may cost
+            w = facts["initiative"]
+            about = [w.get("team"), f"led by {w['lead']}" if w.get("lead") else None,
+                     f"due {_date(w['due'])}" if w.get("due") else None]
+            lines.append(f"Behind it: {w['ticket'].removeprefix('ticket:')} is part of '{w['name']}'"
+                         + (f" ({', '.join(x for x in about if x)})" if any(about) else ""))
     if facts.get("context"):
         lines.append("Context: " + "; ".join(f"{d['title']} ({d['kind']})" for d in facts["context"]))
     for c in co_causes:
@@ -67,6 +74,10 @@ def learned_runbook(service_name: str, kind: str, summary: str, alert_service: s
              f"Watch {_short(alert_service)} p99 recover within 10 minutes",
              f"Last time the culprit was: {summary}",
              f"Add a guard: alert on {service_name} saturation before callers time out"])
+
+
+def _date(at: int) -> str:
+    return datetime.fromtimestamp(at, UTC).strftime("%Y-%m-%d")
 
 
 def _short(service_id: str | None) -> str:

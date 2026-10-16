@@ -14,7 +14,8 @@ from oncall_brain.domain.models import QueryRun
 
 USER = r"^[a-z0-9:@._-]{1,60}$"  # a Person id (person:hana-costa), a handle (@hana.costa) or any stable name
 KEY = r"^[a-z0-9_.-]{1,40}$"
-THINGS, PEOPLE, EITHER = ("service", "change", "ticket", "incident", "team"), ("person",), ("person", "team")
+THINGS = ("service", "change", "ticket", "incident", "initiative", "team")
+PEOPLE, EITHER = ("person",), ("person", "team")
 # Which of the previous question's entities a pronoun can stand for: the first class with a match wins; "it" and
 # "they" fall back to everything the previous question was about, "he" and "she" never stand for a service.
 PRONOUNS = {"it": THINGS, "its": THINGS, "they": EITHER, "them": EITHER, "their": EITHER, "theirs": EITHER,

@@ -6,20 +6,20 @@ import json
 from oncall_brain.datagen import generate
 from oncall_brain.ports import GraphRepository, GraphStore
 
-# Order matters: edges MATCH nodes created by earlier statements (docs mention changes and incidents, tickets
-# mention docs, chat mentions tickets).
+# Order matters: edges MATCH nodes created by earlier statements (docs mention changes, incidents and initiatives,
+# tickets join initiatives and mention docs, chat mentions tickets).
 INGEST = [("ingest_teams", "teams"), ("ingest_people", "people"), ("ingest_services", "services"),
           ("ingest_depends_on", "depends_on"), ("ingest_on_call", "on_call"), ("ingest_changes", "changes"),
           ("ingest_alerts", "alerts"), ("ingest_anomalies", "anomalies"), ("ingest_runbooks", "runbooks"),
-          ("ingest_incidents", "incidents"), ("ingest_docs", "docs"), ("ingest_doc_links", "docs"),
-          ("ingest_tickets", "tickets"), ("ingest_messages", "messages")]
+          ("ingest_incidents", "incidents"), ("ingest_initiatives", "initiatives"), ("ingest_docs", "docs"),
+          ("ingest_doc_links", "docs"), ("ingest_tickets", "tickets"), ("ingest_messages", "messages")]
 
 
 def load(repo: GraphRepository, data: dict[str, list[dict]]) -> None:
     """Idempotent ingest: every statement MERGEs on stable ids, so loading twice changes nothing."""
     repo.ensure_schema()
     for query, key in INGEST:
-        repo.write(query, rows=data[key])
+        repo.write(query, rows=data.get(key, []))  # eval scenarios and bench graphs carry no initiatives
 
 
 def fingerprint(data: dict[str, list[dict]]) -> str:
