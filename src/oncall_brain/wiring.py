@@ -2,7 +2,7 @@
 
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.adapters.llm.mock import MockProvider
-from oncall_brain.config import Settings, get_settings
+from oncall_brain.config import LOCAL_HOSTS, Settings, get_settings
 from oncall_brain.ports import LLMProvider
 
 # LLM_PROVIDER -> (OpenAI-compatible base URL, default model). LLM_BASE_URL / LLM_MODEL override either.
@@ -18,7 +18,7 @@ PRESETS = {
 def make_store(s: Settings | None = None) -> FalkorGraphStore:
     s = s or get_settings()
     return FalkorGraphStore(s.falkordb_host, s.falkordb_port, s.falkordb_username, s.falkordb_password,
-                            s.falkordb_ssl, s.falkordb_url)
+                            s.falkordb_ssl, s.falkordb_url, lock_wait=s.lock_wait_seconds)
 
 
 def make_llm(s: Settings | None = None) -> LLMProvider:
@@ -44,3 +44,21 @@ def make_llm(s: Settings | None = None) -> LLMProvider:
 def _capped(provider: LLMProvider, s: Settings) -> LLMProvider:
     provider.run_token_cap = s.llm_run_token_cap  # services/respond.py budgets each run with it (RunBudget)
     return provider
+
+
+def exposure_warning(s: Settings | None = None) -> str | None:
+    """What the API logs at startup when it answers on a public name (ALLOWED_HOSTS, or the hostname Render or Railway
+    set) with a real model behind it but no daily token cap or no per-client run limit: anyone with the URL could
+    spend on the key. None when local, on the rules planner, or both limits are set."""
+    s = s or get_settings()
+    public = s.hosts()[len(LOCAL_HOSTS):]
+    missing = [name for name, value in (("LLM_DAILY_TOKEN_CAP", s.llm_daily_token_cap),
+                                        ("RUNS_PER_HOUR", s.runs_per_hour)) if not value]
+    try:
+        paid = not isinstance(make_llm(s), MockProvider)
+    except ValueError:  # a misconfigured provider; /api/health reports it
+        return None
+    if not (public and paid and missing):
+        return None
+    return (f"public on {', '.join(public)} with the {s.llm_provider} planner and {' and '.join(missing)} = 0: anyone "
+            "with the URL can run the agents on your key. Set the public preset from .env.example.")

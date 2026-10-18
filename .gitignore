@@ -9,3 +9,6 @@ __pycache__/
 .falkordb-data/
 dump.rdb
 *.log
+
+# agent worktrees (local only)
+.claude/worktrees/

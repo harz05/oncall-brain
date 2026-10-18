@@ -19,7 +19,6 @@ class AnthropicProvider:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, client: httpx.Client | None = None):
         self.model = model
         self.name = f"{model} via Anthropic Messages API"
-        self.last_usage = 0  # input + output tokens of the last request, for the per-run cap
         self._headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
         if model in FALLBACK_MODELS:
             self._headers["anthropic-beta"] = FALLBACK_BETA
@@ -28,7 +27,8 @@ class AnthropicProvider:
     def decide(self, role: str, board: dict[str, Any], tools: list[dict[str, Any]]) -> Decision:
         return guarded(role, board, tools, self._ask, self.model)
 
-    def _ask(self, system: str, board: str, tools: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any], str]:
+    def _ask(self, system: str, board: str,
+             tools: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any], str, int]:
         # Forced tool_choice ("any"/"tool") is rejected by current models: auto + one call at most + the prompt.
         body: dict[str, Any] = {
             "model": self.model, "max_tokens": 4096, "system": system, "tools": tools,
@@ -41,9 +41,9 @@ class AnthropicProvider:
         r.raise_for_status()
         msg = r.json()
         usage = msg.get("usage") or {}
-        self.last_usage = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        used = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
         text = " ".join(b["text"] for b in msg["content"] if b["type"] == "text").strip()
         use = next((b for b in msg["content"] if b["type"] == "tool_use"), None)
         if msg["stop_reason"] != "tool_use" or use is None:  # end_turn, max_tokens, refusal: no usable call
-            return None, {}, text
-        return use["name"], use["input"], text
+            return None, {}, text, used
+        return use["name"], use["input"], text, used

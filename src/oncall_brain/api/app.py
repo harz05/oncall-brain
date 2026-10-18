@@ -2,8 +2,9 @@
 
 Handlers stay thin: they pick the tenant's graph and call services / the registry. Errors map to
 {"detail": str}: unknown things (ValueError from the services) -> 404, bad input -> 422, FalkorDB down or
-erroring -> 503, misconfigured planner -> 503, tenant cap reached -> 429.
-Guards in front of every route: Host allow-list (DNS rebinding), same-origin writes (CSRF), optional API_TOKEN.
+erroring -> 503, misconfigured planner -> 503, tenant cap reached or agent runs busy -> 429.
+Guards in front of every route: Host allow-list (DNS rebinding), same-origin writes (CSRF), per-client throttles and a
+body cap (api/guards.py), optional API_TOKEN; security headers on every response.
 Run: uvicorn oncall_brain.api.app:app --port 8000
 """
 
@@ -11,14 +12,16 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import threading
 from collections.abc import Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path as FsPath
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
 
+import anyio
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -27,17 +30,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import LockError, RedisError
+from starlette.datastructures import QueryParams
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from oncall_brain.adapters import slack
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.agents import registry
 from oncall_brain.agents.registry import ToolContext
+from oncall_brain.api.guards import BodyLimit, SameOrigin, SecurityHeaders, Throttle
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services import respond as respond_svc
+from oncall_brain.services.limits import DailyBudget, RunsBusy
 from oncall_brain.services.seeding import TenantLimitReached, reset
 from oncall_brain.services.tools import AlertEvent
+from oncall_brain.wiring import exposure_warning
 
 WEB_DIR = FsPath(os.environ.get("WEB_DIR") or FsPath(__file__).resolve().parents[3] / "web")
 
@@ -45,7 +52,20 @@ Tenant = Annotated[str, Path(pattern=r"^[a-z0-9_]{1,40}$")]
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="On-call Brain", description="Incident agents over a FalkorDB knowledge graph.")
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    if warning := exposure_warning():  # once per server start: a public URL that can spend on a paid model
+        log.warning(warning)
+    # Sync routes run on anyio's worker threads (40 by default); a /respond holds one for its whole run and a write
+    # waiting on a tenant lock holds one for up to LOCK_WAIT_SECONDS. With every thread taken even /health hangs, so
+    # leave headroom.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 100
+    yield
+
+
+app = FastAPI(title="On-call Brain", description="Incident agents over a FalkorDB knowledge graph.",
+              lifespan=_lifespan)
 # check_dir=False: the web/ folder may appear after the server starts.
 # html=True serves web/index.html at /web/. Asset paths in the page are relative, so the same files also work as a
 # static site (e.g. GitHub Pages with ?offline=1).
@@ -102,20 +122,23 @@ async def _db_error(_: Request, e: RedisError) -> JSONResponse:
     return JSONResponse({"detail": _db_detail(e)}, status_code=409 if isinstance(e, LockError) else 503)
 
 
+@app.exception_handler(RunsBusy)
+async def _busy(_: Request, e: RunsBusy) -> JSONResponse:
+    return JSONResponse({"detail": str(e)}, status_code=429, headers={"Retry-After": "60"})
+
+
+def _bearer_ok(request: Request, token: str) -> bool:
+    sent = request.headers.get("authorization", "").encode("latin-1")  # Starlette decodes headers as latin-1
+    scheme, _, cred = sent.partition(b" ")  # the scheme is case-insensitive (RFC 7235)
+    return scheme.lower() == b"bearer" and secrets.compare_digest(cred.strip(), token.encode())
+
+
 @app.middleware("http")
 async def _guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    path = request.url.path
-    # CSRF: any web page can fire a body-less POST at localhost, but the browser then sends its own Origin. host:port
-    # only (no scheme), so a TLS-terminating proxy in front still matches.
-    origin = request.headers.get("origin")
-    cross = origin is not None and urlsplit(origin).netloc.lower() != request.headers.get("host", "").lower()
-    if cross and request.method not in ("GET", "HEAD", "OPTIONS"):
-        return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+    path = request.url.path  # cross-origin writes were refused before this (api/guards.py SameOrigin)
     token = get_settings().api_token
     if token and path.startswith("/api/") and path != "/api/health":
-        sent = request.headers.get("authorization", "").encode("latin-1")  # Starlette decodes headers as latin-1
-        scheme, _, cred = sent.partition(b" ")  # the scheme is case-insensitive (RFC 7235)
-        if scheme.lower() != b"bearer" or not secrets.compare_digest(cred.strip(), token.encode()):
+        if not _bearer_ok(request, token):
             return JSONResponse({"detail": "missing or wrong API token"}, status_code=401,
                                 headers={"WWW-Authenticate": "Bearer"})
     # FalkorDB refuses string parameters containing NUL; that is bad input (422), not a server error.
@@ -124,8 +147,31 @@ async def _guard(request: Request, call_next: Callable[[Request], Awaitable[Resp
     return await call_next(request)
 
 
-# Added last so it runs first. DNS rebinding: a hostile name resolving to 127.0.0.1 still sends its own Host header.
+_RUN = re.compile(r"/api/tenants/[^/]+/(alerts/[^/]+/respond(/stream)?|reset)")
+_ALERTS = re.compile(r"/api/tenants/[^/]+/alerts")
+_TRUE = {"1", "true", "t", "yes", "y", "on"}  # what FastAPI reads as respond=true
+
+
+def throttle_buckets(method: str, path: str, query: QueryParams) -> list[str]:
+    """The throttles a request counts against (api/guards.py Throttle): every /api/* call but health; writes (any
+    non-GET: the webhook, and Ask, which records the question in the asker's session); agent runs (respond, its stream,
+    the webhook with ?respond=true, reset). ?compare=memory is two runs: it replays the incident without memory."""
+    if not path.startswith("/api/") or path == "/api/health":
+        return []
+    write = method not in ("GET", "HEAD", "OPTIONS")
+    run = method == "POST" and bool(
+        _RUN.fullmatch(path) or (_ALERTS.fullmatch(path) and query.get("respond", "").lower() in _TRUE))
+    return ["req"] + ["write"] * write + ["run"] * run * (2 if query.get("compare") == "memory" else 1)
+
+
+# The last one added runs first: headers on every answer, then Host (DNS rebinding: a hostile name resolving to
+# 127.0.0.1 still sends its own Host header), then same-origin writes (so a refused one counts nowhere), then the
+# throttles, then the body cap (on every path: _guard reads the body of any request), then _guard above.
+app.add_middleware(BodyLimit)
+app.add_middleware(Throttle, store=store, buckets=throttle_buckets)
+app.add_middleware(SameOrigin)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=get_settings().hosts())
+app.add_middleware(SecurityHeaders)
 
 
 def tenant_repo(tenant: Tenant) -> GraphRepository:
@@ -149,14 +195,18 @@ def health_body() -> dict[str, Any]:
     status (503 when not ok), a human reads falkordb_error."""
     try:
         up, db_error = bool(store().db.connection.ping()), None
+        budget = daily_budget()
+        used, hour = budget.used_today(), budget.used_this_hour()
     except Exception as e:  # health itself must answer; keep the reason (a bad URL, a refused connection, auth)
-        up, db_error = False, f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:160]}"
+        up, db_error, used, hour = False, f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:160]}", None, None
     try:
         planner, ok = llm().name, True
     except HTTPException as e:
         planner, ok = f"<error: {e.detail}>", False
     return {"ok": ok and up, "falkordb": up, "falkordb_error": db_error, "planner": planner,
-            "default_tenant": get_settings().default_tenant, "slack": bool(get_settings().slack_webhook_url)}
+            "default_tenant": get_settings().default_tenant, "slack": bool(get_settings().slack_webhook_url),
+            "llm_budget": {"cap": get_settings().llm_daily_token_cap, "used_today": used,
+                           "hourly_cap": get_settings().llm_hourly_token_cap, "used_this_hour": hour}}
 
 
 @app.get("/api/health")
@@ -192,8 +242,13 @@ def new_alert(repo: Repo, body: AlertEvent, respond: bool = False) -> dict[str, 
     return run_agents(repo, out.data["alert"]) if respond else out.data
 
 
+def daily_budget() -> DailyBudget:
+    return DailyBudget(store(), get_settings().llm_daily_token_cap, get_settings().llm_hourly_token_cap)
+
+
 def run_agents(repo: GraphRepository, alert_id: str, on_step: Callable[[Any], None] | None = None) -> dict[str, Any]:
-    run = respond_svc.respond(repo, alert_id, llm(), on_step)
+    run = respond_svc.respond(repo, alert_id, llm(), on_step, max_runs=get_settings().max_concurrent_runs,
+                              daily=daily_budget())
     run["slack"] = slack.post(run["outcome"]["update_text"])
     return run
 
@@ -204,7 +259,8 @@ def respond(repo: Repo, alert_id: str, compare: Literal["memory"] | None = None)
     returns its counters under "ablation" -- the fair before/after for memory."""
     run = run_agents(repo, alert_id)  # FastAPI serialises the TraceStep models inside
     if compare == "memory":
-        run["ablation"] = {"without_memory": respond_svc.without_memory(store(), repo.tenant, alert_id, llm())}
+        run["ablation"] = {"without_memory": respond_svc.without_memory(store(), repo.tenant, alert_id, llm(),
+                                                                        daily_budget())}
     return run
 
 
@@ -222,9 +278,11 @@ def respond_stream(repo: Repo, alert_id: str, compare: Literal["memory"] | None 
             events.put({"result": run})
             if compare == "memory":
                 events.put({"ablation": {"without_memory": respond_svc.without_memory(
-                    store(), repo.tenant, alert_id, llm())}})
+                    store(), repo.tenant, alert_id, llm(), daily_budget())}})
         except RedisError as e:
             events.put({"error": _db_detail(e)})
+        except RunsBusy as e:  # MAX_CONCURRENT_RUNS: the stream has already answered 200, so the line says it
+            events.put({"error": str(e)})
         except ValueError as e:  # an unknown alert: the message is the answer
             events.put({"error": str(e)})
         except Exception as e:  # anything else: the client gets the type, the server log gets the traceback
@@ -293,7 +351,16 @@ def tools() -> list[dict[str, Any]]:
 
 
 @app.post("/api/tenants/{tenant}/tools/{name}")
-def call_tool(repo: Repo, name: str, args: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
+def call_tool(request: Request, repo: Repo, name: str,
+              args: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
     if name not in registry.REGISTRY:
         raise HTTPException(404, f"unknown tool {name!r}")
+    # The UI only reads through this route (ask, graph tools). Writing facts (record_change, transfer_ownership,
+    # retire_dependency...) would rewrite the shared demo company for every visitor after you, so on a deployment
+    # (a token is set) a write needs it, the same one /mcp takes. Locally, with no token, everything stays open.
+    tool, token = registry.REGISTRY[name], get_settings().mcp_bearer()
+    writes = tool.writes and ("incident_id" not in tool.args_model.model_fields or (args or {}).get("incident_id"))
+    if writes and token and not _bearer_ok(request, token):
+        raise HTTPException(401, f"{name} writes to the graph: send Authorization: Bearer <the MCP_TOKEN>",
+                            headers={"WWW-Authenticate": "Bearer"})
     return respond_svc.run_tool(repo, name, args or {}).model_dump(mode="json")

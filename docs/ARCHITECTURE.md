@@ -223,6 +223,35 @@ Every stored `AgentStep` records `by`: the model id (`claude-opus-5-5`) or `rule
 (`domain/verdict.py::confidence`: Confirmed, Very likely, Likely with its doubts, No cause found) and `sources`
 (the update's `CITES` targets with titles), both pure reads of the graph.
 
+### 2.5 Security limits (a public deployment)
+
+A public URL with a paid model behind it lets anyone run three agents on the owner's key (a run on Claude is 60-150 s
+and 60-100k tokens), make tenants and alerts, or hold the server busy. These limits bound that. Each is off at 0 (the
+default, so local dev and the tests are unchanged); `.env.example` has the public preset and `render.yaml` sets it.
+
+| Setting (env) | Public preset | What it bounds | Where | Over the limit |
+|---|---|---|---|---|
+| `RATE_LIMIT_PER_MIN` | 120 | every `/api/*` and `/mcp` request, per client | `api/guards.py` `Throttle` | 429 + `Retry-After`: "Too many requests from your address: 120 per minute. Try again in 37 seconds." |
+| `WRITES_PER_MIN` | 20 | non-GET `/api/*` (the webhook and Ask count: Ask records the question in the asker's session), and every MCP tool that is not read-only, per client | same; `mcp_server.build_server` for MCP | 429, "Too many writes ..." |
+| `RUNS_PER_HOUR` | 12 | agent runs and resets per client: `.../respond`, `.../respond/stream`, `POST .../alerts?respond=true`, `.../reset`; over MCP `respond_to_alert` and `reset_tenant`. `?compare=memory` counts two (it replays the incident without memory). The three acts are 4 runs, so 12 lets a visitor replay the story twice an hour | same | 429, or an MCP tool error with the same words: "Too many agent runs from your address: 12 per hour. Try again in 12 minutes." |
+| `MAX_CONCURRENT_RUNS` | 2 | agent runs in progress at once in one process (API, stream, webhook, MCP all go through `respond()`) | `services/limits.py` `run_slot` | `RunsBusy`: 429 "2 agent runs are already in progress; try again in a minute", the same text as a tool error over MCP and as `{"error": ...}` in the stream |
+| `LLM_DAILY_TOKEN_CAP` | 2,000,000 | model tokens per UTC day across every process | `services/limits.py` `DailyBudget`, used by `RunBudget` | the rules planner decides every remaining step until 00:00 UTC, with the reason "LLM fallback: today's LLM budget (2,000,000 tokens) is spent; ..." in the trace |
+| `LLM_HOURLY_TOKEN_CAP` | 500,000 | the same per UTC hour, across every client: a few addresses cannot spend the day in one hour, whatever addresses they show | same | the rules planner until the next hour: "LLM fallback: this hour's share of the LLM budget (500,000 tokens) is spent; ..." (never a 429: the demo keeps working) |
+| `LOCK_WAIT_SECONDS` | 5 (default 120) | how long a write, reset or run waits for its tenant's lock (an agent run holds it 60-150 s) | `FalkorRepository.lock` via `wiring.make_store` | 409 "another agent run holds this tenant's lock ...: retry shortly"; each waiter holds a server thread, and 120 s waits let a burst of ~40 writes take every thread and hang the whole site, `/health` included |
+| `MAX_TENANTS` | 5 | tenant graphs a reset may create | `services/seeding.py` `reset` | 429 for a new tenant |
+| `MAX_BODY_BYTES` | 65,536 (default) | request body on every path of the API app (`/api/*`, `/`, `/web/*`, `/docs`: its guard reads every body) and on `/mcp` | `api/guards.py` `BodyLimit` | 413 before the body is read: by `Content-Length`, and by counting a chunked body as it arrives |
+
+- **Counted in FalkorDB.** The throttles are fixed windows: `INCR` on `oncall_brain:rl:<bucket>:<client>:<window>` with an expiry (`FalkorGraphStore.incr`, one `MULTI` of `SET NX EX` + `INCRBY`), and the daily budget is `oncall_brain:llm_tokens:<yyyy-mm-dd>` (kept 2 days). So the app and a standalone MCP process share them, and a restart does not reset them. While every throttle is 0 nothing is counted. If FalkorDB is down the throttles let requests through (logged): every throttled route needs FalkorDB and answers 503 by itself.
+- **The client** is the ASGI client address, `request.client.host`, with an IPv6 address counted by its /64 (one subscriber usually holds a whole /64) and an IPv4-mapped one as its IPv4 address (`limits.client_key`). The app never reads `X-Forwarded-For`: uvicorn's proxy headers replace the address only for a connection from `FORWARDED_ALLOW_IPS` (default 127.0.0.1, read from the real environment, not `.env`). Behind a proxy, name the proxy's address or network (a Docker bridge: `172.16.0.0/12`; behind an AWS ALB, the VPC range; `render.yaml` trusts the private ranges): uvicorn then takes the rightmost address the trusted proxies did not add. Avoid `*`: uvicorn then takes the leftmost entry, which the client wrote itself whenever a proxy appends to the header (an ALB, Cloudflare and Render do), so it could pick a fresh bucket per request; `*` is safe only behind one proxy that overwrites the header (Caddy alone). Clients behind one NAT share a bucket. None of this weakens `MAX_CONCURRENT_RUNS` or the token caps, which count every client together. Never throttled: `/api/health`, `/health`, `/`, `/web/*`.
+- **Cross-origin writes** are refused (403) by `api/guards.py` `SameOrigin` in front of the throttles, so a page a visitor opens elsewhere cannot spend that visitor's quotas by making their browser POST here.
+- **The daily budget** counts every decision's billed tokens for every metered provider (wiring sets `run_token_cap` on each real one), so `/api/health` reports `{"llm_budget": {"cap": N, "used_today": M, "hourly_cap": H, "used_this_hour": U}}` even with the caps off. The adapters put the usage on the `Decision` itself (`Decision.usage`), so two concurrent runs sharing one provider never read each other's count, and a request that reached the model but gave no usage back (a read timeout at the client's 15 s, a reply that would not parse) is charged an estimate (~3 characters a token plus 1,000 for the output); an HTTP error or a request never sent costs nothing. `RunBudget` checks the counters before each decision, so runs in flight at a cap overshoot by one decision each. The memory ablation (`?compare=memory`) counts against it too.
+- **Server threads**: sync routes run on anyio's worker threads; the API's lifespan raises them from 40 to 100, since a `/respond` holds one for its whole run and a write waiting on a lock holds one for up to `LOCK_WAIT_SECONDS`.
+- **What visitors write stays.** Anyone can write docs, changes and owners into the demo company. `python -m scripts.seed --reset` restores its pristine copy (what the UI's reset does); on a public box run it from cron, e.g. every 30 minutes: `*/30 * * * * cd <checkout> && docker compose exec -T app python -m scripts.seed --reset`. That also stops sessions and questions piling up until FalkorDB's memory is full.
+- **The run slot** is per process (a counter under a lock, refused at once rather than queued, since a queued run would hold a request open for minutes). Several replicas each allow `MAX_CONCURRENT_RUNS`. The ablation replay takes no slot of its own: it is the second half of the run that asked for it.
+- **Security headers** on every response from `serve.py` and `api/app.py` (`api/guards.py` `SecurityHeaders`): `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'` (the UI has no inline script and vendors its libraries; FastAPI's `/docs` and `/redoc` are left without it, they load Swagger UI from a CDN), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and `Strict-Transport-Security: max-age=31536000` only when the request came over https (the scheme after proxy headers).
+- **A startup warning** (`wiring.exposure_warning`, logged once by the API's lifespan): the app answers on a public name (`ALLOWED_HOSTS`, or the hostname Render or Railway sets) with a real model, and `LLM_DAILY_TOKEN_CAP` or `RUNS_PER_HOUR` is 0.
+- Tests: `tests/unit/test_limits_unit.py` (windows and words, IPv6 by /64, each request's buckets, the run slot, the daily budget and the hourly slice in `RunBudget`, the body cap with a chunked body, the headers, the warning), `tests/unit/test_llm_adapters.py` (each decision's billed tokens, estimated on a timeout) and `tests/integration/test_limits.py` (each limit trips at N+1 through the API and MCP over HTTP, `?compare=memory` counts two, MCP write tools count as writes, a cross-origin write counts nowhere, a write behind a held lock gives up after `LOCK_WAIT_SECONDS` with 409, health and static files never count, `X-Forwarded-For` counts only from a trusted proxy, the daily cap hands the next run to the rules and shows in health, a full run slot on the API, the stream and MCP, 413 by length and chunked on `/api/*`, `/web/`, `/docs`, `/health` and `/mcp`, the headers on `/`, `/web/` and `/api/health`).
+
 ## 3. Deep dive (low-level design)
 
 ### 3.1 Package map
@@ -235,7 +264,7 @@ Everything is under `src/oncall_brain/`. Dependencies point inwards: adapters an
 | `domain/planner.py` | The deterministic planner: one pure function per role (`triage`, `investigator`, `comms`) from board to `Decision`. Also `WINDOW` (2 h), `RECALL_MIN_SCORE` (3) and `STORM_WINDOW` (15 min). | domain | no |
 | `domain/verdict.py` | `judge(CheckFacts) -> Verdict`: the rules that turn graph facts into supports or refutes, each with a reason, a short tag and any monitoring gaps. `leading()`: which of several supported suspects leads (including the cascade rule), which are outranked (and why), and which are co-causes. | stdlib | no |
 | `domain/update.py` | Templates for the status update and the learned runbook. The update reads "Likely cause: config change on payments-gw by Sana Brandt: \"<change summary>\"" (or "status: resolved, cause confirmed" and "Cause (confirmed)" once a human has confirmed it; the author only when known), a "Note:" line naming any monitoring gap on the cause's path, an "Also contributing:" line per co-cause, one compact "Ruled out:" line built from the evidence tags, "Also at risk" without the services on the failure path, and "Next action: <step> (this runbook worked N of M times)". | stdlib | no |
-| `ports/__init__.py` | Protocols: `GraphRepository`, `GraphStore`, `LLMProvider`. | domain | no |
+| `ports/__init__.py` | Protocols: `GraphRepository`, `GraphStore` (with the shared counters `incr` / `counter`), `LLMProvider`. | domain | no |
 | `adapters/falkordb/` | `FalkorRepository` (one tenant's graph), `FalkorGraphStore` (many graphs), `queries.py` (loads named Cypher), `queries/*.cypher`. | falkordb client | yes (FalkorDB) |
 | `adapters/llm/` | `MockProvider` (wraps the planner) and LLM adapters: `openai_compat.py` (any OpenAI-compatible endpoint, with presets in `wiring.PRESETS` for OpenAI, Gemini, Groq, OpenRouter and Ollama) and `anthropic.py`. Both share the fallback guardrails. | domain, registry, httpx | yes (LLM HTTP) |
 | `agents/registry.py` | The tool registry: `@tool`, `REGISTRY`, `call()`, `specs()`, `ToolContext`. | ports, domain | no |
@@ -244,21 +273,23 @@ Everything is under `src/oncall_brain/`. Dependencies point inwards: adapters an
 | `services/brain.py` | The company-brain `ask` tool: question to content words, full-text search, re-rank, graph expansion, a deterministic answer with cited sources (3.5). Registered on import by `services/__init__.py`. | registry, domain | via ports |
 | `services/board.py` | `load_board()`: reads the incident board out of the graph. | ports | via ports |
 | `services/respond.py` | Use cases: `respond()`, `resolve()`, `outcome()`, `without_memory()` (the same alert replayed on a scratch copy of the pristine graph). | loop, registry, tools | via ports |
+| `services/limits.py` | Abuse limits (2.5): `throttle()` (fixed windows, `Throttled`), `run_slot()` (`RunsBusy`), `DailyBudget`. | ports | via ports |
 | `services/seeding.py` | `load()` (idempotent `MERGE` ingest), `seed()` (drop, `load()`, `Meta` fingerprint, pristine snapshot) and `reset()`. | datagen, ports | via ports |
 | `datagen.py` | The seeded synthetic company: the planted three-act story, random noise, and (`_corpus`) the docs, tickets, chat and initiatives the company brain answers from. | domain | no |
 | `scenarios.py` | Randomised incidents for the eval: a fresh hidden cause, decoys and perturbations per seed, on datagen's org. | datagen | no |
 | `api/app.py` | FastAPI surface over services and the registry. Error mapping, and the `Host` / same-origin / `API_TOKEN` guard. | services, registry, wiring | HTTP |
+| `api/guards.py` | ASGI guards shared by the API, MCP over HTTP and `serve.py`: `BodyLimit`, `Throttle`, `SecurityHeaders` (2.5). | services, config | HTTP |
 | `mcp_server/` | MCP surface over the same registry, plus two use-case tools (`respond_to_alert`, `reset_tenant`). stdio by default, Streamable HTTP with `--http`. | registry, services, wiring | MCP |
 | `serve.py` | The deployment app, what the Dockerfile runs: the API and UI at `/`, the MCP server at `/mcp` behind a required bearer token, `/health`; one process, one port. | api, mcp_server | Render / Docker |
 | `wiring.py` | Composition root: the only place that picks concrete adapters (`make_store`, `make_llm`). | adapters, config | no |
-| `config.py` | `Settings` from env vars or `.env` (pydantic-settings): FalkorDB connection (`FALKORDB_URL` or host and port), LLM provider, `ALLOWED_HOSTS`, `API_TOKEN`, `MAX_TENANTS`. | | env |
+| `config.py` | `Settings` from env vars or `.env` (pydantic-settings): FalkorDB connection (`FALKORDB_URL` or host and port), LLM provider, `ALLOWED_HOSTS`, `API_TOKEN`, `MAX_TENANTS`, and the limits of 2.5. | | env |
 
 ### 3.2 Ports and adapters
 
 | Port (Protocol) | Methods | Adapter today | Test double / alternative |
 |---|---|---|---|
 | `GraphRepository` | `read(name, /, **params)` (RO), `write(name, /, **params)`, `ensure_schema()`, `lock(scope="")`, `tenant` | `FalkorRepository` | Integration tests use a real FalkorDB with throwaway tenants |
-| `GraphStore` | `tenant()`, `exists()`, `snapshot()`, `restore()`, `drop()`, `tenants()`, `lock()`, `clone_pristine()` | `FalkorGraphStore` | |
+| `GraphStore` | `tenant()`, `exists()`, `snapshot()`, `restore()`, `drop()`, `tenants()`, `lock()`, `clone_pristine()`, `incr()`, `counter()` | `FalkorGraphStore` | Unit tests count in a dict (`test_limits_unit.py`) |
 | `LLMProvider` | `decide(role, board, tools) -> Decision`, `name` | `MockProvider` (default), OpenAI-compatible, Anthropic | Planner unit tests call `next_decision` on plain dicts |
 
 Two details matter:
@@ -403,6 +434,10 @@ Each planted decoy in act 1 is refuted by a different rule: `chg:pricing-2140` b
 | `LLM_PROVIDER` misconfigured | `make_llm()` | `/api/health` answers `ok: false`; the respond endpoint returns 503 |
 | Too many tenants | `reset(max_tenants=MAX_TENANTS)` (default 20) | 429 for a new tenant; existing tenants can always reset |
 | Wrong `Host`, cross-origin POST, missing `API_TOKEN` | API middleware | 400, 403, 401 |
+| A client past `RATE_LIMIT_PER_MIN`, `WRITES_PER_MIN` or `RUNS_PER_HOUR` | `api/guards.py` `Throttle`; MCP's `call_tool` for runs | 429 with `Retry-After` and the limit in words; an MCP tool error with the same words (2.5) |
+| `MAX_CONCURRENT_RUNS` runs already in progress | `services/limits.py` `run_slot` (`RunsBusy`) | 429; the same text as an MCP tool error and as `{"error": ...}` in the stream |
+| A body over `MAX_BODY_BYTES` | `api/guards.py` `BodyLimit` | 413, before the body is read |
+| Today's `LLM_DAILY_TOKEN_CAP` spent | `RunBudget` | not an error: the rules planner decides, the trace says why |
 | Any error inside an MCP tool call | `mcp_server.build_server` | returned to the client as a tool error; the MCP session stays up |
 | Duplicate or missing named query | `queries.all_queries()` at load / `tests/unit/test_catalogue.py` | fails fast in tests, never at runtime |
 
@@ -474,7 +509,7 @@ agent tools as tool definitions; `guarded()` accepts its choice only if it is a 
 that has not already run with the same target, and stamps the decision `by=<model id>`. Anything else (unknown tool,
 bad arguments, a repeat, an HTTP error, a timeout) becomes the planner's decision with `by="rules"` and a reason that
 starts "LLM fallback:". `services/respond.py::RunBudget` wraps the provider per run: when the tokens the provider
-reports (`last_usage`) pass `LLM_RUN_TOKEN_CAP` (default 300k; a full run on Claude is 60-100k), the rules finish the
+reports (`Decision.usage`) pass `LLM_RUN_TOKEN_CAP` (default 300k; a full run on Claude is 60-100k), the rules finish the
 incident and the trace says so. Tests, CI and no-key runs use the planner (`tests/conftest.py` pins it). Measured:
 Opus 5.5 and Sonnet 5.5 each drive all three acts with 0 fallbacks and the right cause (`docs/LLM_RUN.md`).
 

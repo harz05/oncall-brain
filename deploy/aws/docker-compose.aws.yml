@@ -1,0 +1,71 @@
+# AWS one box (docs/DEPLOY.md section D): docker-compose.yml plus Caddy for HTTPS. From the repo root:
+#   docker compose -f docker-compose.yml -f deploy/aws/docker-compose.aws.yml up -d --build
+# (the box's .env sets COMPOSE_FILE to both files, so plain `docker compose ...` works there).
+# Only Caddy publishes ports. The app and FalkorDB are reachable on the compose network only, and FalkorDB has a
+# password. Values come from .env (template: deploy/aws/env.example). Needs Docker Compose v2.24+ for !reset.
+x-logging: &logging  # rotate container logs so a noisy client cannot fill the disk
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"  # HTTP -> HTTPS redirect and the Let's Encrypt HTTP challenge
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (see deploy/aws/env.example)}
+    volumes:
+      - ./deploy/aws/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data  # certificates: keep this volume, or every rebuild asks Let's Encrypt again
+      - caddy_config:/config
+    logging: *logging
+
+  app:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      # uvicorn takes the client IP from X-Forwarded-For only when the peer is on a private network (Caddy, on the
+      # compose network); the app publishes no host port, and Caddy replaces any client-sent X-Forwarded-For.
+      FORWARDED_ALLOW_IPS: "172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
+      UVICORN_TIMEOUT_KEEP_ALIVE: "130"  # longer than Caddy's 2 min idle upstream pool, so Caddy always closes first
+      ALLOWED_HOSTS: ${DOMAIN:?set DOMAIN in .env (see deploy/aws/env.example)}
+      MCP_TOKEN: ${MCP_TOKEN:?set MCP_TOKEN in .env (user-data.sh generates one)}
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?set FALKORDB_PASSWORD in .env (user-data.sh generates one)}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}  # with LLM_API_KEY empty the deterministic planner runs
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      # Public limits; docs/DEPLOY.md section D says what each does. Override any of them in .env.
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
+      WRITES_PER_MIN: ${WRITES_PER_MIN:-20}
+      RUNS_PER_HOUR: ${RUNS_PER_HOUR:-12}  # one visitor can replay the three acts twice an hour
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
+      LLM_DAILY_TOKEN_CAP: ${LLM_DAILY_TOKEN_CAP:-2000000}
+      LLM_HOURLY_TOKEN_CAP: ${LLM_HOURLY_TOKEN_CAP:-500000}  # no single hour spends the whole day
+      LOCK_WAIT_SECONDS: ${LOCK_WAIT_SECONDS:-5}  # a busy demo company answers "busy" at once instead of hanging
+      LLM_RUN_TOKEN_CAP: ${LLM_RUN_TOKEN_CAP:-150000}  # one run; a normal one is 60-100k
+      MAX_TENANTS: ${MAX_TENANTS:-20}  # room for judges' own copies (?tenant=<name>), a few MB each
+      MAX_BODY_BYTES: ${MAX_BODY_BYTES:-65536}
+    logging: *logging
+
+  falkordb:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      BROWSER: "0"  # the image's FalkorDB Browser (port 3000) is not published here, so do not run it
+      # The image passes REDIS_ARGS to redis-server. maxmemory is a backstop: past it writes fail instead of the box
+      # swapping until the kernel kills FalkorDB. The demo uses a few MB per tenant.
+      REDIS_ARGS: --requirepass ${FALKORDB_PASSWORD:?set FALKORDB_PASSWORD in .env} --maxmemory 768mb
+      REDISCLI_AUTH: ${FALKORDB_PASSWORD}  # lets the base healthcheck's redis-cli ping authenticate
+    logging: *logging
+
+  mcp:  # profile "mcp" is not wired for AWS (no FALKORDB_PASSWORD); the public endpoint is /mcp on the app
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -3,6 +3,7 @@ python -m oncall_brain.mcp_server --http     serve Streamable HTTP at http://127
 
 import argparse
 import secrets
+from functools import lru_cache
 
 import anyio
 from mcp.server.stdio import stdio_server
@@ -11,6 +12,8 @@ from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from oncall_brain import wiring
+from oncall_brain.api.guards import BodyLimit, Throttle
 from oncall_brain.config import get_settings
 from oncall_brain.mcp_server import build_server
 
@@ -66,12 +69,17 @@ def http_app(host: str, require_token: bool = False) -> Starlette:
     """DNS-rebinding protection on any bind address: the SDK only turns it on for a localhost bind, but the docker
     service binds 0.0.0.0. Host and Origin must name ALLOWED_HOSTS (plus the local defaults and the hostname Render
     or Railway set); "*" turns it off. MCP_TOKEN (else API_TOKEN), when set, is required as a bearer token; with
-    require_token the endpoint is not served at all without one (BearerToken)."""
+    require_token the endpoint is not served at all without one (BearerToken). Every request counts against
+    RATE_LIMIT_PER_MIN for its client and its body against MAX_BODY_BYTES (api/guards.py), checked before the token,
+    so guessing tokens is throttled too; write tools also count against WRITES_PER_MIN, and respond_to_alert and
+    reset_tenant against RUNS_PER_HOUR."""
     names = [p for h in get_settings().hosts() for p in (h, f"{h}:*")]
     security = TransportSecuritySettings(enable_dns_rebinding_protection="*" not in names, allowed_hosts=names,
                                          allowed_origins=[f"{s}://{n}" for s in ("http", "https") for n in names])
     app = build_server().streamable_http_app(host=host, transport_security=security)
     app.add_middleware(BearerToken, required=require_token)
+    app.add_middleware(BodyLimit)
+    app.add_middleware(Throttle, store=lru_cache(wiring.make_store), buckets=lambda method, path, query: ["req"])
     app.add_middleware(AcceptTrailingSlash)
     return app
 

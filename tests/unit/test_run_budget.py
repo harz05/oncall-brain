@@ -11,13 +11,12 @@ class SpendyModel:
     name = "spendy via test"
 
     def __init__(self):
-        self.last_usage, self.calls = 0, 0
+        self.calls = 0
 
     def decide(self, role, board, tools):
         self.calls += 1
-        self.last_usage = 100
         return Decision(action="call", tool="blast_radius", args={"service": "svc:checkout"}, reason="because",
-                        by="spendy")
+                        by="spendy", usage=100)
 
 
 def test_decisions_come_from_the_model_until_the_cap_then_from_the_rules():
@@ -33,11 +32,10 @@ def test_decisions_come_from_the_model_until_the_cap_then_from_the_rules():
 def test_a_decision_that_never_reached_the_api_counts_nothing():
     class Flaky(SpendyModel):
         def decide(self, role, board, tools):
-            self.calls += 1  # e.g. an HTTP error: the adapter's fallback never updates last_usage
+            self.calls += 1  # e.g. an HTTP error: the adapter's fallback reports no usage
             return Decision(action="call", tool="blast_radius", args={"service": "svc:checkout"}, reason="fallback")
 
     model = Flaky()
-    model.last_usage = 999  # stale from an earlier run
     budget = RunBudget(model, cap=10_000)
     budget.decide("triage", BOARD, [])
     assert budget.used == 0 and budget.name == "spendy via test"

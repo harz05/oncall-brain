@@ -43,6 +43,7 @@ class Decision(BaseModel):
     reason: str
     handoff_to: str | None = None
     by: str = "rules"  # who decided: "rules" (the deterministic planner) or the model id (e.g. claude-opus-5-5)
+    usage: int = 0  # tokens the provider billed for this decision (services/respond.py RunBudget counts them)
 
 
 class TraceStep(BaseModel):

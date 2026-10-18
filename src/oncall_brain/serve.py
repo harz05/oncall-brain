@@ -6,18 +6,22 @@
 MCP_TOKEN alone and serves the UI, the API and a guarded MCP endpoint from one URL. Plainly: with MCP_TOKEN alone,
 anyone who can reach the URL can drive the demo (simulate, confirm, reset, every write tool) through the UI's API;
 set API_TOKEN too for a deployment that is MCP-only. Host and Origin are checked
-against ALLOWED_HOSTS plus the hostname Render or Railway set, on both halves."""
+against ALLOWED_HOSTS plus the hostname Render or Railway set, on both halves. What anyone can spend is capped by the
+limits in services/limits.py (per-client throttles, concurrent runs, the daily LLM budget; the public preset in
+.env.example), and every response carries the security headers (api/guards.py)."""
 
 from contextlib import asynccontextmanager
 from typing import Any
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from oncall_brain.api.app import app as api
 from oncall_brain.api.app import health_body
+from oncall_brain.api.guards import SecurityHeaders
 from oncall_brain.config import get_settings
 from oncall_brain.mcp_server.__main__ import http_app
 
@@ -58,4 +62,4 @@ async def lifespan(_: Starlette):
 # clients do not follow. /mcp/ reaches the same half (it rewrites the path). The API is mounted last and takes
 # everything else (the UI at /web/, / redirects there).
 app = Starlette(routes=[Route("/health", health), Route("/mcp", mcp), Route("/mcp/", mcp), Mount("/", app=api)],
-                lifespan=lifespan)
+                middleware=[Middleware(SecurityHeaders)], lifespan=lifespan)

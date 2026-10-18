@@ -21,6 +21,7 @@ from oncall_brain.agents import registry
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, GraphStore
 from oncall_brain.services import respond, seeding
+from oncall_brain.services.limits import DailyBudget, RunsBusy, Throttled, client_key, throttle
 from oncall_brain.services.tools import AlertArgs
 
 TENANT = {"type": "string", "pattern": "^[a-z0-9_]{1,40}$",
@@ -71,7 +72,10 @@ def _registry_handler(name: str) -> Handler:
 
 
 def _respond(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
-    run = respond.respond(_repo(store, tenant), AlertArgs.model_validate(args).alert_id, _llm())
+    s = get_settings()
+    run = respond.respond(_repo(store, tenant), AlertArgs.model_validate(args).alert_id, _llm(),
+                          max_runs=s.max_concurrent_runs,
+                          daily=DailyBudget(store, s.llm_daily_token_cap, s.llm_hourly_token_cap))
     return {"incident_id": run["incident_id"], "planner": run["planner"], "llm_tokens": run.get("llm_tokens", 0),
             "outcome": run["outcome"],
             "steps": [{"seq": s.seq, "role": s.role, "tool": s.tool, "by": s.by, "summary": s.summary,
@@ -85,6 +89,17 @@ def _reset(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, An
 @lru_cache
 def _llm():
     return wiring.make_llm()
+
+
+RUNS = {"respond_to_alert", "reset_tenant"}  # count against RUNS_PER_HOUR per client, as the API's respond and reset do
+
+
+def _client(ctx: Any) -> str | None:
+    """The caller's throttle key over HTTP (limits.client_key of its address: the transport attaches the request,
+    uvicorn has applied trusted proxy headers); None over stdio, which is a local process."""
+    request = getattr(ctx, "request", None)
+    client = getattr(request, "client", None)
+    return client_key(client.host) if client else None
 
 
 USE_CASES: dict[str, tuple[str, type[BaseModel], bool, Handler]] = {
@@ -181,8 +196,21 @@ def build_server(store: GraphStore | None = None) -> Server:
             return _text(f"unknown tool {params.name!r}", error=True)
         args = dict(params.arguments or {})
         tenant = str(args.pop("tenant", ""))  # validated by the store: one graph per tenant
+        (tool, handler), client = tools[params.name], _client(ctx)
+
+        def run() -> Any:
+            if client:  # the API's buckets: every write tool (Ask included) is a write, the use cases are also runs
+                s = get_settings()
+                if not tool.annotations.read_only_hint:
+                    throttle(get_store(), "write", client, s.writes_per_min)
+                if params.name in RUNS:
+                    throttle(get_store(), "run", client, s.runs_per_hour)
+            return handler(get_store(), tenant, args)
+
         try:  # graph calls block; keep them off the event loop
-            return _text(await anyio.to_thread.run_sync(tools[params.name][1], get_store(), tenant, args))
+            return _text(await anyio.to_thread.run_sync(run))
+        except (Throttled, RunsBusy) as e:  # a limit's own words, as the API answers them with 429
+            return _text(str(e), error=True)
         except LockError:  # the database is fine; another run holds the tenant
             return _text(f"tenant {tenant!r} is busy: another agent run holds its lock (one run per tenant at a "
                          "time; a crashed holder frees it after 15 min). Retry shortly.", error=True)

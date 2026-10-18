@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     # The token the MCP endpoint of a deployment requires (oncall_brain.serve, the Dockerfile); API_TOKEN when empty.
     mcp_token: str = _secret()
     max_tenants: int = 20  # most tenant graphs a reset may create (~5 MB each)
+    # Abuse limits for a public deployment (api/guards.py, services/limits.py); 0 turns one off. Throttles are per
+    # client address in fixed windows, counted in FalkorDB's Redis so every process (app, MCP) shares them.
+    rate_limit_per_min: int = 0  # requests to /api/* and /mcp per client per minute
+    writes_per_min: int = 0  # non-GET /api/* requests and MCP write tools per client per minute (Ask included)
+    runs_per_hour: int = 0  # agent runs (?compare=memory counts 2) and tenant resets per client per hour, API and MCP
+    max_concurrent_runs: int = 0  # agent runs in progress at once in this process; more are refused (429)
+    llm_daily_token_cap: int = 0  # LLM tokens per UTC day across every process; past it the rules planner decides
+    llm_hourly_token_cap: int = 0  # the same per UTC hour, so the day's budget cannot all go in one hour
+    max_body_bytes: int = 65_536  # largest request body the API (any path) and /mcp accept (413 past it)
+    # Longest a write, reset or run waits for its tenant's lock (an agent run holds it 60-150 s on Claude) before it
+    # is refused with 409. Every waiter holds a server thread, so a public deployment keeps this short (preset 5).
+    lock_wait_seconds: float = 120
 
     # Optional: post each status update to Slack through an incoming webhook (adapters/slack.py).
     slack_webhook_url: str = _secret()

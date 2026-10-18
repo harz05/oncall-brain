@@ -36,10 +36,13 @@ def anthropic_reply(tool: str, args: dict, text: str = "") -> dict:
             "stop_reason": "tool_use"}
 
 
-def make(kind: str, reply: dict | None = None, status: int = 200, seen: list | None = None):
+def make(kind: str, reply: dict | None = None, status: int = 200, seen: list | None = None,
+         fail: Exception | None = None):
     def handler(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(request)
+        if fail:
+            raise fail
         return httpx.Response(status, json=reply or {})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -180,3 +183,21 @@ def test_make_llm_picks_preset_and_vendor_key(monkeypatch):
     assert "sk-zz9" not in repr(Settings(_env_file=None, llm_api_key="sk-zz9"))  # keys never printed
     assert isinstance(make_llm(Settings(_env_file=None, llm_provider="openai", gemini_api_key="g")), MockProvider)
     assert make_llm(Settings(_env_file=None, llm_provider="ollama")).url == "http://localhost:11434/v1/chat/completions"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_each_decision_carries_the_tokens_its_request_was_billed(kind):
+    """On the Decision, not on the shared provider, so two concurrent runs never read each other's count; a request
+    that reached the model but gave no usage back (a read timeout, a reply we could not parse) is estimated."""
+    def billed(reply: dict) -> dict:
+        usage = {"total_tokens": 1234} if kind == "openai" else {"input_tokens": 1000, "output_tokens": 234}
+        return {**reply, "usage": usage}
+
+    assert make(kind, billed(REPLY[kind]("blast_radius", {"service": "svc:checkout"}))).decide(
+        "triage", board(), TOOLS).usage == 1234
+    unusable = make(kind, billed(REPLY[kind]("no_such_tool", {}))).decide("triage", board(), TOOLS)
+    assert unusable.by == "rules" and unusable.usage == 1234  # still billed
+    timed_out = make(kind, fail=httpx.ReadTimeout("slow")).decide("triage", board(), TOOLS)
+    assert timed_out.by == "rules" and "timeout" in timed_out.reason and timed_out.usage > 1000
+    assert make(kind, {}, status=500).decide("triage", board(), TOOLS).usage == 0  # refused: not billed
+    assert make(kind, fail=httpx.ConnectError("down")).decide("triage", board(), TOOLS).usage == 0  # never sent

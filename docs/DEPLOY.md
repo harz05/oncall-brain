@@ -47,6 +47,12 @@ Ports are published on 127.0.0.1 only. Put a reverse proxy (Caddy, nginx) with T
 `Host` header through, and add the public name to `ALLOWED_HOSTS`. Do not publish 6379: FalkorDB in the compose file
 has no password.
 
+In public, also set the abuse-limit preset from `.env.example` (docs/ARCHITECTURE.md 2.5), including
+`LOCK_WAIT_SECONDS=5` and `FORWARDED_ALLOW_IPS` naming the proxy's network (`172.16.0.0/12` for a proxy container on
+the compose network; not `*` behind a load balancer that appends to `X-Forwarded-For`). Restore the demo company on a
+timer, which undoes whatever visitors wrote into it:
+`*/30 * * * * cd <checkout> && docker compose exec -T app python -m scripts.seed --reset`.
+
 ## C. A static replay on GitHub Pages (no backend)
 
 `.github/workflows/pages.yml` publishes `web/` on every push to main (enable once: Settings -> Pages -> Source: GitHub
@@ -56,6 +62,155 @@ comparison). The header then shows a "recorded replay" chip instead of a FalkorD
 the Ask tab (it lists example questions instead) and live resets works. `.github/workflows/ci.yml` runs lint, the
 query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on every push.
 
+## D. AWS, one box (EC2 or Lightsail)
+
+One Ubuntu 24.04 instance runs `docker-compose.yml` plus `deploy/aws/docker-compose.aws.yml`: FalkorDB (with a
+password, no public port), the app (no public port) and Caddy, which gets a Let's Encrypt certificate and is the only
+thing listening on 80 and 443. `deploy/aws/user-data.sh` installs Docker, adds 2 GB of swap, clones the repository to
+`/opt/oncall-brain`, writes `/opt/oncall-brain/.env` with a generated `MCP_TOKEN` and FalkorDB password, and starts
+everything. The instance never sleeps. Allow about 20 minutes, most of it waiting. The repository must be public on
+GitHub first; if it is not yet, leave `REPO_URL` empty and the script's log prints how to copy the code in over SSH.
+
+### EC2 checklist (t3.small in Mumbai)
+
+1. **Region.** Sign in at https://console.aws.amazon.com and pick **Asia Pacific (Mumbai) ap-south-1** in the region
+   menu at the top right.
+2. **Launch.** EC2 -> Instances -> **Launch instances**. Name: `oncall-brain`.
+3. **Image.** Quick Start -> **Ubuntu** -> *Ubuntu Server 24.04 LTS (HVM), SSD Volume Type*, **64-bit (x86)**.
+4. **Size.** Instance type **t3.small** (2 vCPU, 2 GiB). A t3.micro (1 GiB) is too small for FalkorDB plus the app.
+5. **Key pair.** Create one and keep the `.pem` file: steps 10 and 13 need SSH. (Without SSH: first create the role:
+   IAM -> Roles -> Create role -> AWS service, EC2 -> attach `AmazonSSMManagedInstanceCore` -> name it
+   `oncall-brain-ssm`; then pick it under Advanced details -> IAM instance profile, choose "Proceed without a key
+   pair", leave out the SSH rule below and use Systems Manager -> Session Manager to get a shell.)
+6. **Firewall (security group).** Create a security group with these inbound rules. The wizard's three checkboxes
+   "Allow SSH traffic from: My IP", "Allow HTTPS traffic from the internet" and "Allow HTTP traffic from the
+   internet" set the first three.
+   - SSH, TCP 22, from **My IP** only (or no SSH rule when you use Session Manager).
+   - HTTP, TCP 80, from anywhere: Caddy needs it for the certificate and the redirect to HTTPS.
+   - HTTPS, TCP 443, from anywhere.
+   - Optional: Custom UDP, port 443, from anywhere, for HTTP/3. Browsers fall back to TCP without it.
+7. **Storage.** 20 GiB gp3. The default 8 GiB fills up with Docker images.
+8. **User data.** Advanced details -> User data: paste all of `deploy/aws/user-data.sh` and set `REPO_URL` in its
+   first lines to your repository (`https://github.com/<you>/<repo>.git`), and `BRANCH` if it is not `main`. Leave
+   `DOMAIN` empty to get `<public-ip-with-dashes>.sslip.io`. Keep "Metadata version" at "V2 only". Also under
+   Advanced details, set **Metadata response hop limit** to **1**. The setup script runs on the host and needs only
+   1; with 1 the containers cannot reach instance metadata. Never put the Anthropic key, a GitHub token (for example
+   inside `REPO_URL`) or any other secret in user data: any process on the box can read it, and so can anyone with
+   console access, for the life of the instance. The kit puts none there; the tokens are generated on the box and
+   live only in `/opt/oncall-brain/.env` (mode 600).
+9. **Launch instance, then pin its address (do not skip: the link you submit depends on it).** EC2 -> Elastic IPs ->
+   Allocate Elastic IP address -> Actions -> Associate it with the instance. The automatic public IP changes on every
+   stop and start, and the sslip.io name and the certificate with it. Note the Elastic IP; step 16 moves the box onto it. The domain is that address with dashes:
+   `13.233.10.20` becomes `13-233-10-20.sslip.io`.
+10. **Wait 5 to 8 minutes** (Docker install, image build, seeding the demo company). To watch, run
+    `chmod 400 <key>.pem` first (ssh refuses a key file others can read), then
+    `ssh -i <key>.pem ubuntu@<public-ip> sudo tail -f /var/log/oncall-brain-setup.log`. It ends with
+    "On-call Brain is up", the URL and the commands below.
+11. **Check.** `curl -fsS https://<domain>/health` answers `"ok": true`, `"falkordb": true`, `"mcp": "/mcp"`. Open
+    `https://<domain>/` in a browser. The first HTTPS request can take about 30 s while Caddy gets the certificate.
+12. **Cap the bill at the source.** In the Anthropic Console, create an API key only for this deployment and set a
+    monthly spend limit on its workspace. `LLM_DAILY_TOKEN_CAP` (below) is the app's own cap on top of that.
+13. **Set the Anthropic key and restart.** On the box (the key stays out of the shell history):
+    ```bash
+    read -rsp 'Anthropic API key: ' K; echo; sudo sed -i "s|^LLM_API_KEY=.*|LLM_API_KEY=$K|" /opt/oncall-brain/.env; unset K
+    cd /opt/oncall-brain && sudo docker compose up -d
+    ```
+    `up -d` recreates the app with the new value (`restart` would keep the old one). Without a key the deterministic
+    planner runs. `LLM_MODEL` empty means `claude-sonnet-5-5`. To match the recorded runs, use Opus:
+    ```bash
+    sudo sed -i 's|^LLM_MODEL=.*|LLM_MODEL=claude-opus-5-5|' /opt/oncall-brain/.env && cd /opt/oncall-brain && sudo docker compose up -d
+    ```
+14. **Connect Claude Code.** Get the token with `sudo grep ^MCP_TOKEN= /opt/oncall-brain/.env`, then on your machine
+    do step 6 of section A with `ONCALL_BRAIN_URL=https://<domain>` and `ONCALL_BRAIN_TOKEN=<that value>`.
+    `claude --plugin-dir ./plugin mcp list` shows `oncall-brain-remote ... Connected`.
+15. **Warm up before recording.** Open the UI, reset the demo, run Act 1 once end to end, and check that the steps
+    show the model name. Each act's agent run and each reset count against `RUNS_PER_HOUR` (12 per client IP; the three
+    acts with a reset use 5), so raise the hourly cap for the recording session and put it back afterwards:
+    ```bash
+    cd /opt/oncall-brain && echo RUNS_PER_HOUR=30 | sudo tee -a .env && sudo docker compose up -d     # before
+    cd /opt/oncall-brain && sudo sed -i '/^RUNS_PER_HOUR=/d' .env && sudo docker compose up -d       # after
+    ```
+16. **Move onto the Elastic IP from step 9.** The public IP changes when the instance is stopped and started (a reboot keeps
+    it), and the sslip.io name with it. To pin it: EC2 -> Elastic IPs -> Allocate Elastic IP address -> Associate it
+    with the instance, then run `sudo bash /opt/oncall-brain/deploy/aws/user-data.sh` on the box. It moves `DOMAIN` to
+    the new address and keeps the tokens and the key. Without an Elastic IP, run
+    `sudo bash /opt/oncall-brain/deploy/aws/user-data.sh` after every stop and start (a reboot needs nothing) and
+    share the new name it prints.
+
+### Lightsail instead (2 GB plan)
+
+Lightsail -> Create instance -> Mumbai -> Linux/Unix -> OS Only -> **Ubuntu 24.04 LTS**. Under "Add launch script",
+paste `deploy/aws/user-data.sh` with the same `REPO_URL` edit. Choose the 2 GB plan and create it. When it runs, open
+its Networking tab: add an **HTTPS (TCP 443)** rule to the IPv4 firewall (Lightsail opens only 22 and 80 by default),
+restrict SSH to your IP, and optionally add UDP 443. Attach a static IP there too (free while attached), then run
+`sudo bash /opt/oncall-brain/deploy/aws/user-data.sh` from the browser SSH button so `DOMAIN` follows it. Steps 10 to
+15 above are the same.
+
+### The public limits
+
+Defaults live in `deploy/aws/docker-compose.aws.yml`; set a line in `/opt/oncall-brain/.env` to change one, then
+`sudo docker compose up -d`.
+
+| Limit | Value | What it does |
+|---|---|---|
+| `MCP_TOKEN` | generated | `/mcp` needs `Authorization: Bearer <token>`. The UI and `/api` stay open so the demo works for anyone with the link. |
+| `RATE_LIMIT_PER_MIN` | 120 | Requests per minute from one client IP to `/api/*` (except `/api/health`) and `/mcp`; pages, scripts and `/health` are not counted. Over it: 429 with Retry-After. |
+| `WRITES_PER_MIN` | 20 | Non-GET `/api/*` calls per minute from one client IP (simulate, confirm, reset, new alerts). Ask does not count. |
+| `RUNS_PER_HOUR` | 12 | Agent runs and tenant resets one client IP may start per hour: respond, respond/stream, `alerts?respond=true`, reset, and the MCP `respond_to_alert` / `reset_tenant` tools. One run is 60-150 s and about 60-100k tokens; `?compare=memory` (Act 2) runs the agents twice for one count. |
+| `MAX_CONCURRENT_RUNS` | 2 | Agent runs in progress at once, all clients together (the box runs one app process). One more is refused at once: 429, or an error line in the run stream. |
+| `LLM_DAILY_TOKEN_CAP` | 2,000,000 | Model tokens all runs may spend per UTC day (resets 05:30 IST), about 20 to 30 full runs. Counted in FalkorDB, so an app restart does not reset it; `curl -s https://<domain>/health` shows `llm_budget.used_today`. Checked before each model call, so runs in flight at the cap go one call over. Past it, runs use the deterministic planner. |
+| `LLM_RUN_TOKEN_CAP` | 150,000 | Model tokens one run may spend (the app default is 300,000). Past it the deterministic planner finishes that run and the trace says so. |
+| `MAX_TENANTS` | 20 | Tenants a reset may create, the default one included (each is two graphs, a few MB). A judge can open `?tenant=<name>` and press Reset for a private copy of the demo company. Past it: 429. |
+| `LOCK_WAIT_SECONDS` | 5 | How long a run, reset or write waits for the demo company while another agent run holds it. Past it: "busy, retry shortly" at once, instead of a silent 2-minute wait. |
+| `LLM_HOURLY_TOKEN_CAP` | 500,000 | This hour's slice of the daily budget, so one busy hour cannot spend the day. Past it the deterministic planner decides until the next hour. |
+| `MAX_BODY_BYTES` | 65536 | Largest body `/api/*` and `/mcp` accept (413). Caddy refuses bodies over 1 MB first. |
+
+In the app the throttles, `MAX_CONCURRENT_RUNS` and `LLM_DAILY_TOKEN_CAP` default to 0 (off) and `MAX_TENANTS` to 20;
+`deploy/aws/docker-compose.aws.yml` turns on the values above. The throttles are per client IP, so people behind one
+office NAT share them.
+
+The box adds, outside the app: Caddy terminates HTTPS, redirects HTTP, drops clients that take over 10 s to send
+their headers, removes the `Server` header and adds HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy` and `Permissions-Policy` where the app sent none. Caddy replaces any `X-Forwarded-For` a client sends
+with the real address, so the per-IP limits cannot be dodged by faking it. FalkorDB has a password and
+`maxmemory 768mb`. Every container keeps at most 3 x 10 MB of logs.
+
+### Cost, roughly (on-demand, ap-south-1; check the AWS pricing pages)
+
+| Box | Per month |
+|---|---|
+| EC2 t3.small + 20 GB gp3 + public IPv4 | about $22 (instance ~$16, disk ~$2, IPv4 address $3.65) |
+| EC2 t3.medium (4 GiB), if 2 GiB proves tight | about $38 |
+| Lightsail 2 GB plan (IP and disk included) | about $12 |
+
+Anthropic usage comes on top, bounded by `LLM_DAILY_TOKEN_CAP` and the Console spend limit. Worst case per day is
+`LLM_DAILY_TOKEN_CAP` x the model's input price (most tokens are input); work it out for the model in `LLM_MODEL` from
+Anthropic's pricing page. The Console spend limit in step 12 is the hard stop. A demo stays far below
+the 100 GB a month of outbound traffic AWS does not bill.
+
+### Update, back up, tear down
+
+- **Update.** `cd /opt/oncall-brain && sudo git pull --ff-only && sudo docker compose up -d --build && sudo docker
+  image prune -f`, or run `sudo bash /opt/oncall-brain/deploy/aws/user-data.sh` again. Both keep `.env` and the
+  graphs. Update when no agent run is in flight; if one was, its lock lease frees the demo company within 2 minutes.
+- **Back up the whole box.** EC2 -> Elastic Block Store -> Volumes -> the instance's volume -> Actions -> Create
+  snapshot (Lightsail: the instance's Snapshots tab). The snapshot includes `.env` with the keys, so keep it private.
+- **Back up only the graphs.** `cd /opt/oncall-brain && sudo docker compose exec falkordb redis-cli SAVE && sudo
+  docker compose cp falkordb:/var/lib/falkordb/data/dump.rdb ./dump-$(date +%F).rdb`.
+- **Tear down.** EC2 -> Instances -> select it -> Instance state -> Terminate (the root volume goes with it unless you
+  turned off "Delete on termination"). Then delete any volume left in the "available" state, release the Elastic IP
+  if you allocated one (an unattached one is still billed), delete the snapshots, and revoke the Anthropic key. Then
+  delete the `oncall-brain` security group (EC2 -> Security Groups), the key pair (EC2 -> Key Pairs) and your local
+  .pem, and the `oncall-brain-ssm` IAM role if you made one. On Lightsail: delete the instance, the static IP and the
+  snapshots.
+- **If something is wrong.** `cd /opt/oncall-brain && sudo docker compose ps` and
+  `sudo docker compose logs --tail 100 caddy app falkordb`. No certificate usually means port 80 or 443 is closed in
+  the security group or firewall. `sudo docker compose logs caddy | grep -i -E 'rateLimited|too many'` means Let's
+  Encrypt refused the shared sslip.io name. Caddy keeps retrying with backoff. To add a second CA, put
+  `email you@your-real-domain` as the first line inside the top `{ }` block of `deploy/aws/Caddyfile`, then
+  `sudo docker compose restart caddy`. A domain of your own (an A record to the box, `DOMAIN=<it>` in `.env`,
+  `sudo docker compose up -d`) avoids the shared limit.
+
 ## Settings that matter in public
 
 | Setting | Why |
@@ -64,6 +219,8 @@ query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on e
 | `API_TOKEN` | If set, every `/api/*` call except `/api/health` needs `Authorization: Bearer <token>`, and it doubles as the MCP token when `MCP_TOKEN` is empty. The bundled UI does not send it, so set this only for API/MCP-only deployments. Without it, anyone who can reach the URL can drive the demo company (simulate, confirm, reset, every write tool) through the UI's API; the MCP token guards `/mcp` only. |
 | `ALLOWED_HOSTS` | Host-header allow-list (blocks DNS rebinding) on the API and the MCP endpoint. The hostname Render (`RENDER_EXTERNAL_HOSTNAME`) or Railway (`RAILWAY_PUBLIC_DOMAIN`) sets is accepted by itself; list any other public name here. |
 | `MAX_TENANTS` | Each new tenant costs two graphs; resetting a new tenant past the cap returns 429. |
+| Abuse limits | `RATE_LIMIT_PER_MIN`, `WRITES_PER_MIN`, `RUNS_PER_HOUR`, `MAX_CONCURRENT_RUNS`, `LLM_DAILY_TOKEN_CAP`, `LLM_HOURLY_TOKEN_CAP`, `LOCK_WAIT_SECONDS`, `MAX_BODY_BYTES`: the public preset is in `.env.example`, `render.yaml` sets it, and docs/ARCHITECTURE.md 2.5 says what each bounds. |
+| `FORWARDED_ALLOW_IPS` | The proxy addresses uvicorn takes `X-Forwarded-For` from, so each visitor has its own throttle bucket. Name the proxy's network; `*` is safe only behind one proxy that overwrites the header. |
 | `FALKORDB_URL` / `FALKORDB_SSL` | Connection to a hosted FalkorDB (TLS). |
 
 `/health` answers on any `Host` (a platform's checker may not send the public name) and reveals only flags. There is

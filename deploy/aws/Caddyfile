@@ -1,0 +1,35 @@
+# HTTPS in front of the app (deploy/aws/docker-compose.aws.yml, docs/DEPLOY.md section D). DOMAIN comes from .env.
+# On first start Caddy gets a Let's Encrypt certificate for it (ports 80 and 443 must be open to the internet), keeps
+# it in the caddy_data volume and redirects HTTP to HTTPS.
+{
+	servers {
+		timeouts {
+			# Clients that send headers too slowly (slowloris) are dropped. No read_body/write timeout on purpose: Go
+			# applies those to the whole exchange and would cut a 60-150 s agent run stream.
+			read_header 10s
+		}
+	}
+}
+
+{$DOMAIN} {
+	request_body {
+		max_size 1MB
+	}
+	# Compresses pages, scripts and JSON. The NDJSON run stream and SSE pass through unencoded (checked on 2.8.4).
+	encode zstd gzip
+	# Security headers. Deletes run after the app's headers, so uvicorn's Server goes too. "?" sets a header only when
+	# the app did not send it; one line each, because Caddy skips a whole "?" block if any one of its headers exists.
+	header -Server
+	header -Via
+	header ?Strict-Transport-Security "max-age=31536000"
+	header ?X-Content-Type-Options "nosniff"
+	header ?X-Frame-Options "DENY"
+	header ?Referrer-Policy "strict-origin-when-cross-origin"
+	header ?Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	# One upstream for the UI, /api, /health and /mcp. flush_interval -1 writes every chunk as it arrives: the agent run
+	# streams NDJSON and /mcp streams SSE, and buffering would freeze the UI until the run ends. Caddy passes Host
+	# through and replaces any client-sent X-Forwarded-For with the real peer address, which the app trusts.
+	reverse_proxy app:8000 {
+		flush_interval -1
+	}
+}

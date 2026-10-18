@@ -28,16 +28,17 @@ def _check_tenant(tenant: str) -> str:
 
 
 class FalkorRepository:
-    def __init__(self, db: FalkorDB, tenant: str, graph: str | None = None):
+    def __init__(self, db: FalkorDB, tenant: str, graph: str | None = None, lock_wait: float = 120):
         self.tenant = _check_tenant(tenant)
-        self._db = db
+        self._db, self._lock_wait = db, lock_wait
         self._graph = db.select_graph(graph or PREFIX + tenant)
 
     def scratch(self, name: str) -> "FalkorRepository":
         """A repository on a side graph of this tenant (`scratch_<tenant>_<name>`): a projection built from the
         tenant graph for a graph algorithm to run on (the algorithms see every edge, so the projection holds only the
         edges live at the time in question). Callers drop it with `drop_graph()` when done."""
-        return FalkorRepository(self._db, self.tenant, graph=SCRATCH + f"{self.tenant}_{_check_tenant(name)}")
+        return FalkorRepository(self._db, self.tenant, graph=SCRATCH + f"{self.tenant}_{_check_tenant(name)}",
+                                lock_wait=self._lock_wait)
 
     def drop_graph(self) -> None:
         """Delete this graph (meant for scratch projections; a tenant graph is dropped through the store)."""
@@ -55,11 +56,16 @@ class FalkorRepository:
         12 clients racing `MERGE` on one edge still made a duplicate (scripts/concurrency.py). And two concurrent runs
         on one incident would redo each other's work. So whole runs on a tenant are serialised; reads (tools called
         without an incident) stay concurrent, and different tenants run in parallel."""
-        # The lease outlives any sane run (an LLM planner can take minutes); a crashed holder frees it after 15 min.
-        # Waiters poll every 10 ms, not redis-py's default 100 ms: with 8 writers on one tenant the slowest write
-        # fell from 1.3 s to 0.3 s and p99 from 400 ms to 225 ms (scripts/concurrency.py, PERF.md "Concurrency").
+        # A 2-minute lease that respond() renews on every recorded step, so a long LLM run keeps it and a holder that
+        # died (a redeploy, an OOM kill) frees the tenant within 2 minutes instead of blocking it for 15.
+        # A waiter gives up after lock_wait seconds (LOCK_WAIT_SECONDS) with LockError, which the surfaces answer as
+        # "busy, retry shortly": each waiter holds a server thread, and a long wait behind a 2-minute run let a burst
+        # of writes take every thread and freeze the whole site. Waiters poll every 10 ms, not redis-py's default
+        # 100 ms: with 8 writers on one tenant the slowest write fell from 1.3 s to 0.3 s and p99 from 400 ms to 225 ms
+        # (scripts/concurrency.py, PERF.md "Concurrency").
         key = f"oncall_brain:lock:{self.tenant}" + (f":{scope}" if scope else "")
-        return self._db.connection.lock(key, timeout=30 if scope else 900, blocking_timeout=120, sleep=0.01)
+        return self._db.connection.lock(key, timeout=30 if scope else 120, blocking_timeout=self._lock_wait,
+                                        sleep=0.01)
 
     def _run(self, name: str, params: dict[str, Any], readonly: bool) -> QueryRun:
         q = queries.get(name)
@@ -128,12 +134,13 @@ class FalkorRepository:
 
 class FalkorGraphStore:
     def __init__(self, host: str = "localhost", port: int = 6379, username: str | None = None,
-                 password: str | None = None, ssl: bool = False, url: str = ""):
+                 password: str | None = None, ssl: bool = False, url: str = "", lock_wait: float = 120):
         self.db = (FalkorDB.from_url(url) if url
                    else FalkorDB(host=host, port=port, username=username, password=password, ssl=ssl))
+        self.lock_wait = lock_wait
 
     def tenant(self, tenant: str) -> FalkorRepository:
-        return FalkorRepository(self.db, tenant)
+        return FalkorRepository(self.db, tenant, lock_wait=self.lock_wait)
 
     def _names(self) -> list[str]:
         return self.db.list_graphs()
@@ -182,6 +189,17 @@ class FalkorGraphStore:
 
     def lock(self, tenant: str):
         return self.tenant(tenant).lock()
+
+    def incr(self, key: str, ttl: int, by: int = 1) -> int:
+        """A counter in the Redis next to the graphs, so the app and a standalone MCP process share it and it survives
+        restarts. One MULTI: SET NX EX creates it with its expiry (any Redis version), INCRBY keeps that expiry."""
+        pipe = self.db.connection.pipeline()
+        pipe.set(key, 0, ex=ttl, nx=True)
+        pipe.incrby(key, by)
+        return int(pipe.execute()[1])
+
+    def counter(self, key: str) -> int:
+        return int(self.db.connection.get(key) or 0)
 
     def clone_pristine(self, tenant: str, into: str) -> bool:
         """Copy the tenant's pristine graph into another tenant's slot (for what-if replays). False if none."""

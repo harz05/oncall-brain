@@ -1,6 +1,7 @@
 """Use cases: respond to an alert (triage -> investigator -> comms, handing off through the graph) and
 resolve an incident (the human-confirmed fix that becomes memory)."""
 
+import secrets
 from typing import Any
 
 from oncall_brain.agents import registry
@@ -13,35 +14,62 @@ from oncall_brain.ports import GraphRepository, GraphStore, LLMProvider
 
 # Importing the module registers the tools.
 from oncall_brain.services import tools as _tools  # noqa: F401
+from oncall_brain.services.limits import DailyBudget, run_slot
+
+TIMEOUTS_TO_TRIP = 2  # a 529 or a 4xx comes back in under a second and does not count; only timeouts do
 
 
 class RunBudget:
-    """Caps what one incident run may spend on the model: input + output tokens, as the provider reports them in
-    `last_usage`. Past the cap every remaining decision is the deterministic planner's, and the trace says so, so a
-    model that dithers cannot run up a bill or stall an incident."""
+    """Caps what one incident run may spend on the model: input + output tokens, as the provider reports them on each
+    Decision (`usage`; on the decision itself, so concurrent runs sharing one provider never mix counts). Past the
+    cap every remaining decision is the deterministic planner's, and the trace says so, so a model that dithers cannot
+    run up a bill or stall an incident. With a DailyBudget, each decision's usage is also added to today's (and this
+    hour's) shared counter, and once that reaches its cap the planner decides the same way."""
 
-    def __init__(self, llm: LLMProvider, cap: int):
-        self.llm, self.cap, self.used, self.name = llm, cap, 0, llm.name
+    def __init__(self, llm: LLMProvider, cap: int, daily: DailyBudget | None = None):
+        self.llm, self.cap, self.daily, self.used, self.name = llm, cap, daily, 0, llm.name
+        self.timeouts = 0  # consecutive decisions the model did not answer in time
 
     def decide(self, role: str, board: dict[str, Any], tools: list[dict[str, Any]]) -> Decision:
-        if self.used >= self.cap:
-            d = next_decision(role, board)
-            return d.model_copy(update={"reason": f"LLM fallback: token cap for this run ({self.cap:,}) reached. "
-                                                  f"{d.reason}"})
-        if hasattr(self.llm, "last_usage"):
-            self.llm.last_usage = 0  # a decision that never reached the API must not re-count the previous one
+        if self.cap and self.used >= self.cap:
+            return _rules(role, board, f"token cap for this run ({self.cap:,}) reached.")
+        if self.daily and (why := self.daily.spent()):
+            return _rules(role, board, why)
+        if self.timeouts >= TIMEOUTS_TO_TRIP:  # each timeout costs the full client timeout and holds the tenant
+            return _rules(role, board, f"the model did not answer {self.timeouts} times in a row; the rules planner "
+                                       "finishes this run.")
         d = self.llm.decide(role, board, tools)
-        self.used += int(getattr(self.llm, "last_usage", 0) or 0)
+        self.timeouts = self.timeouts + 1 if d.reason.startswith("LLM fallback: timeout") else 0
+        self.used += d.usage
+        if self.daily:
+            self.daily.spend(d.usage)
         return d
 
 
-def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None = None) -> dict[str, Any]:
+def _rules(role: str, board: dict[str, Any], why: str) -> Decision:
+    d = next_decision(role, board)
+    return d.model_copy(update={"reason": f"LLM fallback: {why} {d.reason}"})
+
+
+def respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: OnStep | None = None, *,
+            max_runs: int = 0, daily: DailyBudget | None = None) -> dict[str, Any]:
     """on_step is called with each step as it is recorded, so a caller can stream the run while it happens.
-    A provider with `run_token_cap` (set by wiring from LLM_RUN_TOKEN_CAP) is budgeted per run (RunBudget)."""
-    cap = int(getattr(llm, "run_token_cap", 0) or 0)
-    budget = RunBudget(llm, cap) if cap else None
-    with repo.lock():  # one agent run per tenant at a time (see FalkorRepository.lock)
-        run = _respond(repo, alert_id, budget or llm, on_step)
+    A provider wiring metered (`run_token_cap`, from LLM_RUN_TOKEN_CAP; 0 = no per-run cap) is budgeted per run and
+    against `daily` (RunBudget). At most `max_runs` runs at once in this process (MAX_CONCURRENT_RUNS): past it,
+    RunsBusy."""
+    with run_slot(max_runs):
+        metered = hasattr(llm, "run_token_cap")  # wiring sets it on every real provider, never on the planner
+        budget = RunBudget(llm, int(getattr(llm, "run_token_cap", 0) or 0), daily) if metered else None
+        with repo.lock() as lk:  # one agent run per tenant at a time (see FalkorRepository.lock)
+            renew = getattr(lk, "reacquire", None)  # the lease is 2 min; every step renews it
+
+            def step(s: TraceStep) -> None:
+                if renew:
+                    renew()
+                if on_step:
+                    on_step(s)
+
+            run = _respond(repo, alert_id, budget or llm, step)
     run["llm_tokens"] = budget.used if budget else 0
     return run
 
@@ -67,14 +95,16 @@ def _respond(repo: GraphRepository, alert_id: str, llm: LLMProvider, on_step: On
             "outcome": outcome(repo, incident_id, trace)}
 
 
-def without_memory(store: GraphStore, tenant: str, alert_id: str, llm: LLMProvider) -> dict[str, Any] | None:
+def without_memory(store: GraphStore, tenant: str, alert_id: str, llm: LLMProvider,
+                   daily: DailyBudget | None = None) -> dict[str, Any] | None:
     """The same incident replayed on a copy of the tenant's pristine graph, i.e. without anything the agents learned
-    since seeding: the fair way to show what memory saved (same incident, same planner, memory removed)."""
-    scratch = f"{tenant[:32]}_nomem"
+    since seeding: the fair way to show what memory saved (same incident, same planner, memory removed). Its tokens
+    count against `daily`; it takes no run slot of its own, being the second half of the run that asked for it."""
+    scratch = f"{tenant[:30]}_nm{secrets.token_hex(3)}"  # per run: two act-2 replays never share (or drop) one copy
     if not store.clone_pristine(tenant, scratch):
         return None
     try:
-        o = respond(store.tenant(scratch), alert_id, llm)["outcome"]
+        o = respond(store.tenant(scratch), alert_id, llm, daily=daily)["outcome"]
     finally:
         store.drop(scratch)
     return {"investigator_calls": o["investigator_calls"], "hypotheses_checked": o["hypotheses_checked"],

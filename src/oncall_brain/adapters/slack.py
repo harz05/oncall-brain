@@ -14,6 +14,8 @@ def post(text: str | None) -> str:
         return "off"
     if not text:
         return "nothing to post"
+    # Slack control sequences (<!channel>, <url|label>) can come from public input: escape as Slack documents.
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     try:
         httpx.post(url, json={"text": text}, timeout=5).raise_for_status()
         return "posted"

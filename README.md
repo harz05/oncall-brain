@@ -110,7 +110,7 @@ The eval has single-alert incidents only; act 3's storm is checked by `make demo
 
 ```mermaid
 flowchart LR
-  Team -- OWNS --> Service
+  Team -- "OWNS {valid_from,valid_to}" --> Service
   Person -- MEMBER_OF --> Team
   Person -- "ON_CALL {start,end}" --> Team
   Service -- "DEPENDS_ON {valid_from,valid_to}" --> Service
@@ -140,7 +140,15 @@ flowchart LR
   Incident -- FIXED_WITH --> Runbook
   Runbook -- FOR_SERVICE --> Service
   Incident -- HAS_UPDATE --> Message
-  Message -- "CITES (change, ticket, chat, doc, runbook, person)" --> Change
+  Message -- "CITES (change, ticket, chat, doc, runbook, person, initiative)" --> Change
+  Team -- DRIVES --> Initiative
+  Person -- LEADS --> Initiative
+  Ticket -- PART_OF --> Initiative
+  Person -- OPENED --> Session
+  Session -- ASKED --> Question
+  Question -- FOLLOWS --> Question
+  Question -- "ABOUT {carried}" --> Service
+  Question -- "ANSWERED_WITH {rank}" --> Doc
   Meta["Meta {version, seed}: data fingerprint"]
 ```
 
@@ -148,6 +156,24 @@ flowchart LR
 - One graph per tenant (`tenant_<name>`), plus `pristine_<name>` for resets. The single `Meta` node fingerprints the seed data, so a reset never restores a copy made by an older generator.
 - Every label except `Meta` is indexed on `id` and has a unique constraint on it, so FalkorDB refuses a duplicate even from a raw query; `Change.at` and `Anomaly.at` have range indexes for the alert-window filters; `Doc(title, text)`, `Ticket(title, text)` and `Message(text)` have FalkorDB full-text indexes for `ask`.
 - Every label, property and relationship, with who writes it: [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
+
+### How the agents query it
+
+Each agent step is one tool, and each tool runs named Cypher from `src/oncall_brain/adapters/falkordb/queries/*.cypher`
+(all of them, with parameters and purpose, in [docs/QUERIES.md](docs/QUERIES.md)). The planner reads what came back
+and picks the next step from it.
+
+| Step | What it asks the graph | Query | Graph feature |
+|---|---|---|---|
+| Triage: blast radius | Which services depend on the alerting one through dependencies live at alert time, ranked by criticality | `blast_radius`, `criticality` | variable-length `DEPENDS_ON*` with `valid_from`/`valid_to` filters; `algo.pageRank` on a point-in-time projection |
+| Triage: page | Who is on call now for the team that owned the service at alert time | `on_call_for` | `OWNS` and `ON_CALL` validity windows |
+| Triage: storm | Which other alerts are the same incident | `storm_upstream`, `storm_components` | shared red upstreams; `algo.WCC` on a projection |
+| Investigator: recall | Past incidents whose cause sat on this alert's live dependency path, and the runbook that fixed them | `recall_similar`, `memory_suspects` | episodic `CAUSED_BY` + procedural `FIXED_WITH` |
+| Investigator: suspects | Every change in the window on a service the alerting services depend on | `path_suspects` | multi-hop traversal from the `Change.at` range index |
+| Investigator: check | Did the anomaly travel from the suspect's service to the alert along a live path, and was that service already red before its change | `live_paths`, `anomalies_between`, `red_before` | `shortestPath`-ordered live paths; refutation when none exists |
+| Comms: heads-up | The on-call of the most critical impacted teams nobody paged | `warn_candidates` | PageRank rank joined to ownership at alert time |
+| Comms: update | The facts and sources the status update cites | `update_facts`, `post_update` | `CITES` edges to every source node |
+| Ask (company brain) | Who owns or knows a service, why a decision was made, what an initiative changes, what "it" meant in the last question | `ownership`, `who_knows`, `initiative_story`, `session_context` | `DECIDES`/`SUPERSEDES`, `PART_OF`, `Session`/`Question` memory |
 
 ## Quick start (local, no Docker)
 

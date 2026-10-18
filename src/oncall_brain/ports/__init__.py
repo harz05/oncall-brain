@@ -49,6 +49,15 @@ class GraphStore(Protocol):
     def lock(self, tenant: str) -> AbstractContextManager: ...
     def clone_pristine(self, tenant: str, into: str) -> bool: ...
 
+    def incr(self, key: str, ttl: int, by: int = 1) -> int:
+        """Add to a counter every process on this database shares (throttles, the daily LLM budget) and return it; a
+        new counter expires after `ttl` seconds."""
+        ...
+
+    def counter(self, key: str) -> int:
+        """A shared counter's value (0 when it does not exist or has expired)."""
+        ...
+
 
 class LLMProvider(Protocol):
     """Chooses the next tool for an agent role from what the graph currently says (the board)."""
