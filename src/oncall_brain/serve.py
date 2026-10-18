@@ -3,7 +3,9 @@
 
 /mcp answers only with a bearer token (MCP_TOKEN, else API_TOKEN): a public MCP endpoint can write to every tenant.
 /api/* keeps its own rule (open unless API_TOKEN is set, which the bundled UI cannot send), so a demo deployment sets
-MCP_TOKEN alone and serves the UI, the API and a guarded MCP endpoint from one URL. Host and Origin are checked
+MCP_TOKEN alone and serves the UI, the API and a guarded MCP endpoint from one URL. Plainly: with MCP_TOKEN alone,
+anyone who can reach the URL can drive the demo (simulate, confirm, reset, every write tool) through the UI's API;
+set API_TOKEN too for a deployment that is MCP-only. Host and Origin are checked
 against ALLOWED_HOSTS plus the hostname Render or Railway set, on both halves."""
 
 from contextlib import asynccontextmanager
@@ -15,7 +17,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from oncall_brain.api.app import app as api
-from oncall_brain.api.app import health as api_health
+from oncall_brain.api.app import health_body
 from oncall_brain.config import get_settings
 from oncall_brain.mcp_server.__main__ import http_app
 
@@ -40,8 +42,8 @@ def health(_: Request) -> JSONResponse:
     Answers on any Host (a platform's checker may not send the public name); it reveals no data and changes nothing.
     The API and MCP halves keep their Host and Origin checks."""
     mcp_state = "/mcp" if get_settings().mcp_bearer() else "off: MCP_TOKEN is not set"
-    body: dict[str, Any] = {**api_health(), "mcp": mcp_state}
-    return JSONResponse(body)
+    body: dict[str, Any] = {**health_body(), "mcp": mcp_state}
+    return JSONResponse(body, status_code=200 if body["ok"] else 503)
 
 
 @asynccontextmanager

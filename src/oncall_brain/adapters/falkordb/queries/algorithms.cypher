@@ -32,7 +32,7 @@ MATCH (i:Incident {id: $incident_id})
 OPTIONAL MATCH (i)-[:PAGED]->(:Person)-[:MEMBER_OF]->(pt:Team)
 WITH i, collect(DISTINCT pt.id) AS paged_teams
 MATCH (i)-[x:IMPACTS]->(s:Service)<-[o:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
-WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
   AND oc.start <= $at AND oc.end > $at
 RETURN t.id AS team, t.name AS team_name, p.id AS person, p.name AS name, p.handle AS handle,
        s.id AS service, s.tier AS tier, x.rank AS rank, x.score AS score

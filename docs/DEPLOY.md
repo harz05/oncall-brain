@@ -61,7 +61,7 @@ query-doc check, the demo and the tests against `falkordb/falkordb:v4.22.0` on e
 | Setting | Why |
 |---|---|
 | `MCP_TOKEN` | Required by `/mcp` on a deployment: without it that endpoint answers 401 (the UI and API still work). The plugin sends it as `ONCALL_BRAIN_TOKEN`. |
-| `API_TOKEN` | If set, every `/api/*` call except `/api/health` needs `Authorization: Bearer <token>`, and it doubles as the MCP token when `MCP_TOKEN` is empty. The bundled UI does not send it, so set this only for API/MCP-only deployments. |
+| `API_TOKEN` | If set, every `/api/*` call except `/api/health` needs `Authorization: Bearer <token>`, and it doubles as the MCP token when `MCP_TOKEN` is empty. The bundled UI does not send it, so set this only for API/MCP-only deployments. Without it, anyone who can reach the URL can drive the demo company (simulate, confirm, reset, every write tool) through the UI's API; the MCP token guards `/mcp` only. |
 | `ALLOWED_HOSTS` | Host-header allow-list (blocks DNS rebinding) on the API and the MCP endpoint. The hostname Render (`RENDER_EXTERNAL_HOSTNAME`) or Railway (`RAILWAY_PUBLIC_DOMAIN`) sets is accepted by itself; list any other public name here. |
 | `MAX_TENANTS` | Each new tenant costs two graphs; resetting a new tenant past the cap returns 429. |
 | `FALKORDB_URL` / `FALKORDB_SSL` | Connection to a hosted FalkorDB (TLS). |

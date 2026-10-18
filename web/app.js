@@ -89,7 +89,7 @@ async function api(method, path, body) {
   const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `${r.status} ${r.statusText}`);
+  if (!r.ok) throw Object.assign(new Error(typeof data.detail === 'string' ? data.detail : `${r.status} ${r.statusText}`), { body: data });
   return data;
 }
 
@@ -232,6 +232,7 @@ function renderInbox() {
   const rows = inboxItems();
   const open = rows.filter((it) => statusOf(it.run, it)[0] !== 'confirmed').length;
   set('inbox-counts', rows.length ? `${open} open · ${rows.length - open} confirmed` : '');
+  document.querySelector('.incidents').classList.toggle('has-open', open > 0); // phone: inbox above the hero once something is open (R21)
   set('inbox', rows.length ? rows.map((it) => {
     const [cls, label] = statusOf(it.run, it);
     const trigger = it.run?.alert || it.fresh || it.alerts.find((a) => `inc:${short(a.id)}` === it.incident) || it.alerts.at(-1);
@@ -453,8 +454,8 @@ function renderAnswer(cur) {
   const slack = cur.resolved?.slack || cur.res?.slack;
   const preview = f.update ? h('details', { class: 'slack-wrap', open: mobile() ? null : null },
     h('summary', {}, h('span', { class: 'logo sm' }), h('b', {}, 'Status update drafted for #incidents'),
-      h('span', { class: 'muted small' }, slack === 'posted' ? ' · posted to your Slack' : ' · preview'),
-      cur.res && slack !== 'posted' ? h('span', { class: 'muted small' }, ' · ', h('button', { class: 'link-btn', onclick: (e) => { e.preventDefault(); showView('connect'); } }, 'Connect Slack to post it')) : null),
+      h('span', { class: 'muted small' }, slack === 'posted' ? ' · posted to your Slack' : slack?.startsWith('failed') ? ` · Slack post ${slack}` : ' · preview'),
+      cur.res && slack !== 'posted' && !slack?.startsWith('failed') ? h('span', { class: 'muted small' }, ' · ', h('button', { class: 'link-btn', onclick: (e) => { e.preventDefault(); showView('connect'); } }, 'Connect Slack to post it')) : null),
     slackCard(f.update, cur.alert.at)) : live ? h('div', { class: 'slack-wrap pending' }, h('p', { class: 'muted small' }, 'Comms drafts the #incidents update once the cause is clear…')) : null;
 
   // Right rail.
@@ -964,7 +965,7 @@ function renderChat() {
 
 // One conversation per browser tab: ask remembers it in the graph (Session and Question nodes), so a follow-up can
 // say "it" and "what did I ask about X" works. Keys match services/sessions.py (USER and KEY).
-const CHAT = { user: 'web', session: `web-${Math.random().toString(36).slice(2, 10)}` };
+const CHAT = { user: `web-${Math.random().toString(36).slice(2, 10)}`, session: 'tab' }; // one asker per tab
 
 async function askQ(q) {
   if (!q || state.asking || OFFLINE) return;
@@ -1084,7 +1085,7 @@ async function init() {
   placeGraph();
   showIncident(null);
   try {
-    const hl = state.health = await api('GET', '/api/health');
+    const hl = state.health = await api('GET', '/api/health').catch((e) => { if (OFFLINE || !e.body) throw e; return e.body; }); // 503 = FalkorDB down: show it
     const tenant = params.get('tenant');
     state.tenant = tenant && /^[a-z0-9_]{1,40}$/.test(tenant) ? tenant : hl.default_tenant;
     if (OFFLINE) hl.falkordb = true; // a recording of real runs; the live dot is not shown offline anyway

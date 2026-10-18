@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+from redis.exceptions import RedisError
 
 from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain.models import Highlight, QueryRun, ToolOutput
@@ -102,9 +103,13 @@ def link(rows: list[dict], q: str) -> list[dict]:
     return [r for _, r in sorted(out, key=lambda x: x[0])]
 
 
-def intent_of(question: str) -> str | None:
+def intents_of(question: str) -> list[str]:
     q = question.lower()
-    return next((name for name, rule in INTENTS if rule.search(q)), None)
+    return [name for name, rule in INTENTS if rule.search(q)]
+
+
+def intent_of(question: str) -> str | None:
+    return next(iter(intents_of(question)), None)
 
 
 def _stem(word: str) -> str:
@@ -232,6 +237,11 @@ def _owner(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], a
             head += f" ({'; '.join(history)})"
         ans.people += [m["id"] for m in r["members"]]
         ans.parts.append(f"{head}; {duty}; members: {', '.join(sorted(m['name'] for m in r['members']))}.")
+    if not rows:  # no OWNS edge valid then: say so, or the experts list below reads as the answer
+        when = f"at {_ts(at)}" if at is not None else "now"
+        names = ", ".join(e["name"] for e in _of(ents, "service", "team"))
+        ans.parts.append(f"No team is recorded as owning {names} {when}"
+                         + (f", the time of {inc['id']}" if inc and at == inc["at"] else "") + ".")
     for svc in _of(ents, "service")[:1]:
         _experts(ctx, ans, svc)
 
@@ -443,23 +453,31 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     lead_in = (f'Taking "{pronoun}" as {" and ".join(sessions.mention(e) for e in carried)}, from your earlier '
                f'question "{previous["text"]}". ' if carried else "")
     words = terms(question)
+    intent = intent_of(question)
+    if intent == "history":  # before the word check: "what did I ask?" is all stopwords
+        return _history(ctx, ans, a, question, {**empty, "resolved": resolved})
     if not words:
         return ToolOutput(summary="Nothing to search for", queries=ans.queries, data={
             **empty, "resolved": resolved, "answer": lead_in + "Ask with a few content words (a service, what "
             "happened); one-letter words and words like 'why' or 'the' match nothing."})
-    intent = intent_of(question)
-    if intent == "history":
-        return _history(ctx, ans, a, question, {**empty, "resolved": resolved})
     q = padded(question)
     ents = link(ans.read(ctx, "link_entities", q=q), q)
     asked = padded(a.question)
     for e in ents:  # carried: linked through the pronoun, not named in the question as it was asked
         e["carried"] = bool(carried) and e["id"] in resolved["as"] and f" {e['matched']} " not in asked
-    if intent and ents:
-        ROUTES[intent](ctx, ans, ents, words, a.at)
-    elif _of(ents, "initiative"):  # no rule matched ("tell me about the Q4 cost review"): the initiative itself
-        intent = "project"
-        _project(ctx, ans, ents, words, a.at)
+    if ents:  # the first matching intent that has something to say; members/project need an initiative
+        ran = None
+        for name in intents_of(question):
+            if name == "history" or (name in ("members", "project") and not _of(ents, "initiative")):
+                continue  # "who was on the inc:0911 incident" falls through to "happened"
+            ROUTES[name](ctx, ans, ents, words, a.at)
+            ran = name
+            if ans.parts:
+                break
+        if ran is None and _of(ents, "initiative"):  # no rule ("tell me about the Q4 cost review"): the initiative
+            ran = "project"
+            _project(ctx, ans, ents, words, a.at)
+        intent = ran or intent
     lead = list(ans.sources)  # what the graph fact cites: those docs lead the hits
     boost = {e["id"] for e in ents} | set(ans.people)
     rows = ans.read(ctx, "search_knowledge", query="|".join(words), limit=PER_LABEL)
@@ -521,10 +539,14 @@ def _remember(ctx: ToolContext, a: AskArgs, sid: str | None, resolved: str | Non
         return out
     about = [{"id": e["id"], "matched": e["matched"], "carried": e["carried"]} for e in ents]
     cited = [{"id": x, "rank": i + 1} for i, x in enumerate(sources)]
-    out.data["recorded"], run = sessions.record(ctx, sid=sid, user=a.user, key=a.session, question=a.question,
-                                                resolved=resolved, intent=out.data["intent"], summary=out.summary,
-                                                answer=out.data["answer"], about=about, sources=cited)
-    out.queries.append(run)
+    try:
+        out.data["recorded"], run = sessions.record(ctx, sid=sid, user=a.user, key=a.session, question=a.question,
+                                                    resolved=resolved, intent=out.data["intent"], summary=out.summary,
+                                                    answer=out.data["answer"], about=about, sources=cited)
+        out.queries.append(run)
+    except RedisError as e:  # the answer is in hand; a lost memory write is reported, not raised
+        out.data["recorded"] = {"error": f"not remembered: {type(e).__name__}: {str(e).splitlines()[0][:120]}"}
+        out.summary += " (not remembered)"
     return out
 
 
@@ -540,7 +562,7 @@ def _history(ctx: ToolContext, ans: _Answer, a: AskArgs, question: str, base: di
     ents = link(ans.read(ctx, "link_entities", q=q), q)
     m = re.search(r"\babout\b(.*)$", question.lower())
     text = re.sub(r"[^a-z0-9:@._ -]", "", m.group(1)).strip() if m and not ents else ""
-    rows = ans.read(ctx, "user_questions", user=a.user, session=None, ids=[e["id"] for e in ents],
+    rows = ans.read(ctx, "user_questions", user=sessions.canon(a.user), session=None, ids=[e["id"] for e in ents],
                     text=text or None, limit=10)
     subject = ", ".join(_label(e) for e in ents) or (f"'{text}'" if text else "anything")
     answer = (f"You asked {_n(len(rows), 'question')} about {subject}, newest first: "
@@ -592,7 +614,8 @@ def my_questions(ctx: ToolContext, a: QuestionsArgs) -> ToolOutput:
         q = padded(a.about)
         ents = link(ans.read(ctx, "link_entities", q=q), q)
         text = None if ents else a.about.lower().strip()
-    rows = ans.read(ctx, "user_questions", user=a.user, session=a.session, ids=[e["id"] for e in ents], text=text,
+    rows = ans.read(ctx, "user_questions", user=sessions.canon(a.user), session=a.session, ids=[e["id"] for e in ents],
+                    text=text,
                     limit=a.limit)
     what = (" about " + ", ".join(_label(e) for e in ents)) if ents else (f" containing '{text}'" if text else "")
     where = f" in session {a.session}" if a.session else ""

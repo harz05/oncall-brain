@@ -28,8 +28,13 @@ def lower(value: Any) -> Any:
     return value.strip().lower() if isinstance(value, str) else value
 
 
+def canon(user: str) -> str:
+    """One asker, however named: person:hana-costa, @hana-costa and hana-costa are the same session owner."""
+    return user.removeprefix("person:").lstrip("@")
+
+
 def session_id(user: str, key: str) -> str:
-    return f"session:{user.removeprefix('person:').lstrip('@')}:{key}"
+    return f"session:{canon(user)}:{key}"
 
 
 def mention(e: dict[str, Any]) -> str:
@@ -50,6 +55,8 @@ def resolve(question: str, entities: list[dict[str, Any]]) -> tuple[str, list[di
     pronoun = m.group(1).lower()
     kinds = PRONOUNS[pronoun]
     picked = [e for e in entities if e["kind"] in kinds] or (entities if kinds is not PEOPLE else [])
+    if pronoun in ("it", "its") and len(picked) > 1:  # one thing: what the question was about, not its incident
+        picked = [next((e for e in picked if e["kind"] != "incident"), picked[0])]
     if not picked:
         return question, [], None
     return question[:m.start()] + " and ".join(mention(e) for e in picked) + question[m.end():], picked, pronoun

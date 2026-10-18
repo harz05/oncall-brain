@@ -7,12 +7,17 @@ from oncall_brain.config import get_settings
 
 
 def post(text: str | None) -> str:
-    """"off" (no webhook configured or nothing to say), "posted", or "failed (<error type>)"."""
+    """"off" (no webhook configured), "nothing to post", "posted", or "failed: <what Slack or the network said>"
+    (never the URL: it is the secret)."""
     url = get_settings().slack_webhook_url
-    if not url or not text:
+    if not url:
         return "off"
+    if not text:
+        return "nothing to post"
     try:
         httpx.post(url, json={"text": text}, timeout=5).raise_for_status()
         return "posted"
+    except httpx.HTTPStatusError as e:
+        return f"failed: Slack answered {e.response.status_code} (is SLACK_WEBHOOK_URL a live incoming webhook?)"
     except httpx.HTTPError as e:
-        return f"failed ({type(e).__name__})"  # never the URL: it is the secret
+        return f"failed: {type(e).__name__} reaching Slack (network, DNS or the URL)"

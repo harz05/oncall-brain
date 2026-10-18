@@ -136,7 +136,7 @@ The one-liner: take FalkorDB out and nothing runs, not because a database is mis
   or answer "who owns kafka" without our UI. The webhook (`POST .../alerts?respond=true`) and the Slack post
   (`adapters/slack.py`) close the loop headlessly. The inbox is where a human reviews and confirms. `docs/PRODUCT.md`.
 - **"How do you know a model picks the right tool?"** `python -m scripts.mcp_pick` gives Claude only what an MCP
-  client gets (instructions + tool list) and 14 plain requests; it picked right 14/14 (`docs/MCP_PICK.md`). Inside the
+  client gets (instructions + tool list) and 17 plain requests; it picked right 17/17 (`docs/MCP_PICK.md`). Inside the
   product, every step records `by` (model id or `rules`) and the model's own one-line reason; `docs/LLM_RUN.md` has
   60/60 model decisions with 0 fallbacks.
 - **"What stops a model from running up a bill or confirming its own guess?"** `RunBudget` caps tokens per run

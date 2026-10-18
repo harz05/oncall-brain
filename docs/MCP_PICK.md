@@ -1,6 +1,6 @@
-# Tool pick test: 14/14 on claude-opus-5-5
+# Tool pick test: 17/17 on claude-opus-5-5
 
-Run 2026-10-16 04:40 by `python -m scripts.mcp_pick`. The model sees only what an MCP client sees: the server instructions and the tool list (names, descriptions, schemas) from `oncall_brain.mcp_server.catalogue()`. No playbook, no examples. One request, one tool call.
+Run 2026-10-18 14:15 by `python -m scripts.mcp_pick`. The model sees only what an MCP client sees: the server instructions and the tool list (names, descriptions, schemas) from `oncall_brain.mcp_server.catalogue()`. No playbook, no examples. One request, one tool call.
 
 | request | picked | right? | arguments |
 |---|---|---|---|
@@ -15,6 +15,9 @@ Run 2026-10-16 04:40 by `python -m scripts.mcp_pick`. The model sees only what a
 | we just deployed cart v3.2.0 (new checkout button), record that. | `record_change` | yes | `{'tenant': 'acme', 'service': 'svc:cart', 'kind': 'deploy', 'summary': 'Deploy cart v3.2.0: new checkout button'}` |
 | inc:checkout-latency is confirmed: chg:pgw-pool-1 caused it and reverting it fixed things. | `resolve_incident` | yes | `{'tenant': 'acme', 'incident_id': 'inc:checkout-latency', 'change_id': 'chg:pgw-pool-1'}` |
 | show me every service and which team owns it. | `service_map` | yes | `{'tenant': 'acme'}` |
-| monitoring says payments p99 latency is 4s since 10:05, note that down. | `record_anomaly` | yes | `{'tenant': 'acme', 'service': 'svc:payments', 'kind': 'latency', 'summary': 'p99 latency 4s since 10:05'}` |
+| monitoring says payments p99 latency is 4s since 10:05, note that down. | `record_anomaly` | yes | `{'tenant': 'acme', 'service': 'svc:payments', 'kind': 'latency', 'summary': 'p99 latency 4s since 10:05 (reported by mon` |
 | a new alert: refunds returns 5xx above 1%, on refunds. Register it. | `raise_alert` | yes | `{'tenant': 'acme', 'service': 'svc:refunds', 'symptom': 'errors', 'name': 'refunds returns 5xx above 1%'}` |
 | what did the agents do on inc:checkout-latency so far? | `incident_board` | yes | `{'tenant': 'acme', 'incident_id': 'inc:checkout-latency'}` |
+| I'm person:hana-costa. What did I ask you about payments-gw earlier? | `my_questions` | yes | `{'tenant': 'acme', 'user': 'person:hana-costa', 'about': 'payments-gw'}` |
+| payments-gw moves to the Platform team as of today, record that. | `transfer_ownership` | yes | `{'tenant': 'acme', 'service': 'svc:payments-gw', 'team': 'team:platform'}` |
+| What is the Q4 cost review changing, and who is on it? | `ask` | yes | `{'tenant': 'acme', 'question': 'What is the Q4 cost review changing, and who is on it?'}` |

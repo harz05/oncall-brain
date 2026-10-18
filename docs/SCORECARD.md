@@ -2,7 +2,7 @@
 
 Written by the cloud helper (first from snapshot `f98571a`, 2026-10-16 04:20 IST; re-scored after each helper patch,
 last from `34ee6b5` plus rival-007 to rival-013), run from a clean checkout on Ubuntu 24.04 with `falkordblite` 0.10:
-`make setup` 18 s, `make seed` 0.7 s, `make demo` DEMO OK in 2.2 s, `make test` 206 passed in 54 s, `make lint` clean,
+`make setup` 18 s, `make seed` 0.7 s, `make demo` DEMO OK in 2.2 s, `make test` 207 passed in 37 s, `make lint` clean,
 `make docs` changes nothing. One row per item the judges' pages name. Every row points at code a judge can open.
 
 Scores: **0** absent. **1** present but thin, or not something the agents decide with. **2** real and tested, with a gap
@@ -91,7 +91,7 @@ Ask the brain chat and the Connect page.
    (a linked incident is the time asked), paging at alert time, 3 tests. Left: `MEMBER_OF` validity and an event
    for on-call overrides, so "who was on call" can change after seeding too.
 5. **T1-3 MCP (2, now 3).** Done: every argument described, server instructions and prompts, the tool-pick test
-   (14/14), a token on the HTTP transport, and the Claude Code plugin with three skills and an end-to-end test.
+   (17/17), a token on the HTTP transport, and the Claude Code plugin with three skills and an end-to-end test.
 6. **C4 projects (2, now 3).** Done (rival-010): the `Initiative` node (a team `DRIVES` it, a person `LEADS` it,
    tickets `PART_OF` it, docs `MENTION` it), `initiative_story` behind `ask`'s "what is X changing" and "who is
    on X" (tickets, changes, blamed incidents, people with their roles, decisions), the status update's "Behind

@@ -58,7 +58,7 @@ and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the
 
 `python -m scripts.mcp_pick` gives Claude only what an MCP client gets (instructions + tool list) and 14 plain
 requests ("who owns kafka?", "we just deployed cart v3.2.0, record that", "inc:checkout-latency is confirmed:
-chg:pgw-pool-1 caused it"...). Result: **14/14 right on claude-opus-5-5**, table in [MCP_PICK.md](MCP_PICK.md).
+chg:pgw-pool-1 caused it"...). Result: **17/17 right on claude-opus-5-5**, table in [MCP_PICK.md](MCP_PICK.md).
 
 ## Headless: alert in, answer and update out, no UI open
 

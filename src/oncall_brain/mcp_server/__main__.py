@@ -38,9 +38,14 @@ class BearerToken(BaseHTTPMiddleware):
                                 status_code=401, headers={"WWW-Authenticate": "Bearer"})
         if token:
             sent = request.headers.get("authorization", "").encode("latin-1")
-            if not secrets.compare_digest(sent, f"Bearer {token}".encode()):
-                return JSONResponse({"error": "missing or wrong API token"}, status_code=401,
+            if sent.strip() in (b"", b"Bearer"):  # the plugin sends "Bearer " when ONCALL_BRAIN_TOKEN is unset
+                return JSONResponse({"error": "no bearer token sent: set ONCALL_BRAIN_TOKEN (the plugin) or the "
+                                     "Authorization header to this server's MCP_TOKEN"}, status_code=401,
                                     headers={"WWW-Authenticate": "Bearer"})
+            scheme, _, cred = sent.partition(b" ")
+            if scheme.lower() != b"bearer" or not secrets.compare_digest(cred.strip(), token.encode()):
+                return JSONResponse({"error": "wrong API token (it must equal this server's MCP_TOKEN)"},
+                                    status_code=401, headers={"WWW-Authenticate": "Bearer"})
         return await call_next(request)
 
 

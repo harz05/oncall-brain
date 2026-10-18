@@ -54,8 +54,8 @@ RETURN q.id AS question, q.seq AS seq
 
 // name: user_questions
 // purpose: What an engineer asked before ("what did I ask about payments-gw"): their questions across every session, or in one ($session), newest first, each with the entities it was about (ABOUT) and the sources its answer cited (ANSWERED_WITH); only questions about one of $ids, or whose text contains $text, when either is given.
-MATCH (s:Session {user: $user})-[:ASKED]->(q:Question)
-WHERE $session IS NULL OR s.key = $session
+MATCH (s:Session)-[:ASKED]->(q:Question)
+WHERE s.user IN [$user, 'person:' + $user, '@' + $user] AND ($session IS NULL OR s.key = $session)
 OPTIONAL MATCH (q)-[ab:ABOUT]->(x)
 WITH s, q, collect(CASE WHEN x IS NULL THEN null ELSE {id: x.id, kind: toLower(labels(x)[0]),
                    name: coalesce(x.name, x.title, x.summary), carried: ab.carried} END) AS about

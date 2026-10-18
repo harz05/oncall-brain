@@ -84,7 +84,7 @@ def confidence(cause: dict | None, alerting: int = 1, co_causes: int = 0) -> dic
     return {"level": "high", "label": "Very likely", "why": why}
 
 
-def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset()
+def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(), origin: str | None = None
             ) -> tuple[dict, list[tuple[dict, str]], list[tuple[dict, str]]]:
     """Several suspects survived their checks; keep one leading cause.
 
@@ -117,7 +117,10 @@ def leading(supported: list[dict], depends_on: set[tuple[str, str]] = frozenset(
                 and len(up.get("gaps") or []) <= len(down.get("gaps") or []))
 
     def key(h: dict) -> tuple:
-        return (-len(cov(h)), len(h.get("gaps") or []), h["source"] != "memory",
+        # A suspect that cannot reach the alert that opened the incident (origin) never leads it, however many
+        # folded alerts it explains: it is a co-cause of the storm.
+        return (origin is not None and origin not in cov(h), -len(cov(h)), len(h.get("gaps") or []),
+                h["source"] != "memory",
                 h["hops"] if h["hops"] is not None else 99, onset(h), -h["at"], h["change_id"])
 
     ranked = sorted(supported, key=key)

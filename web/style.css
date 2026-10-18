@@ -438,7 +438,7 @@ pre.code { margin: 0; padding: 10px 64px 10px 12px; border-radius: 8px; backgrou
   .incidents { grid-template-columns: minmax(0, 1fr); }
   .inbox-panel { border-right: 0; border-bottom: 1px solid var(--line); }
   .incidents.has-current .inbox-panel { display: none; }
-  .incidents:not(.has-current) .incident-main { order: -1; }
+  .incidents:not(.has-current):not(.has-open) .incident-main { order: -1; } /* hero first only while nothing is open */
   .inbox { max-height: none; }
   .inbox-item { min-height: 64px; }
   .landing { height: auto; padding: 20px 16px 16px; }

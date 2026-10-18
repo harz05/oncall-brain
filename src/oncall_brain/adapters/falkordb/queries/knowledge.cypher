@@ -60,7 +60,8 @@ WHERE size(found) > 0
 RETURN i.id AS id, 'incident' AS kind, i.title AS name, found[0] AS matched, i.opened_at AS at
 UNION ALL
 MATCH (n:Initiative)
-WITH n, [x IN [toLower(n.name), toLower(n.id), last(split(toLower(n.id), ':'))] WHERE $q CONTAINS (' ' + x + ' ')] AS found
+WITH n, [x IN [toLower(n.name), replace(toLower(n.name), '.', ' '), toLower(n.id), last(split(toLower(n.id), ':'))]
+         WHERE $q CONTAINS (' ' + x + ' ')] AS found
 WHERE size(found) > 0
 RETURN n.id AS id, 'initiative' AS kind, n.name AS name, found[0] AS matched, null AS at
 
@@ -73,7 +74,7 @@ WITH CASE WHEN $at IS NOT NULL THEN $at WHEN last IS NOT NULL THEN last ELSE tim
 MATCH (t:Team)-[o:OWNS]->(s:Service)
 WHERE (s.id IN $ids OR t.id IN $ids)
   AND (($at IS NULL AND o.valid_to IS NULL)
-       OR ($at IS NOT NULL AND o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)))
+       OR ($at IS NOT NULL AND coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)))
 OPTIONAL MATCH (p:Person)-[oc:ON_CALL]->(t)
 WHERE oc.start <= now AND oc.end > now
 RETURN s.id AS service, s.name AS service_name, t.id AS team, t.name AS team_name,

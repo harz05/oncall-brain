@@ -105,7 +105,7 @@ Every query the product runs: 101 named, parameterised statements in `src/oncall
 | [add_dependency](#add_dependency) | W | events.cypher | Keep knowledge current: caller starts depending on callee at $at (a new temporal DEPENDS_ON edge). |
 | [retire_dependency](#retire_dependency) | W | events.cypher | Keep knowledge current: close the live caller -> callee dependency at $at (history is kept; queries at later times stop using it). |
 | [record_doc](#record_doc) | W | events.cypher | Keep knowledge current: record a decision record, design note, postmortem or runbook page as it is written (idempotent on id): its author, the service it DECIDES for, what it MENTIONS, and the older doc it SUPERSEDES, so ask puts the new decision of record first and flags the old one. |
-| [transfer_ownership](#transfer_ownership) | W | events.cypher | Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write. |
+| [transfer_ownership](#transfer_ownership) | W | events.cypher | Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false); an $at before the live edge's valid_from writes nothing (backdated = true: history is append-only). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write. |
 | [session_context](#session_context) | RO | sessions.cypher | Conversation memory for pronouns: the entities (ABOUT) of the latest question in the session that was about something, so a follow-up's "it" or "them" can be read as them, with that question's text and position so the answer can say where "it" came from. |
 | [record_question](#record_question) | W | sessions.cypher | Conversation memory: append a question to the asker's session (created on first use and OPENED by the Person when the user is one) as a Question node with its position in the session (seq), the question before it (FOLLOWS), the entities it was about (ABOUT; carried = true when the entity came from a pronoun read against the previous question) and the sources the answer cited (ANSWERED_WITH, in rank order). Run under the session's lock: seq is the session's question count + 1, and the unique constraint on Question.id refuses a duplicate if a writer ever skips the lock. |
 | [user_questions](#user_questions) | RO | sessions.cypher | What an engineer asked before ("what did I ask about payments-gw"): their questions across every session, or in one ($session), newest first, each with the entities it was about (ABOUT) and the sources its answer cited (ANSWERED_WITH); only questions about one of $ids, or whose text contains $text, when either is given. |
@@ -492,7 +492,7 @@ UNWIND [f1, f2, f3, f4, f5, f6] AS level
 UNWIND level AS path
 WITH path[0] AS caller, collect(path)[0] AS path
 MATCH (t:Team)-[o:OWNS]->(caller)
-WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 RETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path
 ORDER BY hops, service
 ```
@@ -518,7 +518,7 @@ Who is on call at $at for the team that owned $service at $at (OWNS and ON_CALL 
 
 ```cypher
 MATCH (s:Service {id: $service})<-[o:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
-WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at) AND oc.start <= $at AND oc.end > $at
+WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at) AND oc.start <= $at AND oc.end > $at
 RETURN p.id AS person, p.name AS name, p.handle AS handle, t.id AS team, t.name AS team_name
 ```
 
@@ -1242,7 +1242,7 @@ Services, the team that owned each at $at (OWNS valid then; null if none) and de
 ```cypher
 MATCH (s:Service)
 OPTIONAL MATCH (t:Team)-[o:OWNS]->(s)
-WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 OPTIONAL MATCH (s)-[d:DEPENDS_ON]->(x:Service)
 RETURN s.id AS id, s.name AS name, s.tier AS tier, t.name AS team,
        collect({to: x.id, live: d.valid_from <= $at AND (d.valid_to IS NULL OR d.valid_to > $at)}) AS deps
@@ -1414,7 +1414,8 @@ WHERE size(found) > 0
 RETURN i.id AS id, 'incident' AS kind, i.title AS name, found[0] AS matched, i.opened_at AS at
 UNION ALL
 MATCH (n:Initiative)
-WITH n, [x IN [toLower(n.name), toLower(n.id), last(split(toLower(n.id), ':'))] WHERE $q CONTAINS (' ' + x + ' ')] AS found
+WITH n, [x IN [toLower(n.name), replace(toLower(n.name), '.', ' '), toLower(n.id), last(split(toLower(n.id), ':'))]
+         WHERE $q CONTAINS (' ' + x + ' ')] AS found
 WHERE size(found) > 0
 RETURN n.id AS id, 'initiative' AS kind, n.name AS name, found[0] AS matched, null AS at
 ```
@@ -1433,7 +1434,7 @@ WITH CASE WHEN $at IS NOT NULL THEN $at WHEN last IS NOT NULL THEN last ELSE tim
 MATCH (t:Team)-[o:OWNS]->(s:Service)
 WHERE (s.id IN $ids OR t.id IN $ids)
   AND (($at IS NULL AND o.valid_to IS NULL)
-       OR ($at IS NOT NULL AND o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)))
+       OR ($at IS NOT NULL AND coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)))
 OPTIONAL MATCH (p:Person)-[oc:ON_CALL]->(t)
 WHERE oc.start <= now AND oc.end > now
 RETURN s.id AS service, s.name AS service_name, t.id AS team, t.name AS team_name,
@@ -1762,7 +1763,7 @@ WITH caller, p
 ORDER BY length(p)
 WITH caller, collect(p)[0] AS p
 MATCH (t:Team)-[o:OWNS]->(caller)
-WHERE o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
 RETURN caller.id AS service, caller.tier AS tier, length(p) AS hops, t.name AS team, [n IN nodes(p) | n.id] AS path
 ORDER BY hops, service
 ```
@@ -1849,7 +1850,7 @@ MATCH (i:Incident {id: $incident_id})
 OPTIONAL MATCH (i)-[:PAGED]->(:Person)-[:MEMBER_OF]->(pt:Team)
 WITH i, collect(DISTINCT pt.id) AS paged_teams
 MATCH (i)-[x:IMPACTS]->(s:Service)<-[o:OWNS]-(t:Team)<-[oc:ON_CALL]-(p:Person)
-WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND o.valid_from <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+WHERE x.rank IS NOT NULL AND NOT t.id IN paged_teams AND coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
   AND oc.start <= $at AND oc.end > $at
 RETURN t.id AS team, t.name AS team_name, p.id AS person, p.name AS name, p.handle AS handle,
        s.id AS service, s.tier AS tier, x.rank AS rank, x.score AS score
@@ -2030,7 +2031,7 @@ RETURN DISTINCT d.id AS doc, s.id AS decides, prev.id AS supersedes
 
 **W** · `events.cypher` · used by `oncall_brain.services.tools.transfer_ownership` (write)
 
-Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write.
+Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false); an $at before the live edge's valid_from writes nothing (backdated = true: history is append-only). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write.
 
 ```cypher
 MATCH (s:Service {id: $service}), (t:Team {id: $team})
@@ -2038,10 +2039,11 @@ OPTIONAL MATCH (prev:Team)-[o:OWNS]->(s)
 WHERE o.valid_to IS NULL
 WITH s, t, prev, o ORDER BY o.valid_from DESC
 LIMIT 1
-WITH s, t, prev, o, (prev IS NULL OR prev.id <> t.id) AS moves
-FOREACH (x IN CASE WHEN moves AND o IS NOT NULL THEN [o] ELSE [] END | SET x.valid_to = $at)
-FOREACH (_ IN CASE WHEN moves THEN [1] ELSE [] END | CREATE (t)-[:OWNS {valid_from: $at}]->(s))
-RETURN s.id AS service, t.id AS team, prev.id AS previous, moves AS transferred,
+WITH s, t, prev, o, (prev IS NULL OR prev.id <> t.id) AS moves,
+     (o IS NOT NULL AND coalesce(o.valid_from, 0) > $at) AS backdated
+FOREACH (x IN CASE WHEN moves AND NOT backdated AND o IS NOT NULL THEN [o] ELSE [] END | SET x.valid_to = $at)
+FOREACH (_ IN CASE WHEN moves AND NOT backdated THEN [1] ELSE [] END | CREATE (t)-[:OWNS {valid_from: $at}]->(s))
+RETURN s.id AS service, t.id AS team, prev.id AS previous, moves AS transferred, backdated, o.valid_from AS live_from,
        [(s)<-[x:OWNS]-(b:Team) | {team: b.id, from: x.valid_from, until: x.valid_to}] AS history
 ```
 
@@ -2122,8 +2124,8 @@ RETURN q.id AS question, q.seq AS seq
 What an engineer asked before ("what did I ask about payments-gw"): their questions across every session, or in one ($session), newest first, each with the entities it was about (ABOUT) and the sources its answer cited (ANSWERED_WITH); only questions about one of $ids, or whose text contains $text, when either is given.
 
 ```cypher
-MATCH (s:Session {user: $user})-[:ASKED]->(q:Question)
-WHERE $session IS NULL OR s.key = $session
+MATCH (s:Session)-[:ASKED]->(q:Question)
+WHERE s.user IN [$user, 'person:' + $user, '@' + $user] AND ($session IS NULL OR s.key = $session)
 OPTIONAL MATCH (q)-[ab:ABOUT]->(x)
 WITH s, q, collect(CASE WHEN x IS NULL THEN null ELSE {id: x.id, kind: toLower(labels(x)[0]),
                    name: coalesce(x.name, x.title, x.summary), carried: ab.carried} END) AS about

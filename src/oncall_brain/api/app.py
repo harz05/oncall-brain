@@ -8,6 +8,7 @@ Run: uvicorn oncall_brain.api.app:app --port 8000
 """
 
 import json
+import logging
 import os
 import queue
 import secrets
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import RedisError
+from redis.exceptions import LockError, RedisError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from oncall_brain.adapters import slack
@@ -41,6 +42,8 @@ from oncall_brain.services.tools import AlertEvent
 WEB_DIR = FsPath(os.environ.get("WEB_DIR") or FsPath(__file__).resolve().parents[3] / "web")
 
 Tenant = Annotated[str, Path(pattern=r"^[a-z0-9_]{1,40}$")]
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="On-call Brain", description="Incident agents over a FalkorDB knowledge graph.")
 # check_dir=False: the web/ folder may appear after the server starts.
@@ -84,6 +87,9 @@ async def _unknown(_: Request, e: ValueError) -> JSONResponse:
 
 
 def _db_detail(e: RedisError) -> str:
+    if isinstance(e, LockError):  # the database is fine; another run holds the tenant
+        return ("another agent run holds this tenant's lock (one run per tenant at a time; a crashed holder frees it "
+                "after 15 min): retry shortly")
     if isinstance(e, RedisConnectionError):  # also covers auth failures
         return f"FalkorDB unavailable: {e}"
     # Timeouts and ResponseError (e.g. "GRAPH.COPY failed, could not fork"). First line only, capped: FalkorDB
@@ -93,7 +99,7 @@ def _db_detail(e: RedisError) -> str:
 
 @app.exception_handler(RedisError)
 async def _db_error(_: Request, e: RedisError) -> JSONResponse:
-    return JSONResponse({"detail": _db_detail(e)}, status_code=503)
+    return JSONResponse({"detail": _db_detail(e)}, status_code=409 if isinstance(e, LockError) else 503)
 
 
 @app.middleware("http")
@@ -108,7 +114,8 @@ async def _guard(request: Request, call_next: Callable[[Request], Awaitable[Resp
     token = get_settings().api_token
     if token and path.startswith("/api/") and path != "/api/health":
         sent = request.headers.get("authorization", "").encode("latin-1")  # Starlette decodes headers as latin-1
-        if not secrets.compare_digest(sent, f"Bearer {token}".encode()):
+        scheme, _, cred = sent.partition(b" ")  # the scheme is case-insensitive (RFC 7235)
+        if scheme.lower() != b"bearer" or not secrets.compare_digest(cred.strip(), token.encode()):
             return JSONResponse({"detail": "missing or wrong API token"}, status_code=401,
                                 headers={"WWW-Authenticate": "Bearer"})
     # FalkorDB refuses string parameters containing NUL; that is bad input (422), not a server error.
@@ -137,18 +144,25 @@ def index(request: Request) -> RedirectResponse:
     return RedirectResponse(f"/web/{'?' + request.url.query if request.url.query else ''}")
 
 
-@app.get("/api/health")
-def health() -> dict[str, Any]:
+def health_body() -> dict[str, Any]:
+    """ok only when the planner is configured AND FalkorDB answers a ping; a platform health check reads the
+    status (503 when not ok), a human reads falkordb_error."""
     try:
-        up = bool(store().db.connection.ping())
-    except Exception:  # any failure here just means "not reachable"; health itself must answer
-        up = False
+        up, db_error = bool(store().db.connection.ping()), None
+    except Exception as e:  # health itself must answer; keep the reason (a bad URL, a refused connection, auth)
+        up, db_error = False, f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:160]}"
     try:
         planner, ok = llm().name, True
     except HTTPException as e:
         planner, ok = f"<error: {e.detail}>", False
-    return {"ok": ok, "falkordb": up, "planner": planner, "default_tenant": get_settings().default_tenant,
-            "slack": bool(get_settings().slack_webhook_url)}
+    return {"ok": ok and up, "falkordb": up, "falkordb_error": db_error, "planner": planner,
+            "default_tenant": get_settings().default_tenant, "slack": bool(get_settings().slack_webhook_url)}
+
+
+@app.get("/api/health")
+def health() -> JSONResponse:
+    body = health_body()
+    return JSONResponse(body, status_code=200 if body["ok"] else 503)
 
 
 @app.get("/api/tenants")
@@ -211,8 +225,11 @@ def respond_stream(repo: Repo, alert_id: str, compare: Literal["memory"] | None 
                     store(), repo.tenant, alert_id, llm())}})
         except RedisError as e:
             events.put({"error": _db_detail(e)})
-        except Exception as e:  # ValueError (unknown alert) and anything else: report it in the stream
-            events.put({"error": str(e) if isinstance(e, ValueError) else f"agent run failed ({type(e).__name__})"})
+        except ValueError as e:  # an unknown alert: the message is the answer
+            events.put({"error": str(e)})
+        except Exception as e:  # anything else: the client gets the type, the server log gets the traceback
+            log.exception("agent run for %s on tenant %s failed", alert_id, repo.tenant)
+            events.put({"error": f"agent run failed ({type(e).__name__})"})
         finally:
             events.put(None)
 

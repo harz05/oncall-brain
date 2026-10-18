@@ -199,7 +199,7 @@ calls `respond_to_alert`, reads the outcome (likely cause with a confidence labe
 and why, the fix, the status update) and, when you say the cause is right, `resolve_incident` so the fix is remembered.
 *"Who owns kafka?"*, *"why was legacy-billing retired?"* go to `ask`. The server also publishes two prompts
 (`work_alert`, `company_question`) that script those two workflows. Given only the tool list, Claude Opus 5.5 picks the
-right tool for 14 of 14 plain requests ([docs/MCP_PICK.md](docs/MCP_PICK.md)). For Claude Desktop / claude.ai use the
+right tool for 17 of 17 plain requests ([docs/MCP_PICK.md](docs/MCP_PICK.md)). For Claude Desktop / claude.ai use the
 Streamable HTTP transport with `API_TOKEN`; everything is in [docs/MCP.md](docs/MCP.md).
 
 ## Using it

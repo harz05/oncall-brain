@@ -1,11 +1,13 @@
 """The graph tools. Each one runs named Cypher through the GraphRepository port and returns a ToolOutput
 (summary, data, the queries it ran, and the graph ids to highlight). Registered once in agents.registry."""
 
+import contextlib
 import secrets
 import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from redis.exceptions import RedisError
 
 from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain import update
@@ -263,8 +265,14 @@ def _storm_components(ctx: ToolContext, edges: list[dict], qs: list) -> dict[str
         parts = scratch.read("storm_components")
         qs.append(parts)
     finally:
-        scratch.drop_graph()
-    return {r["service"]: r["component"] for r in parts.rows}
+        with contextlib.suppress(RedisError):  # a failed drop must not hide the error that got us here
+            scratch.drop_graph()
+    got = {r["service"]: r["component"] for r in parts.rows}
+    missing = ({e["alerting"] for e in edges} | {e["red"] for e in edges}) - got.keys()
+    if missing:  # a silent empty projection would read as "no related alerts": a confident, wrong triage
+        raise RuntimeError(f"storm projection lost {sorted(missing)}: algo.WCC returned {len(got)} of the "
+                           f"{len(edges)} projected edges' services")
+    return got
 
 
 @tool(writes=True)
@@ -425,7 +433,7 @@ def conclude(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
                                                             else None, "outranked": []}, queries=qs)
     dq = ctx.repo.read("depends_among", services=sorted({h["service"] for h in supported}), at=head["at"])
     qs.append(dq)
-    lead, lost, co = leading(supported, {(r["service"], r["upstream"]) for r in dq.rows})
+    lead, lost, co = leading(supported, {(r["service"], r["upstream"]) for r in dq.rows}, origin=head["service"])
     if lost:
         qs.append(ctx.repo.write("record_outranked", at=head["at"], rows=[
             {"id": h["id"], "evidence_id": "ev:" + h["id"].removeprefix("hyp:") + ":outranked", "reason": why}
@@ -730,10 +738,16 @@ def transfer_ownership(ctx: ToolContext, a: OwnershipEvent) -> ToolOutput:
     (valid_to), never deleted: paging, blast radius, who_knows and ask use the owner at the time asked, so "who owned
     payments-gw at the time of inc:0911" still names the old team and an alert after the handover pages the new one."""
     at = a.at or int(time.time())
+    if at > int(time.time()) + 60:
+        raise ValueError(f"at={at} is in the future: record a handover when it takes effect")
     q = ctx.repo.write("transfer_ownership", service=a.service, team=a.team, at=at)
     if not q.rows:
         raise ValueError(f"unknown service {a.service!r} or team {a.team!r}")
     r = dict(q.rows[0])
+    if r.pop("backdated"):
+        raise ValueError(f"{a.service} has been owned by {r['previous']} since {r['live_from']}: a handover at {at} "
+                         "would predate it (history is append-only)")
+    r.pop("live_from")
     r["history"] = sorted(r["history"], key=lambda e: e["from"])
     summary = (f"{a.service}: {r['previous'] or 'nobody'} -> {a.team} from {at}" if r["transferred"]
                else f"{a.team} already owns {a.service}")

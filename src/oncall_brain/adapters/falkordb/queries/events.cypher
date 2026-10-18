@@ -77,14 +77,15 @@ FOREACH (y IN CASE WHEN x IS NULL THEN [] ELSE [x] END | MERGE (d)-[:MENTIONS]->
 RETURN DISTINCT d.id AS doc, s.id AS decides, prev.id AS supersedes
 
 // name: transfer_ownership
-// purpose: Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write.
+// purpose: Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false); an $at before the live edge's valid_from writes nothing (backdated = true: history is append-only). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write.
 MATCH (s:Service {id: $service}), (t:Team {id: $team})
 OPTIONAL MATCH (prev:Team)-[o:OWNS]->(s)
 WHERE o.valid_to IS NULL
 WITH s, t, prev, o ORDER BY o.valid_from DESC
 LIMIT 1
-WITH s, t, prev, o, (prev IS NULL OR prev.id <> t.id) AS moves
-FOREACH (x IN CASE WHEN moves AND o IS NOT NULL THEN [o] ELSE [] END | SET x.valid_to = $at)
-FOREACH (_ IN CASE WHEN moves THEN [1] ELSE [] END | CREATE (t)-[:OWNS {valid_from: $at}]->(s))
-RETURN s.id AS service, t.id AS team, prev.id AS previous, moves AS transferred,
+WITH s, t, prev, o, (prev IS NULL OR prev.id <> t.id) AS moves,
+     (o IS NOT NULL AND coalesce(o.valid_from, 0) > $at) AS backdated
+FOREACH (x IN CASE WHEN moves AND NOT backdated AND o IS NOT NULL THEN [o] ELSE [] END | SET x.valid_to = $at)
+FOREACH (_ IN CASE WHEN moves AND NOT backdated THEN [1] ELSE [] END | CREATE (t)-[:OWNS {valid_from: $at}]->(s))
+RETURN s.id AS service, t.id AS team, prev.id AS previous, moves AS transferred, backdated, o.valid_from AS live_from,
        [(s)<-[x:OWNS]-(b:Team) | {team: b.id, from: x.valid_from, until: x.valid_to}] AS history

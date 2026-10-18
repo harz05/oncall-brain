@@ -4,6 +4,7 @@ plus a required `tenant`), next to two use cases: respond_to_alert and reset_ten
 workflows (work an alert, answer a company question). Nothing is defined twice: add a tool to the registry and it
 shows up here, in the agent loop and in the HTTP API."""
 
+import logging
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
@@ -13,6 +14,7 @@ from mcp import types
 from mcp.server import Server
 from pydantic import BaseModel
 from pydantic_core import to_json
+from redis.exceptions import LockError
 
 from oncall_brain import wiring
 from oncall_brain.agents import registry
@@ -153,7 +155,7 @@ def catalogue() -> dict[str, tuple[types.Tool, Handler]]:
         schema["properties"] = {"tenant": TENANT, **schema.get("properties", {})}
         schema["required"] = ["tenant", *schema.get("required", [])]
         tool = types.Tool(name=name, description=description, input_schema=schema,
-                          annotations=types.ToolAnnotations(read_only_hint=not writes))
+                          annotations=types.ToolAnnotations(read_only_hint=not writes and name != "ask"))
         out[name] = (tool, handler)
     return out
 
@@ -161,6 +163,9 @@ def catalogue() -> dict[str, tuple[types.Tool, Handler]]:
 def _text(payload: Any, error: bool = False) -> types.CallToolResult:
     text = payload if isinstance(payload, str) else to_json(payload, fallback=str).decode()
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=error)
+
+
+log = logging.getLogger(__name__)
 
 
 def build_server(store: GraphStore | None = None) -> Server:
@@ -178,7 +183,11 @@ def build_server(store: GraphStore | None = None) -> Server:
         tenant = str(args.pop("tenant", ""))  # validated by the store: one graph per tenant
         try:  # graph calls block; keep them off the event loop
             return _text(await anyio.to_thread.run_sync(tools[params.name][1], get_store(), tenant, args))
-        except Exception as e:  # report to the client as a tool error instead of killing the session
+        except LockError:  # the database is fine; another run holds the tenant
+            return _text(f"tenant {tenant!r} is busy: another agent run holds its lock (one run per tenant at a "
+                         "time; a crashed holder frees it after 15 min). Retry shortly.", error=True)
+        except Exception as e:  # the client gets a tool error instead of a dead session; the log gets the traceback
+            log.exception("tool %s on tenant %s failed", params.name, tenant)
             return _text(f"{type(e).__name__}: {e}", error=True)
 
     async def list_prompts(ctx: Any, params: Any) -> types.ListPromptsResult:
