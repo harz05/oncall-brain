@@ -6,7 +6,7 @@
 - **Similarity must be structural, not vector.** "Same upstream service, same change type, same failure mode" needs no model, is truly graph-native and fills a gap nobody else has claimed. Embeddings are at most a tie-breaker later.
 - **PageRank on about 40 nodes and maxFlow for blast radius are decoration.** Cut them.
 - **The deterministic planner must visibly branch on what each query returns.** An empty path clears a suspect. No deploy in the window means pivoting to config changes. A matching past incident means trying its runbook first.
-- **Runner-up: four of five chose C.** It is unoriginal, but the graph is clearly load-bearing and it is the safest thing for the rival team to ship.
+- **Runner-up: four of five chose C.** It is unoriginal, but the graph is clearly load-bearing and it is the safest to ship.
 
 ## Where the Council Clashes
 
@@ -57,7 +57,7 @@ Fold in the proposed F variants as follows:
 - **From the Expansionist (after 11:30).** Add the MCP server, tenant swap, and a NEXT_STEP runbook chain with success counts.
 - **Replace** the "pull the plug" toggle with the baseline ablation and the eval table.
 
-**Runner-up: C, Fraud Ring Investigator.** It is distinct from A: a different domain, no ops or runbook memory, and no shared generator story. It is buildable, and the graph is clearly load-bearing. To lift its originality, the rival should sharpen it this way:
+**Runner-up: C, Fraud Ring Investigator.** It is distinct from A: a different domain, no ops or runbook memory, and no shared generator story. It is buildable, and the graph is clearly load-bearing. To lift its originality, it could be sharpened this way:
 - WCC or labelPropagation to surface rings.
 - `algo.maxFlow` from victim accounts to cash-out nodes for a money trail. This is a place where maxFlow is actually meaningful.
 - Shared device and IP paths as the explanation.

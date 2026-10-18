@@ -337,7 +337,7 @@ Each in the agent's own words, from this run's `check_hypothesis` and `conclude`
 - **Same authors.** The generator, the checks and the agent were written by the same team, and the decoy
   types mirror the facts the agent checks (live path, edge validity, rollback, anomaly propagation). This
   shows those checks are implemented correctly and hold up on random topologies, not that they are the
-  right checks for real incidents. The perturbations were added after mock judges called the first version
+  right checks for real incidents. The perturbations were added after a review called the first version
   (one decoy per verdict rule, nothing else in the window) built to be passed; the agent's ranking (onset-
   and upstream-aware leading cause, a monitoring gap as weaker support) changed in the same round, by the
   same team, knowing what the perturbations are. Not a blind test either.

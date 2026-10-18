@@ -48,7 +48,7 @@ Return order after 11:30: eval harness (graph vs baseline), "no change, it's cap
 
 Deviation from the council, logged here: the brief's milestone M5 (11:00) asks for a runnable MCP server. Because every tool is defined once in a registry, the MCP surface is a thin wrapper, so we keep it in M5 if on schedule and make it the first cut otherwise.
 
-## Runner-up (for the rival build): C Fraud Ring Investigator
+## Runner-up: C Fraud Ring Investigator
 Synthetic accounts, devices, IPs, cards, merchants and transactions. The agent:
 - surfaces rings with `algo.WCC` / `algo.labelPropagation` over shared-device / shared-IP edges;
 - follows the money trail from victim accounts to cash-out nodes with `algo.maxFlow` (a place where maxFlow is meaningful);

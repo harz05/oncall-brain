@@ -8,7 +8,7 @@ E := [ -f $(ENV_SH) ] && . $(ENV_SH); \
 TENANT ?= acme
 PORT ?= 8000
 
-.PHONY: setup falkordb-bin db db-stop seed dev mcp mcp-http serve headless test test-unit lint demo eval docs snapshot
+.PHONY: setup falkordb-bin db db-stop seed dev mcp mcp-http serve headless test test-unit lint demo eval docs
 
 setup:
 	$(E) if command -v uv >/dev/null; then uv venv -q --allow-existing --python 3.12 $$VIRTUAL_ENV && uv pip install -q --python $$VIRTUAL_ENV/bin/python -e ".[dev]"; \
@@ -69,9 +69,3 @@ bench-concurrency:
 
 docs:
 	$(E) python -m scripts.gen_queries_doc
-
-# Dev-only: archive HEAD for an outside code reviewer working from ../collab.
-snapshot:
-	git log --oneline -40 > ../collab/GITLOG.txt
-	git archive --format=tar.gz -o ../collab/snapshot.tar.gz HEAD
-	@echo "snapshot written to ../collab/"

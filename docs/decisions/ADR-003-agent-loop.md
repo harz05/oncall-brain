@@ -6,7 +6,7 @@
 ## Context
 - Track 02 asks for shared state and handoffs between agents. Track 01 asks for actions based on what the graph shows, with explainable results.
 - The council's biggest risk for this idea was that it looks like "a hardcoded pipeline answering a question you seeded". The planner must visibly branch on query results.
-- No LLM key is available, and the demo, tests, cloud reviewer and judges must all run without one.
+- No LLM key is available, and the demo, tests and judges must all run without one.
 - Every answer must show its trace: the step, the reason, the Cypher, the rows and the timing.
 
 ## Decision

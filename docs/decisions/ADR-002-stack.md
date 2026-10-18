@@ -8,7 +8,7 @@
 - The dev machine runs Ubuntu 22.04 with glibc 2.35. The easy embedded route, the `falkordblite` wheel (which bundles redis-server and the FalkorDB module), needs glibc 2.39, so it does not install here.
 - No `docker pull` on the dev machine: images land on an internal disk that is nearly full. Everything (venv, caches, binaries, data) must live on the external drive.
 - No LLM key is available. The product has to run end to end without one.
-- One builder with AI help, and hours not weeks. The judges, and a second Claude acting as a cloud reviewer, must be able to run it from a clean checkout.
+- One builder with AI help, and hours not weeks. The judges must be able to run it from a clean checkout.
 
 ## Decision
 - **Language and libraries:** Python 3.12, the official `falkordb` client (1.8), FastAPI + uvicorn, pydantic v2 at every boundary, pydantic-settings for config, the official `mcp` SDK, pytest and ruff. These are the brief's defaults. Nothing here needed an override.

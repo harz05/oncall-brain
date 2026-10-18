@@ -62,7 +62,7 @@ Add one graph per tenant (two companies, isolated). Also expose the same tools o
 
 Scope risk is real, but the mock planner hides it. The scripted plan just calls the graph tools in order, and the graph does the reasoning. Ship the triage, investigation, write-back and recall slice by 11:30. Add Q&A and comms later.
 
-Runner-up for the rival team: E, sharpened with temporal validity (valid_from/valid_to, SUPERSEDED_BY) so it isn't just Drift. It can also reuse the synthetic-company generator idea.
+Runner-up: E, sharpened with temporal validity (valid_from/valid_to, SUPERSEDED_BY) so it isn't just Drift. It can also reuse the synthetic-company generator idea.
 
 **Proposed F:** F, a sharper version of A: an on-call brain that learns. Agents post Hypothesis nodes onto the shared Incident subgraph with EVIDENCED_BY edges to deploys, config changes and messages, then mark each one CONFIRMED or REFUTED. When an incident is resolved, the confirmed path becomes a procedural Runbook (a NEXT_STEP chain with success stats). The next nearby incident recalls it through graph-pattern similarity, and a 'graph off' ablation toggle plus an MCP server prove the graph is load-bearing.
 
@@ -108,7 +108,7 @@ What all missed: Nobody planned for what actually shows on screen, and all four 
 1. A 40-node Cytoscape graph at 1080p is an unreadable hairball. Render only the lit path, with large labels and plain-English captions.
 2. Judges remember one number. Show a before/after counter such as "steps to culprit: 7, then 1 on the second incident".
 3. Label the scripted planner honestly on screen ("deterministic planner, graph picks each branch") so it isn't mistaken for a faked LLM.
-4. The runner-up needs to be different enough from A that the rival build is not wasted.
+4. The runner-up needs to be different enough from A that the runner-up is not wasted.
 
 ## The Executor / Pragmatic shipper
 
@@ -123,7 +123,7 @@ Hour 4: a Cytoscape page that highlights the path and shows the Cypher.
 
 Cut by 11:30: vector search (use graph-pattern similarity on shared services and symptoms instead, which is the gap nobody has claimed), the Slack/ticket/ADR spread beyond one "why Kafka" chain, the MCP server, per-tenant graphs, and concurrency. The comms agent fills a template.
 
-Runner-up: C. It has the least data work, one algorithm, and indispensability you can't argue with. It is unoriginal, but the rival team can ship it safely. B, D and E either depend on an LLM to look smart (D, E) or duplicate code-graph (B).
+Runner-up: C. It has the least data work, one algorithm, and indispensability you can't argue with. It is unoriginal, but it is safe to ship. B, D and E either depend on an LLM to look smart (D, E) or duplicate code-graph (B).
 
 **Proposed F:** A, sharpened into a two-run demo. Run 1: the alert fires, the planner traverses the graph, the human confirms the planted deploy as root cause, and the resolution is written back as an (:Incident)-[:RESOLVED_BY]->(:Runbook) memory. Run 2: a similar alert on a different service matches the past incident by shared-subgraph pattern and goes straight to that runbook, with the reason shown as a highlighted path. This gives the strongest 2-minute "remove FalkorDB and it breaks" story.
 

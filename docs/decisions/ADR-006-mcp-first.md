@@ -32,8 +32,7 @@ company-brain tools) is the valuable part; the web inbox is one way to look at i
 7. **Agents keep their limits on every surface.** `resolve_incident` and the event tools are `agent=False`: an outside
    client (a human in Claude Code) may call them; the product's own agent runs never see them.
 8. **A Claude Code plugin packages the install** (`plugin/`: `.claude-plugin/plugin.json`, `.mcp.json`, skills,
-   `marketplace.json`), so "install it into Claude Code in one minute" is literal. The cloud helper ships it as a
-   patch; the server side (this ADR) is owned here.
+   `marketplace.json`), so "install it into Claude Code in one minute" is literal.
 
 ## Consequences
 
