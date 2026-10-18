@@ -2,120 +2,133 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- The server's policy (src/oncall_brain/api/guards.py) as a meta tag too, so a static copy (GitHub Pages) has it.
+       frame-ancestors only works as a header, so it is left out here. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>On-call Brain</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2316213a'/%3E%3Ccircle cx='11' cy='11' r='5' fill='%23fb7a3c'/%3E%3Ccircle cx='22' cy='13' r='4.5' fill='%237dd3fc'/%3E%3Ccircle cx='15' cy='23' r='4.5' fill='%23b48cff'/%3E%3C/svg%3E">
+  <meta name="description" content="When an alert fires, three agents read your company graph in FalkorDB and answer: what broke, why, who is paged and the fix, with sources.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2318120F'/%3E%3Crect x='7' y='7' width='10' height='10' fill='%23C50710'/%3E%3Crect x='7' y='21' width='18' height='3' fill='%23F8F6F4'/%3E%3C/svg%3E">
+  <link rel="preload" href="vendor/fonts/ibm-plex-sans-var.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
-  <!-- Vendored builds (cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0): no CDN, works offline. Order matters: cytoscape-dagre registers itself on window.cytoscape. -->
+  <!-- Vendored builds (cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0) and fonts (vendor/fonts, OFL): no CDN, works offline.
+       Order matters: cytoscape-dagre registers itself on window.cytoscape. -->
   <script src="vendor/cytoscape.min.js"></script>
   <script src="vendor/dagre.min.js"></script>
   <script src="vendor/cytoscape-dagre.min.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
   <header class="top">
     <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
-      <div class="brand-text">
-        <h1>On-call Brain</h1>
-        <p class="tagline">Tells you what broke, why and who to page, with the proof from your service graph.</p>
-      </div>
+      <span class="wordmark">On-call Brain</span>
+      <p class="positioning">What broke, why, who is paged and the fix, with the proof from your company graph</p>
     </div>
     <nav class="views" aria-label="Views">
-      <button class="view-tab" data-view="incidents" aria-current="page">Incidents</button>
-      <button class="view-tab" data-view="ask">Ask the brain</button>
-      <button class="view-tab" data-view="connect">Connect</button>
+      <button class="view-tab" type="button" data-view="incidents" aria-current="page">Incidents</button>
+      <button class="view-tab" type="button" data-view="ask">Ask the brain</button>
+      <button class="view-tab" type="button" data-view="connect">Connect</button>
     </nav>
-    <div class="top-actions">
-      <div class="menu-wrap">
-        <button id="btn-simulate" class="primary-btn" aria-haspopup="menu" aria-expanded="false">Simulate an incident <span class="caret" aria-hidden="true">▾</span></button>
-        <div id="simulate-menu" class="menu" role="menu" hidden></div>
-      </div>
+    <div class="menu-wrap" id="menu-wrap">
+      <button id="btn-simulate" class="btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="simulate-menu" aria-describedby="sim-why">Simulate an incident</button>
+      <span id="sim-why" class="sr-only"></span>
+      <div id="simulate-menu" class="menu" role="dialog" aria-label="Simulate an incident" hidden></div>
     </div>
   </header>
 
-  <main>
+  <main id="main">
     <!-- ======================= Incidents ======================= -->
-    <section id="view-incidents" class="view incidents">
-      <aside class="inbox-panel" id="inbox-panel">
-        <div class="panel-head"><h2>Incidents</h2><span id="inbox-counts" class="counts"></span></div>
-        <ul id="inbox" class="inbox" aria-label="Incidents"></ul>
-        <p id="panel-foot" class="panel-foot"></p>
-      </aside>
+    <section id="view-incidents" class="view incidents" aria-label="Incidents">
+      <nav class="rail" id="rail" aria-label="Incident list">
+        <div id="inbox"></div>
+        <p id="health" class="health"></p>
+      </nav>
 
-      <div class="incident-main" id="incident-main">
+      <div class="stage" id="stage">
+        <div id="notice" class="notice" hidden></div>
         <div id="landing" class="landing"></div>
 
-        <article id="incident" class="incident" hidden>
-          <div class="incident-head">
-            <button id="btn-back" class="back" hidden>← Incidents</button>
-            <div class="incident-title">
-              <span id="inc-status" class="status-pill"></span>
-              <h2 id="inc-title"></h2>
-              <span id="inc-sub" class="muted"></span>
-            </div>
+        <article id="incident" class="incident" aria-labelledby="inc-title" hidden>
+          <button id="btn-back" class="btn small back" type="button">All incidents</button>
+          <div id="slab" class="slab"></div>
+          <div class="bar">
             <div class="seg" role="tablist" aria-label="Incident view">
-              <button id="tab-answer" role="tab" aria-selected="true" aria-controls="answer-view">Answer</button>
-              <button id="tab-why" role="tab" aria-selected="false" aria-controls="why-view" tabindex="-1"
-                      title="The graph, every agent step and the Cypher behind it">Show me why</button>
+              <button id="tab-answer" type="button" role="tab" aria-selected="true" aria-controls="answer-view">Answer</button>
+              <button id="tab-why" type="button" role="tab" aria-selected="false" aria-controls="why-view" tabindex="-1">Show me why</button>
             </div>
+            <div class="acts" id="acts"></div>
           </div>
 
-          <div id="answer-view" class="answer-view" role="tabpanel" aria-labelledby="tab-answer" tabindex="0">
-            <div id="progress" class="progress"></div>
-            <div id="answer" class="answer"></div>
+          <div id="answer-view" class="answer" role="tabpanel" aria-labelledby="tab-answer" tabindex="0">
+            <div id="progress"></div>
+            <div id="alts"></div>
+            <dl id="dispatch" class="dispatch"></dl>
+            <section id="update" class="update" aria-label="Status update"></section>
           </div>
 
-          <div id="why-view" class="why-view" role="tabpanel" aria-labelledby="tab-why" tabindex="0" hidden>
+          <div id="why-view" class="why" role="tabpanel" aria-labelledby="tab-why" tabindex="0" hidden>
             <div class="why-graph" id="why-graph-slot"></div>
-            <aside class="why-side" id="why-side"></aside>
+            <div class="why-steps" id="why-side"></div>
           </div>
         </article>
       </div>
     </section>
 
     <!-- ======================= Ask the brain ======================= -->
-    <section id="view-ask" class="view ask-view" hidden>
-      <div class="chat">
+    <section id="view-ask" class="view ask" aria-labelledby="ask-title" hidden>
+      <div class="ask-main">
+        <div class="ask-head">
+          <h1 id="ask-title" tabindex="-1">Ask the brain</h1>
+          <p>Ask who owns a service, why something was decided or what fixed it last time. Answers come from the same graph the agents use, with their sources.</p>
+          <p id="ask-blocked" class="note" hidden></p>
+        </div>
+        <div id="ask-phone-slot" class="ask-phone-graph" hidden></div>
         <div id="chat-log" class="chat-log"></div>
-        <form id="ask-form" class="chat-input">
-          <input id="ask-q" type="text" required maxlength="300" autocomplete="off"
-                 placeholder="Ask about services, owners, decisions…" aria-label="Ask the company brain">
-          <button id="ask-go" class="primary-btn">Ask</button>
+        <div id="ask-examples" class="examples"></div>
+        <form id="ask-form" class="ask-form">
+          <label for="ask-q">Your question</label>
+          <input id="ask-q" type="text" required maxlength="300" autocomplete="off" placeholder="Who owns kafka?">
+          <button id="ask-go" class="btn fill" type="submit">Ask</button>
         </form>
       </div>
-      <div class="ask-graph" id="ask-graph-slot"></div>
+      <div class="ask-graph" id="ask-graph-slot"><p class="graph-empty" id="ask-graph-empty">Ask a question and the part of the graph its answer is linked to appears here.</p></div>
     </section>
 
     <!-- ======================= Connect ======================= -->
-    <section id="view-connect" class="view connect-view" hidden>
+    <section id="view-connect" class="view" aria-labelledby="connect-title" hidden>
       <div id="connect" class="connect"></div>
     </section>
 
     <!-- The one graph canvas; moved between "Show me why" and "Ask the brain". -->
     <div id="graph-wrap" class="graph-wrap">
-      <div class="hud" id="hud"></div>
-      <div id="graph" role="img" aria-label="Service dependency graph; the agent steps panel lists what is highlighted"></div>
-      <div class="graph-foot">
-        <ul class="legend" aria-label="Legend">
-          <li><i class="lg t1"></i>tier-1 service</li>
-          <li><i class="lg alerting"></i>alerting</li>
-          <li><i class="lg shared"></i>shared upstream</li>
-          <li><i class="lg chg"></i>change</li>
-          <li><i class="lg person"></i>person</li>
-          <li><i class="lg team"></i>team</li>
-          <li><i class="lg inc"></i>past incident</li>
-          <li><i class="lg rb"></i>runbook</li>
-          <li><i class="ln retired"></i>retired dependency</li>
-          <li><i class="ln cause"></i>cause path</li>
-          <li><i class="ln memory"></i>memory link</li>
-        </ul>
-        <div class="graph-tools" id="graph-tools"></div>
-      </div>
+      <div class="graph-head"><p class="hud" id="hud"></p><div id="graph-tools"></div></div>
+      <div id="graph" role="img" aria-label="Service dependency graph" aria-describedby="hud graph-alt"></div>
+      <p id="graph-alt" class="graph-alt"></p>
+      <ul class="legend" id="legend" aria-label="Legend">
+        <!-- services are wide boxes, as on the graph; changes are small squares, people and teams circles -->
+        <li data-k="svc"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><rect class="k-paper s-ink" x="1" y="2" width="20" height="10" stroke-width="1.5"/></svg>service</li>
+        <li data-k="t1"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><rect class="k-paper s-ink" x="1.5" y="2.5" width="19" height="9" stroke-width="3"/></svg>tier-1 service</li>
+        <li data-k="alerting"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><rect class="k-sig" x="0" y="1" width="22" height="12"/></svg>alerting</li>
+        <li data-k="hot"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><rect class="k-ink" x="0" y="1" width="22" height="12"/></svg><span>in this step</span></li>
+        <li data-k="ctx"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><rect class="k-paper s-rule" x="1" y="2" width="20" height="10" stroke-width="1.5"/></svg><span>not touched by the agents</span></li>
+        <li data-k="path"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><line class="s-sig" x1="0" y1="7" x2="22" y2="7" stroke-width="3.5"/></svg>evidence path</li>
+        <li data-k="cause"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><rect class="k-ink s-sig" x="1.5" y="1.5" width="11" height="11" stroke-width="3"/></svg>the change that caused it</li>
+        <li data-k="chg"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><rect class="k-ink" x="2" y="2" width="10" height="10"/></svg>change</li>
+        <li data-k="refuted"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><rect class="k-paper s-muted" x="2" y="2" width="10" height="10" stroke-width="1.5"/></svg>ruled-out change</li>
+        <li data-k="person"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><circle class="k-paper s-ink" cx="7" cy="7" r="6" stroke-width="1.5"/></svg>person</li>
+        <li data-k="team"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><circle class="k-ink" cx="7" cy="7" r="7"/></svg>team</li>
+        <li data-k="inc"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><circle class="k-paper-2 s-ink" cx="7" cy="7" r="6" stroke-width="1.5" stroke-dasharray="3 2"/></svg>past incident</li>
+        <li data-k="rb"><svg class="lg" viewBox="0 0 14 14" aria-hidden="true"><rect class="k-paper-2 s-ink" x="1" y="3" width="12" height="8" stroke-width="1.5"/></svg>runbook</li>
+        <li data-k="rel"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><line class="s-muted" x1="0" y1="7" x2="22" y2="7" stroke-width="2" stroke-dasharray="1.5 3"/></svg>owns, member, on call, heads-up or knows it</li>
+        <li data-k="retired"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><line class="s-muted" x1="0" y1="7" x2="22" y2="7" stroke-width="2" stroke-dasharray="4 3"/></svg>retired dependency</li>
+        <li data-k="memory"><svg class="lg wide" viewBox="0 0 22 14" aria-hidden="true"><line class="s-ink" x1="0" y1="7" x2="22" y2="7" stroke-width="2.5" stroke-dasharray="6 3"/></svg>memory link</li>
+      </ul>
     </div>
   </main>
 
   <p id="sr-status" class="sr-only" aria-live="polite" aria-atomic="true"></p>
-  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="toast" class="toast" role="status" hidden><p id="toast-text"></p><button id="toast-close" type="button">Close</button></div>
 </body>
 </html>

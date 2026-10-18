@@ -24,9 +24,9 @@ choosing every step) when no backend is reachable, so the GitHub Pages build of 
 is a zero-setup look at the product. For live runs, use the quick start below; to use it from Claude Code, see
 [Use it from Claude Code](#use-it-from-claude-code-in-one-minute).
 
-![The incident answer: likely cause (a payments-gw config change by Sana Brandt, 40 min before the alert) with the confidence label "Very likely, 4 of 5 suspects ruled out", Confirm cause / Wrong cause, what broke, who is paged, the fix, the four suspects ruled out with their reasons, the dependency path and the sources](docs/img/answer.png)
+![The incident answer for "checkout p99 latency above 2s": a readout of 40 min from change to alert, 4 services hurt, 5 suspects tested and 2 people paged; Confirm cause / Wrong cause; the cause, a payments-gw config change by Sana Brandt 40 min before the alert, labelled "Very likely" with "4 of 5 suspects ruled out"; and the evidence path from the change through payments-gw and payments to checkout, with the time each hop slowed down](docs/img/answer.png)
 
-![The second incident: "Seen this before" banner, the same fix tried first, 3 investigator steps instead of 6 and 1 suspect tested instead of 4](docs/img/memory.png)
+![The second incident, refunds p99 latency above 2s: a new payments-gw config change named as the cause, and "Solved from memory": checkout's confirmed fix ("Revert the config change on payments-gw") was tested first, so 3 investigator steps instead of 6 and 1 suspect tested instead of 4](docs/img/memory.png)
 
 ## The story the demo tells
 
@@ -69,7 +69,7 @@ Recall finds act 1 by structure, because payments-gw is on refunds' live depende
 - Related alerts need not share one cause: a suspect that explains an alerting service the leader cannot is kept as a co-cause (its team is paged, the update says "Also contributing"), not ruled out (`tests/integration/test_storms.py`).
 - Both change logs are wrong here: the flat one blames a search deploy, the anomaly-aware one blames the subscriptions deploy because it went red first. Without correlation, the same planner blames the subscriptions deploy too (`make demo` prints this ablation).
 
-![The alert storm: "3 alerts, 1 incident: refunds, checkout and subscriptions fired within minutes and share payments and postgres-orders"; the postgres-orders config change named as the cause ("Very likely, it explains all 3 alerting services") and the subscriptions deploy listed as "also possible", explaining one](docs/img/storm.png)
+![The alert storm: "3 alerts, 1 incident: subscriptions, refunds and checkout fired within 4 minutes and share payments and postgres-orders upstream"; the postgres-orders config change (Omar Tanaka, 21 min before the first alert) named as the cause, labelled "Very likely" because it explains all 3 alerting services, and the evidence path from the change through postgres-orders and payments to subscriptions](docs/img/storm.png)
 
 ## Why the graph is not decoration
 
@@ -238,7 +238,7 @@ Streamable HTTP transport with `API_TOKEN`; everything is in [docs/MCP.md](docs/
 - **Live events**, as tools: `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc`, `transfer_ownership`. Push a change and an anomaly, raise an alert, then respond to it: the agents use the new facts at once. Record a new decision record that supersedes an old one and `ask` puts it first and flags the old one (`test_a_new_decision_record_flips_the_ask_answer_and_flags_the_old_one`). Hand a service to another team and `OWNS` keeps the history (`valid_from`, `valid_to`): "who owns payments-gw" flips, "who owned payments-gw at the time of inc:0911" does not, and an alert pages the team that owned the service at the alert's time (`tests/integration/test_ownership.py`).
 - **Exposure:** the API checks the `Host` header (`ALLOWED_HOSTS`) and refuses cross-origin POSTs. `API_TOKEN` optionally requires a bearer token on `/api/*` (not `/api/health`; the bundled UI does not send it). There is no per-user auth: anyone who can reach the API can address any tenant. Keep it on localhost unless you set these.
 
-![Ask the brain answering "Who owns kafka?": the Platform team and who is on call, then source chips (the Kafka retention decision record, the consumer-lag runbook, a ticket, a chat, and the superseded older decision flagged), with the answer's subgraph (Platform team, its people, kafka and its callers) on the right](docs/img/ask.png)
+![Ask the brain answering "Who owns kafka?": the Platform team and who is on call, then its sources (the Kafka retention decision record, the consumer-lag runbook, a ticket, a chat, and the older decision marked superseded), with the answer's subgraph (Platform team, its people, kafka and the services that use it) on the right](docs/img/ask.png)
 
 ## Docker
 

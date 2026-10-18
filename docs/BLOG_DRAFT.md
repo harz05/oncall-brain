@@ -143,7 +143,7 @@ Recall finds act 1 with score 3. The runbook that fixed act 1 is for config chan
 
 That is the same incident twice: the "without" run replays the refunds alert on a copy of the pristine graph, which has never seen act 1. (An earlier version of the UI compared act 2 with act 1: two different incidents, which flattered memory.) The API does the same with `?compare=memory`, and the UI's act 2 card shows both. Without memory, nearest-first checking tries a newer, healthy payments deploy one hop away before the real cause. With memory, act 2's status update says "Next action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)", and names who knows payments-gw best, found by `who_knows` in the same graph.
 
-![The second incident: "Seen this before", the same fix tried first, 3 steps instead of 6](img/memory.png)
+![The second incident: "Solved from memory", the same fix tried first, 3 steps instead of 6](img/memory.png)
 
 The three kinds of memory are ordinary nodes:
 

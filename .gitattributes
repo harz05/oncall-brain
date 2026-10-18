@@ -1,0 +1,2 @@
+# Kept out of `git archive` (the AWS deploy tarball and the collab snapshot); still in the repo.
+docs/screenshots export-ignore
