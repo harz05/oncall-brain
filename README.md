@@ -210,7 +210,7 @@ ONCALL_BRAIN_URL=https://oncall.example.com ONCALL_BRAIN_TOKEN=<its MCP_TOKEN> c
 Or install it from the marketplace this repo carries (Claude Code 2.1.275 or later), then start `claude` anywhere:
 
 ```
-/plugin install oncall-brain --marketplace <owner>/<repo>
+/plugin install oncall-brain --marketplace harz05/oncall-brain
 ```
 
 The plugin (`plugin/`) ships the MCP server (launched over stdio by `plugin/bin/oncall-brain-mcp`; set

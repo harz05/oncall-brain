@@ -22,7 +22,7 @@ so the container is stateless; FalkorDB comes from FalkorDB Cloud (`FALKORDB_URL
    `https://<service>.onrender.com/` for the UI: 0 Reset, then 1 Act 1.
 5. **Token.** In the service's Environment tab, copy the value of `MCP_TOKEN`.
 6. **Claude Code, from anywhere.** With the plugin (`claude --plugin-dir ./plugin` from a checkout, or
-   `/plugin install oncall-brain --marketplace <owner>/<repo>`), and nothing else installed:
+   `/plugin install oncall-brain --marketplace harz05/oncall-brain`), and nothing else installed:
    ```bash
    export ONCALL_BRAIN_URL=https://<service>.onrender.com
    export ONCALL_BRAIN_TOKEN=<the MCP_TOKEN value>

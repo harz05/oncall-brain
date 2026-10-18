@@ -17,7 +17,7 @@ The server runs from a checkout of the repository with FalkorDB up:
 git clone <this repository> && cd <repository>
 make setup && make db && make seed      # venv, FalkorDB on localhost:6379, the demo company (tenant acme)
 claude --plugin-dir ./plugin            # from the checkout; or, from GitHub (Claude Code 2.1.275 or later):
-/plugin install oncall-brain --marketplace <owner>/<repo>
+/plugin install oncall-brain --marketplace harz05/oncall-brain
 ```
 
 `plugin/bin/oncall-brain-mcp` finds the checkout as the plugin's parent directory; when the plugin is installed
@@ -36,7 +36,7 @@ transport):
 export ONCALL_BRAIN_URL=https://oncall.example.com      # the deployment; the plugin adds /mcp
 export ONCALL_BRAIN_TOKEN=<that deployment's MCP_TOKEN>  # sent as "Authorization: Bearer ..."
 claude --plugin-dir ./plugin                            # or, installed from GitHub:
-/plugin install oncall-brain --marketplace <owner>/<repo>
+/plugin install oncall-brain --marketplace harz05/oncall-brain
 ```
 
 Claude Code expands `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` and `Bearer ${ONCALL_BRAIN_TOKEN}` from your

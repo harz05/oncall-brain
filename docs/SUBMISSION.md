@@ -64,7 +64,7 @@ and the agents keep no state outside the graph.
 
 ## Links
 
-- Repository: <GITHUB_REPO_URL>
+- Repository: https://github.com/harz05/oncall-brain
 - Live deployment: https://13-127-186-74.sslip.io/ (the UI at `/`, MCP at `/mcp` with the bearer token given to the
   judges, health at `/health`; the recorded replay at `/?offline=1`)
 - Demo video: <VIDEO_URL>
@@ -73,4 +73,4 @@ and the agents keep no state outside the graph.
 
 ## Team
 
-Harsh Chauhan (<GITHUB_HANDLE>)
+Harsh Chauhan (harz05)

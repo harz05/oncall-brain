@@ -107,9 +107,9 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 | `plugin/skills/incident/SKILL.md` | `/oncall-brain:incident <alert_id> [tenant]`: the `work_alert` flow, with the heads-up and the confirm step. |
 | `plugin/skills/who-owns/SKILL.md` | `/oncall-brain:who-owns <service> [tenant]`: `who_knows`, then `ask`, then the rotation. |
 | `plugin/skills/ask/SKILL.md` | `/oncall-brain:ask <question> [--tenant t] [--as person:...]`: the `company_question` flow, with the asker's session when `--as` is given (a follow-up can say "it"; "what did I ask about X" recalls), plus `change_story` / `dependency_path` when they add something. |
-| `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace, so `/plugin install oncall-brain --marketplace <owner>/<repo>` works once the repo is on GitHub. |
+| `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace, so `/plugin install oncall-brain --marketplace harz05/oncall-brain` works once the repo is on GitHub. |
 
-From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
+From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace harz05/oncall-brain`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
 the server through the launcher with an MCP client: 30 tools, 2 prompts, and the who-owns skill's three calls on a
