@@ -28,6 +28,7 @@ The settings are listed in `.env.example`, and the public preset is in `deploy/a
 | System-design and architecture review | The engineering plugin's skills, each finding checked against the code | 19 real, fixed in 6da2baa |
 | Two-way Slack | A security reviewer and a Slack platform QA reviewer | Fixed before merge (b7b3746) |
 | Claude Security scan | The claude-security plugin's pipeline on src, plugin, deploy and scripts at 6da2baa, high effort, with a three-voter panel per candidate | 8 verified findings (1 medium, 7 low), all fixed in the commit after b7b3746 |
+| Claude Security scan of the Slack commit | The same pipeline in changes mode on b7b3746 (18 files, 1,128 lines), high effort | 1 verified finding (low): agents could pass a `user` to `ask`; fixed (agents get no asker, change ids are ASCII) |
 
 ## The Claude Security findings and their fixes
 
@@ -42,7 +43,7 @@ The settings are listed in `.env.example`, and the public preset is in `deploy/a
 | F7 | low | `scripts/falkordb_bin.sh` checked hashes in a shared /tmp directory | A private `mktemp -d` work directory |
 | F8 | low | The plugin launcher's import probe could import from the current directory | `python -P` |
 
-The scan's report is in `CLAUDE-SECURITY-20261018-104619/` (git-ignored, local). It was verified on revision 6da2baa,
+The scans' reports are in `CLAUDE-SECURITY-20261018-104619/` and `CLAUDE-SECURITY-20261018-112437/` (git-ignored, local), both stamped verified,
 and each fix has a test in `tests/unit/test_security_scan_fixes.py` or `tests/integration/test_hardening.py`.
 
 ## What is still open, on purpose

@@ -598,7 +598,7 @@ class ChangeEvent(BaseModel):
     author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$",
                                description="Person id of who made it, e.g. person:sana-brandt (optional)")
     rolled_back_at: int | None = Field(None, description="Epoch seconds the change was rolled back, if it was")
-    id: str | None = Field(None, pattern=r"^chg:[\w.-]{1,80}$",
+    id: str | None = Field(None, pattern=r"^chg:[A-Za-z0-9._-]{1,80}$",
                            description="Your own id for the change, e.g. chg:cart-320 (optional; generated if omitted)")
 
 

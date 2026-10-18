@@ -69,7 +69,9 @@ def _call(ctx: ToolContext, d: Decision, incident_id: str):
     tool = registry.REGISTRY[d.tool]
     if not tool.agent:  # confirming fixes and recording facts belong to humans, whatever the planner proposes
         raise ValueError(f"{d.tool} is not an agent tool")
-    args = dict(d.args)
+    # Agents have no asker: a model-chosen user/session would reach someone's conversation memory (a Slack user's
+    # included) past the identity checks the HTTP and MCP surfaces apply. Claude Security scan of b7b3746, F1.
+    args = {k: v for k, v in d.args.items() if k not in ("user", "session")}
     if "incident_id" in tool.args_model.model_fields:
         args["incident_id"] = incident_id  # agents only ever act on the incident they were given
     return registry.call(d.tool, ctx, args), tool, args
