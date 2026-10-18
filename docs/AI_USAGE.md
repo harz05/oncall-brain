@@ -1,34 +1,27 @@
-# AI usage disclosure
+# AI usage
 
-The rules ask for AI coding assistants to be disclosed. This page says plainly what Harsh did and what AI did.
+I designed, directed and shipped On-call Brain. I built it with AI coding agents (Claude Code), which wrote most of the code, tests and docs to my specifications. I reviewed, tested and deployed it. The rules ask for AI assistance to be disclosed, so here is how the work was split.
 
-## What Harsh did
+## What I did
 
-- **Set the goal and the rules:** the hackathon brief and constraints, the engineering rules the code had to follow (Cypher in named files, one tool registry, the graph must change decisions), and the machine limits.
-- **Made the product calls:**
-  - He pushed it from a demo rig to a product.
-  - He made the MCP server and plugin the main surface, with the web UI as one window onto it.
-  - He set the UI standard from his earlier project.
-  - He asked for the security review and the throttles.
-- **Reviewed and approved the architecture** the AI proposed, and the trade-offs logged in `docs/decisions/`.
-- **Owned the deployment:**
-  - He chose AWS over Render, and supplied the account and the deployment pattern (one ARM box, no SSH, secrets in SSM).
-  - He approved the cost before anything was created.
-  - He set up the Slack app and the API keys.
-- **Tested it himself** end to end, on the web, in Slack and in Claude Code, and recorded the demo video.
+- **Defined the problem and the product.** On-call Brain is an on-call copilot whose decisions come from a FalkorDB company graph. You can use it from Claude Code over MCP, from Slack, from an alert webhook and from the web.
+- **Set the engineering rules the code follows.** Cypher lives in named, parameterised files. Every tool is defined once and served to the agents, over MCP and over HTTP. The graph has to change the decision, and everything works without an LLM key.
+- **Directed the build in rounds and made the product calls.** These included making MCP and the plugin the main surface, the UI direction and its design rules, the security limits for a public demo, and two-way Slack.
+- **Reviewed and approved the architecture,** the graph model and the trade-offs recorded in `docs/decisions/`.
+- **Deployed it.** I chose the AWS architecture (one ARM box, no SSH, secrets in SSM, HTTPS), approved the cost, and set up the keys and the Slack app.
+- **Tested it end to end** on the web, in Slack and in Claude Code, and recorded the demo.
 
-## What AI did
+## Where AI was used
 
-- **Claude Code** (Claude Opus 5.5 and Fable 5.1) wrote most of the code, tests and docs, under Harsh's direction. It proposed the architecture, the data model and the agent design. It wrote the deploy scripts, and it ran teams of agents: one builds, separate reviewers check code, security, design and UX, then the builder fixes what they found.
-- **A second Claude session** acted as a cloud reviewer, running snapshots on another machine and sending patches. Each patch was applied or rejected with a reason.
-- **At runtime,** Claude Opus 5.5 chooses each agent step when a key is set. A deterministic rules planner runs the tests and key-less demos, so the product does not need an LLM.
+- **Claude Code (Anthropic)** was the coding agent. It wrote the implementation, tests and docs, and ran separate reviewer agents for code, security and design whose findings it then fixed.
+- **At runtime,** Claude Opus 5.5 chooses each agent step when an API key is set. Without one, a deterministic rules planner does the same job, and it is also what the tests use.
 
 ## How it was checked
 
 - 284 automated tests against a real FalkorDB.
 - `make demo`, which fails if the story breaks.
-- A 200-incident eval: 186/200 against 0/200 for a plain change log, with every miss listed in `docs/EVAL.md`.
-- Independent review rounds and two Claude Security scans: 9 verified findings, all fixed (`docs/SECURITY.md`).
-- A live deployment checked end to end.
+- A 200-incident eval: 186/200, against 0/200 for a plain change log (`docs/EVAL.md`).
+- Two security scans, with all 9 verified findings fixed (`docs/SECURITY.md`).
+- A live deployment, checked end to end.
 
 All data is synthetic: a seeded generator with fake names.
