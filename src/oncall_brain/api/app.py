@@ -41,6 +41,7 @@ from oncall_brain.api.guards import BodyLimit, SameOrigin, SecurityHeaders, Thro
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services import respond as respond_svc
+from oncall_brain.services import sessions
 from oncall_brain.services.limits import DailyBudget, RunsBusy
 from oncall_brain.services.seeding import TenantLimitReached, reset
 from oncall_brain.services.tools import AlertEvent
@@ -246,10 +247,12 @@ def daily_budget() -> DailyBudget:
     return DailyBudget(store(), get_settings().llm_daily_token_cap, get_settings().llm_hourly_token_cap)
 
 
-def run_agents(repo: GraphRepository, alert_id: str, on_step: Callable[[Any], None] | None = None) -> dict[str, Any]:
+def run_agents(repo: GraphRepository, alert_id: str, on_step: Callable[[Any], None] | None = None,
+               post: bool = True) -> dict[str, Any]:
+    """post=False: the caller answers in Slack itself (/oncall incident), so the webhook does not post it twice."""
     run = respond_svc.respond(repo, alert_id, llm(), on_step, max_runs=get_settings().max_concurrent_runs,
                               daily=daily_budget())
-    run["slack"] = slack.post(run["outcome"]["update_text"])
+    run["slack"] = slack.post(run["outcome"]["update_text"]) if post else "answered in Slack"
     return run
 
 
@@ -355,6 +358,8 @@ def call_tool(request: Request, repo: Repo, name: str,
               args: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
     if name not in registry.REGISTRY:
         raise HTTPException(404, f"unknown tool {name!r}")
+    if sessions.reserved((args or {}).get("user")):
+        raise HTTPException(403, sessions.RESERVED)
     # The UI only reads through this route (ask, graph tools). Writing facts (record_change, transfer_ownership,
     # retire_dependency...) would rewrite the shared demo company for every visitor after you, so on a deployment
     # (a token is set) a write needs it, the same one /mcp takes. Locally, with no token, everything stays open.
@@ -364,3 +369,8 @@ def call_tool(request: Request, repo: Repo, name: str,
         raise HTTPException(401, f"{name} writes to the graph: send Authorization: Bearer <the MCP_TOKEN>",
                             headers={"WWW-Authenticate": "Bearer"})
     return respond_svc.run_tool(repo, name, args or {}).model_dump(mode="json")
+
+
+from oncall_brain.api.slack_app import router as slack_router  # noqa: E402  (it uses the names above)
+
+app.include_router(slack_router)

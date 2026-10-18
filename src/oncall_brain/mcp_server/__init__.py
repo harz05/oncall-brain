@@ -20,7 +20,7 @@ from oncall_brain import wiring
 from oncall_brain.agents import registry
 from oncall_brain.config import get_settings
 from oncall_brain.ports import GraphRepository, GraphStore
-from oncall_brain.services import respond, seeding
+from oncall_brain.services import respond, seeding, sessions
 from oncall_brain.services.limits import DailyBudget, RunsBusy, Throttled, client_key, throttle
 from oncall_brain.services.tools import AlertArgs
 
@@ -63,6 +63,8 @@ def _repo(store: GraphStore, tenant: str) -> GraphRepository:
 
 def _registry_handler(name: str) -> Handler:
     def run(store: GraphStore, tenant: str, args: dict[str, Any]) -> dict[str, Any]:
+        if sessions.reserved(args.get("user")):
+            raise ValueError(sessions.RESERVED)
         out = respond.run_tool(_repo(store, tenant), name, args)
         return {"summary": out.summary, "data": out.data,
                 "queries": [{"name": q.name, "readonly": q.readonly, "rows": q.row_count, "ms": q.ms,

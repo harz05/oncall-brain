@@ -21,7 +21,7 @@ your company's graph, and it remembers what you confirmed.
 | **Claude Code** (terminal) | A plugin (`plugin/`: `claude --plugin-dir ./plugin`, or `/plugin install oncall-brain --marketplace <owner>/<repo>`) with the MCP server and three skills: `/oncall-brain:incident <alert>`, `/oncall-brain:who-owns <service>`, `/oncall-brain:ask <question>`. Or the bare server: `claude mcp add ... oncall_brain.mcp_server`. Claude picks the graph tools itself: `respond_to_alert`, `blast_radius`, `dependency_path`, `who_knows`, `ask`, `change_story`, and the write tools (`record_change`, `record_doc`, `raise_alert`, `resolve_incident`). | Shipped (plugin by the cloud helper, applied; `tests/integration/test_plugin.py`) |
 | **Claude Desktop / claude.ai** | The same MCP server over Streamable HTTP (`python -m oncall_brain.mcp_server --http`), added as a remote connector, guarded by `API_TOKEN`. | HTTP: shipped. Token on HTTP MCP: this cycle |
 | **Their alerting tool** (PagerDuty, Datadog, Grafana, a cron) | A webhook: `POST /api/tenants/{company}/alerts?respond=true` with `service`, `symptom`, `name`. The three agents run headless; the incident, its evidence and the status update land in the graph. | Shipped |
-| **Slack** | Every status update the comms agent writes (and the update after a human confirms the cause) is posted to a channel through an incoming webhook (`SLACK_WEBHOOK_URL`). | Shipped (post only; no slash commands) |
+| **Slack** | `/oncall <question>` answers from the graph with sources (follow-ups remember the channel's conversation); `/oncall incident checkout latency` runs the three agents and posts the cause, who is paged and the fix with Confirm cause / Wrong cause buttons that resolve the incident in the graph. Every status update is also posted through an incoming webhook (`SLACK_WEBHOOK_URL`). `docs/SLACK.md` | Shipped (slash command, buttons, webhook) |
 | **A browser** | The web UI: an incidents inbox, the answer with Confirm / Wrong cause, "Show me why" (incident subgraph, the three agents' steps, every Cypher query), Ask the brain, Connect. | Shipped; one clarity pass left |
 | **Their own code** | The HTTP API (`/api/tenants/{company}/tools/{tool}`) exposes the same registry; every tool is defined once. | Shipped |
 
@@ -52,6 +52,6 @@ node; each step re-reads the board from the graph, calls one tool, and is logged
 
 ## Deliberately not built (yet)
 
-- Slack slash commands and two-way PagerDuty: the webhook in and the Slack post out cover the loop for a demo.
+- Two-way PagerDuty: the alert webhook in and Slack (`/oncall`, the buttons, the webhook post) cover the loop.
 - Per-user authentication: tenants are isolated from each other, not from callers; `API_TOKEN` is the only guard.
 - A build step for the UI: one HTML, one CSS, two JS files any judge can read.

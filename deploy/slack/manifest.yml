@@ -1,0 +1,29 @@
+# Slack app manifest for On-call Brain (docs/SLACK.md). api.slack.com/apps -> Create New App -> From a manifest,
+# paste this with YOUR_DOMAIN replaced by the public host of your deployment (the one in ALLOWED_HOSTS).
+display_information:
+  name: On-call Brain
+  description: Ask your company graph who owns what, and have three agents work an incident.
+features:
+  bot_user:
+    display_name: On-call Brain
+    always_online: false
+  slash_commands:
+    - command: /oncall
+      url: https://YOUR_DOMAIN/slack/commands
+      description: Ask the company brain, or have three agents work an incident
+      usage_hint: "who owns kafka? | share <question> | incident checkout latency | help"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - incoming-webhook
+settings:
+  incoming_webhooks:  # the webhook URL for SLACK_WEBHOOK_URL appears once this is on
+    incoming_webhooks_enabled: true
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR_DOMAIN/slack/actions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

@@ -14,6 +14,10 @@ x-app-env: &app-env
   API_TOKEN: ${API_TOKEN:-}
   MCP_TOKEN: ${MCP_TOKEN:-}  # the app container's /mcp answers only with this (or API_TOKEN) set
   MAX_TENANTS: ${MAX_TENANTS:-20}
+  # Slack (docs/SLACK.md): the status-update webhook, and the /oncall command's signing secret and company graph.
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  SLACK_TENANT: ${SLACK_TENANT:-}
 
 services:
   falkordb:

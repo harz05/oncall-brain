@@ -439,7 +439,7 @@ RETURN i.id AS incident, i.status AS status, s.id AS service, a.at AS at, a.symp
 
 ### incident_head
 
-**RO** · `triage.cypher` · used by `oncall_brain.api.app.incident` (read), `oncall_brain.services.respond.outcome` (read), `oncall_brain.services.tools._head` (read)
+**RO** · `triage.cypher` · used by `oncall_brain.api.app.incident` (read), `oncall_brain.api.slack_app._action` (read), `oncall_brain.api.slack_app._render` (read), `oncall_brain.services.respond.outcome` (read), `oncall_brain.services.tools._head` (read)
 
 The incident's alerting service, alert time and status.
 
@@ -1080,7 +1080,7 @@ ORDER BY seq
 
 ### update_facts
 
-**RO** · `comms_memory.cypher` · used by `oncall_brain.services.respond.outcome` (read), `oncall_brain.services.tools.post_update` (read)
+**RO** · `comms_memory.cypher` · used by `oncall_brain.api.slack_app._render` (read), `oncall_brain.services.respond.outcome` (read), `oncall_brain.services.tools.post_update` (read)
 
 Facts for the status update: impact, who was paged and consulted, the supported cause with its author and sources (ticket, chat), and the runbook memory used.
 
@@ -1380,7 +1380,7 @@ RETURN c.id AS change, c.kind AS kind, c.summary AS summary, c.at AS at, s.id AS
 
 ### link_entities
 
-**RO** · `knowledge.cypher` · used by nothing in src/ or scripts/
+**RO** · `knowledge.cypher` · used by `oncall_brain.api.slack_app._incident` (read)
 
 Entity linking for ask: the services, teams, people (full or first name), changes (id, or the part after 'chg:'), tickets (id or key), incidents (id, or the part after 'inc:', with the time it opened, so "at the time of inc:0911" names a time) and initiatives (name, id or the part after 'init:') named in $q, the question lowered to space-separated tokens and padded with a space each side. A name must sit between spaces, so 'cart' never matches inside 'cartography'.
 
@@ -1618,7 +1618,7 @@ ORDER BY name
 
 ### list_alerts
 
-**RO** · `api.cypher` · used by `oncall_brain.api.app.alerts` (read), `oncall_brain.api.app.graph` (read)
+**RO** · `api.cypher` · used by `oncall_brain.api.app.alerts` (read), `oncall_brain.api.app.graph` (read), `oncall_brain.api.slack_app._open_alert` (read)
 
 The UI's incident inbox: every alert in story order (act 1, 2, 3, then alerts raised live), with the incident handling it (opened for it, or one it was folded into) and that incident's status.
 

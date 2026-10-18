@@ -39,6 +39,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}  # /oncall and the buttons (docs/SLACK.md); empty = off
+      SLACK_TENANT: ${SLACK_TENANT:-}
       # Public limits; docs/DEPLOY.md section D says what each does. Override any of them in .env.
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
       WRITES_PER_MIN: ${WRITES_PER_MIN:-20}

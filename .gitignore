@@ -12,3 +12,4 @@ dump.rdb
 
 # agent worktrees (local only)
 .claude/worktrees/
+CLAUDE-SECURITY-*/

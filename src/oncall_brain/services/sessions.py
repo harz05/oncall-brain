@@ -33,6 +33,16 @@ def canon(user: str) -> str:
     return user.removeprefix("person:").lstrip("@")
 
 
+RESERVED = ("users named slack:<id> belong to /oncall in Slack, which proves them with Slack's signature; "
+            "ask as yourself")
+
+
+def reserved(user: Any) -> bool:
+    """A self-asserted slack:<id> (HTTP API, MCP): it would read or steer that Slack user's conversation. Checked on
+    the name as the session sees it, so @slack:u7 and person:slack:u7 count too."""
+    return isinstance(user, str) and canon(lower(user)).startswith("slack:")
+
+
 def session_id(user: str, key: str) -> str:
     return f"session:{canon(user)}:{key}"
 

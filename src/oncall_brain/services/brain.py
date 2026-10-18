@@ -523,8 +523,8 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
     what = (f"{intent}: {', '.join(e['matched'] for e in ents)}" if ans.parts else f"'{' '.join(words)}'") + (
         f"; most relevant {ranked[0]['id']}" if ranked else "")
     out = ToolOutput(summary=f"{len(sources)} sources for {what}" + (f" ({flags} superseded)" if flags else ""),
-                     data={"answer": lead_in + " ".join(parts), "hits": hits, "related": list(related.values()),
-                           "sources": sources, **info},
+                     data={"answer": lead_in + " ".join(parts), "parts": parts, "hits": hits,
+                           "related": list(related.values()), "sources": sources, **info},
                      queries=ans.queries, highlight=Highlight(
                          nodes=list(dict.fromkeys(sources + list(related) + [e["id"] for e in ents])),
                          edges=list(dict.fromkeys(ans.edges))))

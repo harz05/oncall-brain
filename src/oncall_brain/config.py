@@ -67,6 +67,10 @@ class Settings(BaseSettings):
 
     # Optional: post each status update to Slack through an incoming webhook (adapters/slack.py).
     slack_webhook_url: str = _secret()
+    # Two-way Slack, the /oncall command and its buttons (api/slack_app.py, docs/SLACK.md): the Slack app's signing
+    # secret. Empty: /slack/* answer 404. SLACK_TENANT is the company graph /oncall works on (default DEFAULT_TENANT).
+    slack_signing_secret: str = _secret()
+    slack_tenant: str = ""
 
     def hosts(self) -> list[str]:
         names = [h.strip() for h in self.allowed_hosts.split(",")] + [self.render_external_hostname,
