@@ -34,11 +34,13 @@ from starlette.datastructures import QueryParams
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from oncall_brain.adapters import slack
+from oncall_brain.adapters.falkordb.queries import all_queries
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.agents import registry
 from oncall_brain.agents.registry import ToolContext
 from oncall_brain.api.guards import BodyLimit, SameOrigin, SecurityHeaders, Throttle
 from oncall_brain.config import get_settings
+from oncall_brain.domain.models import cypher_sha
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services import respond as respond_svc
 from oncall_brain.services import sessions
@@ -327,8 +329,14 @@ def incident(repo: Repo, incident_id: str) -> dict[str, Any]:
     head = repo.read("incident_head", incident_id=incident_id).rows
     if not head:
         raise HTTPException(404, f"unknown incident {incident_id!r}")
-    return {**head[0], "outcome": respond_svc.outcome(repo, incident_id, []),
-            "steps": repo.read("incident_steps", incident_id=incident_id).rows}
+    return {**head[0], "outcome": respond_svc.outcome(repo, incident_id, []), "steps": _stored_steps(repo, incident_id)}
+
+
+def _stored_steps(repo: GraphRepository, incident_id: str) -> list[dict[str, Any]]:
+    """The persisted AgentSteps, each with the queries it ran ({name, row_count, ms, readonly, params, sha}; the Cypher
+    text is GET /api/queries/{name}). Steps stored before the queries were kept have queries None."""
+    rows = repo.read("incident_steps", incident_id=incident_id).rows
+    return [{**r, "queries": json.loads(r["queries"]) if r["queries"] else None} for r in rows]
 
 
 class ResolveBody(BaseModel):
@@ -347,7 +355,7 @@ def resolve(repo: Repo, incident_id: str, body: ResolveBody) -> dict[str, Any]:
 
 @app.get("/api/tenants/{tenant}/incidents/{incident_id}/steps")
 def steps(repo: Repo, incident_id: str) -> list[dict[str, Any]]:
-    rows = repo.read("incident_steps", incident_id=incident_id).rows
+    rows = _stored_steps(repo, incident_id)
     if not rows:
         raise HTTPException(404, f"no agent steps for incident {incident_id!r}")
     return rows
@@ -369,6 +377,15 @@ def graph(repo: Repo, at: int | None = None) -> dict[str, list[dict[str, Any]]]:
 @app.get("/api/tools")
 def tools() -> list[dict[str, Any]]:
     return registry.specs()
+
+
+@app.get("/api/queries/{name}")
+def query_text(name: str) -> dict[str, str]:
+    """One named query from the adapter's catalogue (code, not tenant data): how a stored step shows its Cypher. The
+    sha matches the one the step stored unless the query was edited since."""
+    if not (q := all_queries().get(name)):
+        raise HTTPException(404, f"unknown query {name!r}")
+    return {"name": q.name, "purpose": q.purpose, "cypher": q.cypher, "sha": cypher_sha(q.cypher)}
 
 
 @app.post("/api/tenants/{tenant}/tools/{name}")

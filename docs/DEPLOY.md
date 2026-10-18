@@ -364,5 +364,5 @@ A deployment serves MCP at `https://<host>/mcp` with the bearer token above, fro
 any MCP SDK). The standalone server, `python -m oncall_brain.mcp_server --http --host 0.0.0.0 --port 8001`, still
 runs as a second process next to `make dev`; it checks `Host` and `Origin` the same way and needs no token unless one
 is set. `tests/integration/test_deploy.py` starts the deployment app as the Dockerfile does and checks all of this from
-outside: `/health`, the open API, the UI, the Host checks on both halves, 28 tools and an `ask` over `/mcp`, 401 on a
+outside: `/health`, the open API, the UI, the Host checks on both halves, 30 tools and an `ask` over `/mcp`, 401 on a
 wrong token.

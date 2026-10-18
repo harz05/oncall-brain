@@ -23,19 +23,19 @@ RETURN i.id AS id, i.status AS status, o.id AS service, a.id AS alert, a.at AS a
        steps, hypotheses, recalls, storm, correlated, collect(u.id) AS shared_upstream
 
 // name: log_step
-// purpose: Persist each agent step on the incident (queryable agent history; handoffs between roles are steps too).
+// purpose: Persist each agent step on the incident (queryable agent history; handoffs between roles are steps too), with the named queries it ran (JSON: name, row_count, ms, readonly, params, sha of the Cypher).
 MATCH (i:Incident {id: $incident_id})
 OPTIONAL MATCH (i)-[:LOGGED]->(prev:AgentStep)
 WITH i, count(prev) AS n
 CREATE (st:AgentStep {id: $incident_id + '#' + toString(n + 1), seq: n + 1, role: $role, tool: $tool,
                       target: $target, reason: $reason, summary: $summary, rows: $rows, ms: $ms,
-                      writes: $writes, by: $by})
+                      writes: $writes, by: $by, queries: $queries})
 CREATE (i)-[:LOGGED]->(st)
 RETURN st.seq AS seq
 
 // name: incident_steps
-// purpose: Replay an incident's persisted agent history in order, with who decided each step (the model id, or "rules").
+// purpose: Replay an incident's persisted agent history in order, with who decided each step (the model id, or "rules") and the queries behind it (null on steps stored before they were kept).
 MATCH (i:Incident {id: $incident_id})-[:LOGGED]->(st:AgentStep)
 RETURN st.seq AS seq, st.role AS role, st.tool AS tool, st.target AS target, st.reason AS reason,
-       st.summary AS summary, coalesce(st.by, 'rules') AS by
+       st.summary AS summary, coalesce(st.by, 'rules') AS by, st.queries AS queries
 ORDER BY seq

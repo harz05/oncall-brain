@@ -193,3 +193,79 @@ def test_a_new_decision_record_flips_the_ask_answer_and_flags_the_old_one(store,
     assert all(h["superseded_by"] == "doc:adr-015" for h in old)
     with pytest.raises(ValueError):
         call("record_doc", ctx, {"kind": "design", "title": "x", "text": "y", "decides": "svc:nope"})
+    two = [call("record_doc", ctx, {"kind": "design", "title": t, "text": "y", "at": T1}).data["doc"] for t in "ab"]
+    assert two[0] != two[1]  # same kind, same second, no id: two docs, not one overwritten
+    assert call("record_doc", ctx, {"kind": "design", "title": "a", "text": "y", "at": T1}).data["doc"] == two[0]
+
+
+def test_a_recorded_chat_message_is_a_source_of_ask_at_once_and_corrects_rather_than_duplicates(store, tenant):
+    """Keeping knowledge current for chat: record_message links what the message mentions; ask cites it at once."""
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    ctx = ToolContext(repo)
+    msg = {"channel": "#platform", "author": "person:hana-costa", "mentions": ["svc:kafka"], "at": T1,
+           "text": "Heads up: Platform owns kafka, and the kafka brokers move to the new cluster on Friday."}
+    out = call("record_message", ctx, msg)
+    mid = out.data["message"]
+    assert mid.startswith("msg:platform-") and (mid, "svc:kafka", "MENTIONS") in out.highlight.edges
+    assert mid in call("ask", ctx, {"question": "who owns kafka?"}).data["sources"]
+    assert call("record_message", ctx, msg).data["message"] == mid  # a retried event is the same message
+    call("record_message", ctx, {**msg, "id": mid, "text": "Correction: the kafka move is on Monday.", "mentions": []})
+    assert repo._graph.ro_query("MATCH (m:Message {id: $id}) RETURN m.text, size([(m)-[:MENTIONS]->() | 1])",
+                                {"id": mid}).result_set == [["Correction: the kafka move is on Monday.", 0]]
+    long = call("record_message", ctx, {"channel": "#" + "a" * 75, "text": "kafka", "at": T1}).data["message"]
+    assert call("record_message", ctx, {"channel": "#" + "a" * 75, "text": "kafka again", "id": long}).data[
+        "message"] == long  # a generated id can be sent back to correct the message, however long the channel
+
+
+def test_a_recorded_ticket_shows_in_its_change_and_initiative_stories(store, tenant):
+    """Keeping knowledge current for tickets: REQUESTED puts it in change_story, PART_OF in the initiative's story."""
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    ctx = ToolContext(repo)
+    call("record_change", ctx, {"id": "chg:pgw-pool-4", "service": "svc:payments-gw", "kind": "config",
+                                "summary": "payments-gw max_connections 20 -> 200", "at": T1 + DAY})
+    ticket = {"key": "CR-990", "title": "Restore the payments-gw pool to 200", "status": "done", "at": T1 + DAY - 600,
+              "text": "After the checkout latency incident: max_connections back to 200, per the load test postmortem.",
+              "requests": "chg:pgw-pool-4", "part_of": "init:q4-cost-review", "author": "person:hana-costa",
+              "mentions": ["svc:payments-gw", "doc:pm-load-test-pgw"]}
+    out = call("record_ticket", ctx, ticket)
+    assert out.data["ticket"] == "ticket:CR-990" and out.data["title"] == "CR-990 Restore the payments-gw pool to 200"
+    story = call("change_story", ctx, {"change_id": "chg:pgw-pool-4"})
+    assert [s["id"] for s in story.data["sources"]] == ["ticket:CR-990"]
+    assert ("ticket:CR-990", "chg:pgw-pool-4", "REQUESTED") in story.highlight.edges
+    d = call("ask", ctx, {"question": "what is the Q4 cost review changing"}).data
+    assert ("CR-990 Restore the payments-gw pool to 200 -> chg:pgw-pool-4 (config on payments-gw)" in d["answer"]
+            and "ticket:CR-990" in d["sources"])
+    linked = call("ask", ctx, {"question": "what is CR-990 about"}).data["linked"]
+    assert [(e["id"], e["kind"]) for e in linked] == [("ticket:CR-990", "ticket")]  # its key links it
+    call("record_ticket", ctx, {**ticket, "status": "open", "requests": None})  # same key: corrected, not doubled
+    assert repo._graph.ro_query("MATCH (t:Ticket {id: 'ticket:CR-990'}) RETURN t.status, "
+                                "size([(t)-[:REQUESTED]->() | 1]), size([(t)-[:PART_OF]->() | 1])").result_set == [
+        ["open", 0, 1]]
+    assert call("change_story", ctx, {"change_id": "chg:pgw-pool-4"}).data["sources"] == []
+
+
+def test_event_tools_refuse_unknown_ids_before_writing_anything(store, tenant):
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    ctx = ToolContext(repo)
+    count = "MATCH (n) WHERE n:Message OR n:Ticket OR n:Doc RETURN count(n)"
+    before = repo._graph.ro_query(count).result_set
+    with pytest.raises(ValueError, match="unknown id 'svc:nope'"):
+        call("record_message", ctx, {"channel": "#platform", "text": "kafka", "mentions": ["svc:kafka", "svc:nope"]})
+    with pytest.raises(ValueError, match="unknown ids 'chg:nope', 'init:nope'"):
+        call("record_ticket", ctx, {"title": "x", "text": "y", "status": "open", "requests": "chg:nope",
+                                    "part_of": "init:nope"})
+    with pytest.raises(ValueError, match="key CR-992 makes the id ticket:CR-992"):  # else its key would not link it
+        call("record_ticket", ctx, {"title": "x", "text": "y", "status": "open", "key": "CR-992",
+                                    "id": "ticket:jira-77"})
+    with pytest.raises(ValueError, match="'person:nobody'"):
+        call("record_doc", ctx, {"kind": "design", "title": "x", "text": "y", "author": "person:nobody"})
+    for bad in ({"mentions": ["person:hana-costa"]}, {"mentions": ["svc:kafkä"]}, {"channel": "payments"}):
+        with pytest.raises(ValueError):  # pydantic: only the six mentionable kinds, plain ASCII ids, a #channel
+            call("record_message", ctx, {"channel": "#platform", "text": "x", **bad})
+    assert repo._graph.ro_query(count).result_set == before
+    # A doc with no mentions is recorded (an empty list used to end the write before it returned its row).
+    assert call("record_doc", ctx, {"kind": "design", "title": "x", "text": "y", "decides": "svc:kafka"}).data[
+        "decides"] == "svc:kafka"

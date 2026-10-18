@@ -4,18 +4,20 @@ Every step is returned in the trace AND persisted as an AgentStep node on the in
 decision (by this role or the next one) sees it. Handoffs between roles are steps too.
 """
 
+import json
 from collections.abc import Callable
 
 from pydantic import ValidationError
 
 from oncall_brain.agents import registry
 from oncall_brain.agents.registry import ToolContext
-from oncall_brain.domain.models import Decision, TraceStep
+from oncall_brain.domain.models import Decision, QueryRun, TraceStep, cypher_sha
 from oncall_brain.domain.planner import next_decision
 from oncall_brain.ports import GraphRepository, LLMProvider
 from oncall_brain.services.board import load_board
 
 MAX_STEPS_PER_ROLE = 40
+STORED_PARAMS_BUDGET = 2048  # chars of JSON params a stored step keeps; names, row counts and ms are always kept
 NEXT_ROLE = {"triage": "investigator", "investigator": "comms", "comms": None}
 
 OnStep = Callable[[TraceStep], None]  # called with each step as soon as it is recorded (the UI's live stream)
@@ -25,12 +27,28 @@ def _target(args: dict) -> str:
     return str(args.get("service") or args.get("hypothesis_id") or args.get("incident_id") or "")
 
 
+def stored_queries(queries: list[QueryRun]) -> str:
+    """The proof a stored step keeps: each query's name, row count, ms, params and the sha of its Cypher, as JSON (the
+    Cypher text is code, served by GET /api/queries/{name} with its current sha). Params are ids, times and service
+    names; a query whose params would take the step past STORED_PARAMS_BUDGET keeps params null, so a big projection
+    (blast_radius passes every edge) cannot bloat the log."""
+    left, out = STORED_PARAMS_BUDGET, []
+    for q in queries:
+        size = len(json.dumps(q.params, default=str))
+        keep = size <= left
+        left -= size if keep else 0
+        out.append({"name": q.name, "row_count": q.row_count, "ms": q.ms, "readonly": q.readonly,
+                    "params": q.params if keep else None, "sha": cypher_sha(q.cypher)})
+    return json.dumps(out, default=str)
+
+
 def record(repo: GraphRepository, incident_id: str, trace: list[TraceStep], step: TraceStep, target: str,
            on_step: OnStep | None = None) -> None:
     trace.append(step)
     repo.write("log_step", incident_id=incident_id, role=step.role, tool=step.tool, target=target,
                reason=step.reason, summary=step.summary, rows=sum(q.row_count for q in step.queries),
-               ms=round(sum(q.ms for q in step.queries), 2), writes=step.writes, by=step.by)
+               ms=round(sum(q.ms for q in step.queries), 2), writes=step.writes, by=step.by,
+               queries=stored_queries(step.queries))
     if on_step:
         on_step(step)
 

@@ -52,8 +52,22 @@ WHERE d.valid_to IS NULL AND d.valid_from <= $at
 SET d.valid_to = $at
 RETURN count(d) AS retired
 
+// name: known_ids
+// purpose: Keep knowledge current: which of $ids the graph has, looked up per label (Person, Service, Change, Incident, Doc, Ticket, Initiative) so the id indexes are used. record_doc, record_message and record_ticket refuse a record that names an unknown id before writing anything, so nothing is written half-linked.
+UNWIND $ids AS x
+OPTIONAL MATCH (p:Person {id: x})
+OPTIONAL MATCH (s:Service {id: x})
+OPTIONAL MATCH (c:Change {id: x})
+OPTIONAL MATCH (i:Incident {id: x})
+OPTIONAL MATCH (d:Doc {id: x})
+OPTIONAL MATCH (t:Ticket {id: x})
+OPTIONAL MATCH (n:Initiative {id: x})
+WITH x, coalesce(p, s, c, i, d, t, n) AS found
+WHERE found IS NOT NULL
+RETURN x AS id
+
 // name: record_doc
-// purpose: Keep knowledge current: record a decision record, design note, postmortem or runbook page as it is written (idempotent on id): its author, the service it DECIDES for, what it MENTIONS, and the older doc it SUPERSEDES, so ask puts the new decision of record first and flags the old one.
+// purpose: Keep knowledge current: record a decision record, design note, postmortem or runbook page as it is written (idempotent on id): its author, the service it DECIDES for, what it MENTIONS (services, changes, incidents, docs, tickets, initiatives, each looked up per label), and the older doc it SUPERSEDES, so ask puts the new decision of record first and flags the old one.
 MERGE (d:Doc {id: $id})
 SET d.kind = $kind, d.title = $title, d.text = $text, d.at = $at
 WITH d
@@ -68,13 +82,65 @@ FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (d)-[:AUTHORED_BY
 FOREACH (x IN CASE WHEN s IS NULL THEN [] ELSE [s] END | MERGE (d)-[:DECIDES]->(x) MERGE (d)-[:MENTIONS]->(x))
 FOREACH (x IN CASE WHEN prev IS NULL THEN [] ELSE [prev] END | MERGE (d)-[:SUPERSEDES]->(x))
 WITH d, s, prev
-UNWIND coalesce($mentions, []) AS m
+// The empty-id sentinel keeps the row alive when there are no mentions.
+UNWIND coalesce($mentions, []) + [''] AS m
 OPTIONAL MATCH (ms:Service {id: m})
 OPTIONAL MATCH (mc:Change {id: m})
 OPTIONAL MATCH (mi:Incident {id: m})
-WITH d, s, prev, coalesce(ms, mc, mi) AS x
+OPTIONAL MATCH (md:Doc {id: m})
+OPTIONAL MATCH (mt:Ticket {id: m})
+OPTIONAL MATCH (mn:Initiative {id: m})
+WITH d, s, prev, coalesce(ms, mc, mi, md, mt, mn) AS x
 FOREACH (y IN CASE WHEN x IS NULL THEN [] ELSE [x] END | MERGE (d)-[:MENTIONS]->(y))
 RETURN DISTINCT d.id AS doc, s.id AS decides, prev.id AS supersedes
+
+// name: record_message
+// purpose: Keep knowledge current: record a chat message as it is posted (idempotent on id): its channel, who AUTHORED it and what it MENTIONS (services, changes, incidents, docs, tickets, initiatives, each looked up per label so the id indexes are used). Message.text is full-text indexed, so ask finds it at once; change_story lists it for a change it mentions. Re-recording an id corrects the message: its old links are dropped first.
+MERGE (m:Message {id: $id})
+SET m.kind = 'chat', m.channel = $channel, m.text = $text, m.at = $at
+WITH m
+OPTIONAL MATCH (m)-[old:AUTHORED_BY|MENTIONS]->()
+DELETE old
+WITH DISTINCT m
+OPTIONAL MATCH (p:Person {id: $author})
+FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (m)-[:AUTHORED_BY]->(x))
+WITH m
+UNWIND coalesce($mentions, []) + [''] AS ref
+OPTIONAL MATCH (ms:Service {id: ref})
+OPTIONAL MATCH (mc:Change {id: ref})
+OPTIONAL MATCH (mi:Incident {id: ref})
+OPTIONAL MATCH (md:Doc {id: ref})
+OPTIONAL MATCH (mt:Ticket {id: ref})
+OPTIONAL MATCH (mn:Initiative {id: ref})
+WITH m, coalesce(ms, mc, mi, md, mt, mn) AS x
+FOREACH (y IN CASE WHEN x IS NULL THEN [] ELSE [x] END | MERGE (m)-[:MENTIONS]->(y))
+RETURN DISTINCT m.id AS message
+
+// name: record_ticket
+// purpose: Keep knowledge current: record a ticket as it is filed or updated (idempotent on id): title, text and status, who AUTHORED it, the change it REQUESTED (change_story lists the ticket), the initiative it is PART_OF (ask's initiative story lists it) and what it MENTIONS, each looked up per label. title and text are full-text indexed, so ask finds it at once. Re-recording an id corrects the ticket: its old links are dropped first.
+MERGE (t:Ticket {id: $id})
+SET t.title = $title, t.text = $text, t.status = $status, t.at = $at
+WITH t
+OPTIONAL MATCH (t)-[old:AUTHORED_BY|REQUESTED|PART_OF|MENTIONS]->()
+DELETE old
+WITH DISTINCT t
+OPTIONAL MATCH (p:Person {id: $author})
+OPTIONAL MATCH (c:Change {id: $requests})
+OPTIONAL MATCH (n:Initiative {id: $part_of})
+FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (t)-[:AUTHORED_BY]->(x))
+FOREACH (x IN CASE WHEN c IS NULL THEN [] ELSE [c] END | MERGE (t)-[:REQUESTED]->(x))
+FOREACH (x IN CASE WHEN n IS NULL THEN [] ELSE [n] END | MERGE (t)-[:PART_OF]->(x))
+WITH t
+UNWIND coalesce($mentions, []) + [''] AS ref
+OPTIONAL MATCH (ms:Service {id: ref})
+OPTIONAL MATCH (mc:Change {id: ref})
+OPTIONAL MATCH (mi:Incident {id: ref})
+OPTIONAL MATCH (md:Doc {id: ref})
+OPTIONAL MATCH (mt:Ticket {id: ref})
+OPTIONAL MATCH (mn:Initiative {id: ref})
+WITH t, coalesce(ms, mc, mi, md, mt, mn) AS x
+FOREACH (y IN CASE WHEN x IS NULL THEN [] ELSE [x] END | MERGE (t)-[:MENTIONS]->(y))
+RETURN DISTINCT t.id AS ticket
 
 // name: transfer_ownership
 // purpose: Keep knowledge current: $team takes over $service at $at. The previous owner's live OWNS edge is closed (valid_to = $at; history is kept, never deleted) and a new OWNS {valid_from: $at} edge is created; a team that already owns the service changes nothing (transferred = false); an $at before the live edge's valid_from writes nothing (backdated = true: history is append-only). Every query that asks who owns a service at a time (on_call_for, blast_radius, warn_candidates, service_map, ownership) filters OWNS by validity, so paging and "who owned X at the time of inc:0911" follow the history. history lists every OWNS edge of the service after the write.

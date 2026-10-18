@@ -1,8 +1,14 @@
 """Value objects shared by every layer. Pure data, no I/O."""
 
+import hashlib
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def cypher_sha(cypher: str) -> str:
+    """A short fingerprint of a query's text. A stored step keeps it, so a later edit of that query shows."""
+    return hashlib.sha256(cypher.encode()).hexdigest()[:12]
 
 
 class QueryRun(BaseModel):

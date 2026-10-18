@@ -41,9 +41,11 @@ Three ways to use it:
    session key through a conversation: each question is then remembered in the graph, a follow-up can say "it" or
    "them", and my_questions(tenant, user) or asking "what did I ask about payments-gw" recalls them with sources.
 3. Keeping the graph current: record_change (deploys, config changes), record_anomaly, raise_alert, add_dependency,
-   retire_dependency, record_doc (a new decision record, with the doc it supersedes) and transfer_ownership (a team
-   takes over a service; the old owner's OWNS edge is closed, never deleted) write live facts; the next investigation
-   and the next question see them, and "who owned X at the time of inc:0911" still names the owner back then.
+   retire_dependency, record_doc (a new decision record, with the doc it supersedes), record_message (a chat message
+   and what it mentions), record_ticket (a ticket, the change it requested, its initiative) and transfer_ownership (a
+   team takes over a service; the old owner's OWNS edge is closed, never deleted) write live facts; the next
+   investigation and the next question see them, and "who owned X at the time of inc:0911" still names the owner
+   back then.
 Ids look like svc:checkout, alert:checkout-latency, inc:checkout-latency, chg:pgw-pool-1, person:sana-brandt. Every
 result includes the Cypher it ran. If a tenant has no graph yet, reset_tenant(tenant) seeds the demo company."""
 

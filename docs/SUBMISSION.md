@@ -24,7 +24,7 @@ that was live at alert time and the anomalies on it, every refutation says why, 
 that produced it. When a human confirms the cause, the graph remembers the fix, and the next similar incident is solved
 in half the steps.
 
-It is an MCP server first: 28 tools generated from one registry, a Claude Code plugin with three skills that works
+It is an MCP server first: 30 tools generated from one registry, a Claude Code plugin with three skills that works
 from a checkout or against a deployed instance, a webhook-in and Slack-out headless flow, and a web inbox that is one
 window onto the same brain. A deterministic planner runs everything without an LLM key. With Claude choosing every step
 instead, the full three-act story finds the right cause with zero fallbacks.
@@ -51,7 +51,7 @@ an ownership transfer flips the answer at once, and "who owned it at the time of
 ## Would it work without FalkorDB?
 
 No. Suspects, refutations, blast radius, storm splitting, memory recall, ownership at a point in time and every `ask`
-answer are Cypher queries or graph algorithms (101 named statements in `.cypher` files, listed in `docs/QUERIES.md`),
+answer are Cypher queries or graph algorithms (104 named statements in `.cypher` files, listed in `docs/QUERIES.md`),
 and the agents keep no state outside the graph.
 
 ## Try it

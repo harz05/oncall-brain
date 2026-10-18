@@ -85,8 +85,7 @@ const mobile = () => matchMedia('(max-width: 899px)').matches;
 const nodeOf = (id) => state.graph?.nodes.find((n) => n.id === id) || null;
 // The same alert stored twice (the webhook sample posted into the demo company) is one alert.
 const distinct = (alerts) => [...new Map(alerts.map((a) => [`${a.service}|${a.name}|${a.at}`, a])).values()];
-const actOf = (cur) => cur?.act ?? cur?.alerts?.find((a) => a.act != null)?.act ?? null;
-const recordedLink = (text, act, cls = null) => h('a', { class: cls, href: `${location.pathname}?offline=1${act ? `&replay=${act}` : ''}` }, text);
+const recordedLink = (text, cls = null) => h('a', { class: cls, href: `${location.pathname}?offline=1` }, text);
 const teamOf = (id) => nodeOf(id)?.team || null;
 
 // running: an agent run is streaming; graphOwner: whose picture the graph shows (a run, 'ask', or null);
@@ -238,7 +237,8 @@ async function* runEvents(path) {
 
 // ---------- runs and incidents ----------
 // A run is one agent response to an alert, kept for this page's lifetime. An incident handled before the page was
-// opened is loaded from the graph instead (GET /incidents/{id}): its outcome and steps, without the live trace.
+// opened is loaded from the graph instead (GET /incidents/{id}): its outcome and steps with the queries each ran,
+// without the live trace's rows and step data.
 function newRun(alert, alerts, act) {
   return { alert, alerts, act, home: alert.service, incident: null, steps: [], res: null, ablation: null,
     resolved: null, picked: null, done: false, error: null, folded: alerts.length < 2, showAlt: false, saving: null,
@@ -469,7 +469,7 @@ function renderNotice() {
   if (!down) return set('notice');
   set('notice', h('p', {}, h('b', {}, 'FalkorDB is not reachable, so incidents cannot load and Simulate is off. '), 'Start FalkorDB with ',
     h('code', {}, 'make db'), ', then reload this page.'),
-  h('p', {}, 'Or watch the agents work a recorded run, with no database: ', recordedLink('Open the replay', null), '.'),
+  h('p', {}, 'Or watch the agents work a recorded run, with no database: ', recordedLink('Open the replay'), '.'),
   hl.falkordb_error ? h('details', { 'data-key': 'raw' }, h('summary', {}, 'What the server said'), h('pre', {}, hl.falkordb_error)) : null);
   announce('FalkorDB is not reachable, so incidents cannot load.');
 }
@@ -1006,32 +1006,70 @@ function learnOutcome(o) {
   for (const r of o?.memory?.recalled || []) names.set(r.incident, r.title);
 }
 
-function copyBtn(text, label = 'Copy', name = null, key = null) {
+function copyBtn(text, label = 'Copy', name = null, key = null) { // text: a string, or a function giving it at click time
   return h('button', { class: 'btn small', type: 'button', 'aria-label': name, 'data-key': key || `copy-${label}`, onclick: (e) => {
     e.preventDefault();
     if (!navigator.clipboard) return toast('This page cannot reach the clipboard here; select the text and copy it.', true);
-    navigator.clipboard.writeText(text).then(() => toast('Copied to the clipboard.'), () => toast('The browser blocked the clipboard; select the text and copy it.', true));
+    const t = typeof text === 'function' ? text() : text;
+    if (!t) return toast('The Cypher has not loaded yet. Open the list and try again.', true);
+    navigator.clipboard.writeText(t).then(() => toast('Copied to the clipboard.'), () => toast('The browser blocked the clipboard; select the text and copy it.', true));
   } }, label);
 }
 
+// A live query carries its Cypher and rows. A stored step's query keeps its name, row count, ms, params (null when
+// they were too long to keep) and the sha of its Cypher; the Cypher is code, fetched once per name from
+// GET /api/queries/{name} when its list opens, and a different sha there means the query was edited since the step ran.
+const cypherFor = new Map(); // query name -> {cypher, sha, ...}, or the fetch in flight (a 404 stays: the query is gone)
+const knownCypher = (q) => q.cypher ?? cypherFor.get(q.name)?.cypher ?? null;
+const rowCount = (q) => q.rows?.length ?? q.row_count ?? 0;
+const DRIFTED = 'This query has changed since the step ran; this is its current Cypher.';
+const drifted = (sha, name) => !!sha && !!cypherFor.get(name)?.sha && cypherFor.get(name).sha !== sha;
+function loadCypher(name) {
+  if (!cypherFor.has(name)) {
+    cypherFor.set(name, api('GET', `/api/queries/${enc(name)}`).then((r) => { cypherFor.set(name, r); return r; },
+      (e) => { if (e.status !== 404) cypherFor.delete(name); throw e; })); // other failures are tried again on reopen
+  }
+  return Promise.resolve(cypherFor.get(name));
+}
+function fillCypher(details) {
+  if (!details.open) return;
+  for (const code of details.querySelectorAll('code[data-query]')) {
+    const name = code.dataset.query;
+    loadCypher(name).then((r) => {
+      if (!code.dataset.query) return; // an earlier open already filled it
+      code.textContent = r.cypher; code.removeAttribute('data-query');
+      if (drifted(code.dataset.sha, name)) code.parentElement.after(h('p', { class: 'small muted' }, DRIFTED));
+    }, (e) => {
+      code.textContent = e.status === 404 ? 'This query is no longer in the catalogue: the product changed after this step ran.'
+        : 'The Cypher did not load. Close and open this list to try again.';
+    });
+  }
+}
+
 function queryBlock(q, key) {
+  const cypher = knownCypher(q), n = rowCount(q);
   return h('div', { class: 'q' },
     h('div', { class: 'qhead' }, h('b', {}, q.name),
       h('span', { class: 'rw', title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' }, q.readonly ? 'read' : 'write'),
-      h('span', {}, `${plural(q.rows.length, 'row')}, ${q.ms} ms`),
+      h('span', {}, `${plural(n, 'row')}, ${q.ms} ms`),
       q.name === 'incident_board' ? h('span', {}, 'the agent re-reads the shared board') : null,
-      copyBtn(q.cypher, 'Copy', `Copy the ${q.name} query`, `copy-${key}`)),
+      copyBtn(() => knownCypher(q), 'Copy', `Copy the ${q.name} query`, `copy-${key}`)),
     // focusable, so a keyboard can scroll a wide block sideways (Safari does not make scrollers focusable itself)
-    h('pre', { tabindex: 0, 'aria-label': `${q.name} Cypher` }, h('code', {}, q.cypher)),
-    h('pre', { tabindex: 0, 'aria-label': `${q.name} parameters` }, h('code', {}, `params ${JSON.stringify(q.params)}`)),
-    q.rows.length ? h('details', { 'data-key': `rows-${key}` }, h('summary', {}, `Rows (${q.rows.length})`),
+    h('pre', { tabindex: 0, 'aria-label': `${q.name} Cypher` },
+      h('code', { 'data-query': cypher == null ? q.name : null, 'data-sha': q.sha }, cypher ?? 'Loading the Cypher…')),
+    drifted(q.sha, q.name) ? h('p', { class: 'small muted' }, DRIFTED) : null,
+    h('pre', { tabindex: 0, 'aria-label': `${q.name} parameters` }, h('code', {},
+      q.params == null ? 'params not stored (too long to keep with the step)' : `params ${JSON.stringify(q.params)}`)),
+    q.rows?.length ? h('details', { 'data-key': `rows-${key}` }, h('summary', {}, `Rows (${n})`),
       h('pre', { tabindex: 0, 'aria-label': `${q.name} rows` }, h('code', {}, JSON.stringify(q.rows, null, 1)))) : null);
 }
 
 function cypherList(queries, key) {
   if (!queries?.length) return null;
-  const ms = queries.reduce((a, q) => a + q.ms, 0), rows = queries.reduce((a, q) => a + q.rows.length, 0);
-  return h('details', { 'data-key': `cy-${key}` }, h('summary', {}, `${plural(queries.length, 'query')}, ${plural(rows, 'row')}, ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`),
+  const ms = queries.reduce((a, q) => a + q.ms, 0), rows = queries.reduce((a, q) => a + rowCount(q), 0);
+  const lazy = queries.some((q) => knownCypher(q) == null); // a stored step: the Cypher arrives when the list opens
+  return h('details', { 'data-key': `cy-${key}`, ontoggle: lazy ? (e) => fillCypher(e.currentTarget) : null },
+    h('summary', {}, `${plural(queries.length, 'query')}, ${plural(rows, 'row')}, ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`),
     queries.map((q, j) => queryBlock(q, `${key}-${j}`)));
 }
 
@@ -1081,15 +1119,16 @@ function renderWhy(cur) {
   const foot = tally.size === 1 ? `${cap(deciderName([...tally.keys()][0]))} chose all ${plural(work.length, 'step')}.`
     : `Of the ${plural(work.length, 'step')}, ${and(chose)}.`;
   const counted = `${plural(work.length, 'step')}${hands ? ` and ${plural(hands, 'handoff')}` : ''}`;
+  const unkept = cur.stored ? work.filter((s) => !s.queries).length : 0; // stored before steps kept their queries
   set('why-side',
     h('div', { class: 'why-intro' },
       h('h2', {}, 'How the agents got here'),
-      h('p', {}, 'Every step the three agents took, in order, with the graph queries behind it. Select a step to light up its part of the graph.'),
+      h('p', {}, `Every step the three agents took, in order${unkept && unkept === work.length ? '' : ', with the graph queries behind it'}. Select a step to light up its part of the graph.`),
       h('p', { class: 'small muted' }, steps.length ? [`${counted}${ms ? `, ${(ms / 1000).toFixed(1)} s of graph queries` : ''}`
         + `${tokens ? `, ${Math.round(tokens / 1000)}k model tokens` : ''}.`,
       work.some(oldStep) ? ' Steps from an older recording show their tool and result, without the model\'s reason.' : '',
-      cur.stored && !OFFLINE ? [' To see the Cypher behind every step, ',
-        recordedLink('watch the recorded run of this scenario', actOf(cur)), '.'] : '']
+      !unkept ? '' : unkept === work.length ? ' This incident was stored before steps kept their queries.'
+        : ` ${plural(unkept, 'step')} here ${unkept === 1 ? 'was' : 'were'} stored before steps kept their queries.`]
         : 'The steps appear here as the agents take them.')),
     groups,
     work.length ? h('p', { class: 'why-foot' }, foot) : null);
@@ -1766,8 +1805,11 @@ function renderConnect() {
         h('ul', {},
           h('li', {}, c('record_change'), ' from CI/CD (deploys, config changes)'),
           h('li', {}, c('record_anomaly'), ' and ', c('raise_alert'), ' from monitoring'),
-          h('li', {}, c('add_dependency'), ' and ', c('retire_dependency'), ' from the service catalog')),
-        h('p', { class: 'small muted' }, 'Every write is an idempotent MERGE, so replays and retries are safe.')),
+          h('li', {}, c('add_dependency'), ' and ', c('retire_dependency'), ' from the service catalog'),
+          h('li', {}, c('record_doc'), ' from your wiki (decision records, design notes, postmortems, runbook pages)'),
+          h('li', {}, c('record_message'), ' from chat (a message and what it mentions)'),
+          h('li', {}, c('record_ticket'), ' from your tracker (a ticket, the change it asks for, the initiative it is part of)')),
+        h('p', { class: 'small muted' }, 'Every write is an idempotent MERGE on the record\'s id: send the source\'s id or time and replays and retries are safe.')),
       step(5, 'Keep each company in its own graph',
         h('p', {}, 'One FalkorDB graph per company (tenant): memory, incidents and knowledge never mix. ', h('b', {}, `This company: ${state.tenant || 'none'}.`),
           ' Add ', c('?tenant=<name>'), ' to the URL to open another.'),
@@ -1900,8 +1942,6 @@ async function boot() {
   state.loaded = true;
   simButtonState();
   renderAll();
-  const replay = Number(params.get('replay')); // ?offline=1&replay=N: the link from a stored incident to its recorded run
-  if (OFFLINE && replay && !state.loadError) fire(replay);
 }
 
 wire();

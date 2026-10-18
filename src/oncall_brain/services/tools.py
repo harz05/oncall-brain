@@ -2,16 +2,17 @@
 (summary, data, the queries it ran, and the graph ids to highlight). Registered once in agents.registry."""
 
 import contextlib
+import hashlib
 import secrets
 import time
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from redis.exceptions import RedisError
 
 from oncall_brain.agents.registry import ToolContext, tool
 from oncall_brain.domain import update
-from oncall_brain.domain.models import Highlight, ToolOutput
+from oncall_brain.domain.models import Highlight, QueryRun, ToolOutput
 from oncall_brain.domain.planner import RECALL_MIN_SCORE, STORM_WINDOW, WINDOW
 from oncall_brain.domain.verdict import CheckFacts, judge, leading
 
@@ -587,7 +588,11 @@ def service_map(ctx: ToolContext, a: AtArgs) -> ToolOutput:
 
 SVC = r"^svc:[a-z0-9-]{1,60}$"
 TEAM = r"^team:[a-z0-9-]{1,60}$"
+PERSON = r"^person:[a-z0-9.-]{1,80}$"
 SYMPTOM = Literal["latency", "errors", "saturation"]
+# What a doc, ticket or chat message can MENTION; plain ASCII ids, looked up per label (known_ids, then the write).
+MENTION = r"^(svc|chg|inc|doc|ticket|init):[A-Za-z0-9._-]{1,80}$"
+Mentions = list[Annotated[str, Field(pattern=MENTION)]]
 
 
 class ChangeEvent(BaseModel):
@@ -595,7 +600,7 @@ class ChangeEvent(BaseModel):
     kind: Literal["deploy", "config"] = Field(description="deploy (a new version) or config (a setting changed)")
     summary: str = Field(max_length=300, description="One line, as a changelog entry: what changed and why")
     at: int | None = Field(None, description="Epoch seconds; defaults to now")
-    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$",
+    author: str | None = Field(None, pattern=PERSON,
                                description="Person id of who made it, e.g. person:sana-brandt (optional)")
     rolled_back_at: int | None = Field(None, description="Epoch seconds the change was rolled back, if it was")
     id: str | None = Field(None, pattern=r"^chg:[A-Za-z0-9._-]{1,80}$",
@@ -624,16 +629,64 @@ class DocEvent(BaseModel):
     text: str = Field(max_length=4000, description="The doc's text, or its summary; what ask quotes and searches")
     decides: str | None = Field(None, pattern=SVC, description="The service this doc is the decision of record for, "
                                                                 "e.g. svc:kafka (decisions and design notes)")
-    mentions: list[str] = Field(default_factory=list, description="Service, change or incident ids the doc talks "
-                                                                   "about, e.g. ['svc:kafka', 'chg:kafka-ret-7']")
-    supersedes: str | None = Field(None, pattern=r"^doc:[\w.-]{1,80}$",
+    mentions: Mentions = Field(default_factory=list, max_length=20,
+                               description="Ids the doc talks about: services, changes, incidents, docs, tickets or "
+                                           "initiatives, e.g. ['svc:kafka', 'doc:adr-011']")
+    supersedes: str | None = Field(None, pattern=r"^doc:[A-Za-z0-9._-]{1,80}$",
                                    description="The older doc this one replaces, e.g. doc:adr-011; ask then flags "
                                                "the old one as superseded")
-    author: str | None = Field(None, pattern=r"^person:[a-z0-9.-]{1,80}$",
+    author: str | None = Field(None, pattern=PERSON,
                                description="Person id of the author, e.g. person:hana-costa (optional)")
     at: int | None = Field(None, description="Epoch seconds the doc was written; defaults to now")
-    id: str | None = Field(None, pattern=r"^doc:[\w.-]{1,80}$",
-                           description="Your own id for the doc, e.g. doc:adr-015 (optional; generated if omitted)")
+    id: str | None = Field(None, pattern=r"^doc:[A-Za-z0-9._-]{1,80}$",
+                           description="Your own id for the doc, e.g. doc:adr-015 (optional; without it, or at, "
+                                       "each call is a new doc)")
+
+
+class MessageEvent(BaseModel):
+    channel: str = Field(pattern=r"^#[a-z0-9][a-z0-9._-]{0,79}$", description="The chat channel, e.g. #payments")
+    text: str = Field(min_length=1, max_length=2000,
+                      description="The message as posted; what ask quotes and searches")
+    mentions: Mentions = Field(default_factory=list, max_length=20,
+                               description="Ids the message talks about: services, changes, incidents, docs, tickets "
+                                           "or initiatives, e.g. ['svc:kafka', 'ticket:CR-881']")
+    author: str | None = Field(None, pattern=PERSON,
+                               description="Person id of who posted it, e.g. person:hana-costa (optional)")
+    at: int | None = Field(None, description="Epoch seconds it was posted; defaults to now")
+    id: str | None = Field(None, pattern=r"^msg:[A-Za-z0-9._-]{1,80}$",
+                           description="Your chat tool's message id, e.g. msg:slack-1729 (optional; without it, or at, "
+                                       "each call is a new message)")
+
+
+class TicketEvent(BaseModel):
+    title: str = Field(min_length=1, max_length=200,
+                       description="The ticket's title, e.g. 'Lower the kafka consumer lag alert'")
+    text: str = Field(max_length=4000, description="The ticket's description; what ask quotes and searches")
+    status: Literal["open", "done"] = Field(description="open (still to do or in progress) or done")
+    key: str | None = Field(None, pattern=r"^[A-Z][A-Z0-9]{0,15}-[0-9]{1,8}$",
+                            description="The tracker's key, e.g. CR-123: the id becomes ticket:CR-123, the title "
+                                        "starts with it, and a question that names CR-123 links the ticket")
+    requests: str | None = Field(None, pattern=r"^chg:[A-Za-z0-9._-]{1,80}$",
+                                 description="The change this ticket asked for, e.g. chg:pgw-pool-1 (REQUESTED: "
+                                             "change_story then lists the ticket)")
+    part_of: str | None = Field(None, pattern=r"^init:[A-Za-z0-9._-]{1,80}$",
+                                description="The initiative the ticket is part of, e.g. init:q4-cost-review (PART_OF: "
+                                            "ask's 'what is the Q4 cost review changing' then lists it)")
+    mentions: Mentions = Field(default_factory=list, max_length=20,
+                               description="Ids the ticket talks about: services, changes, incidents, docs, tickets "
+                                           "or initiatives, e.g. ['svc:payments-gw', 'doc:adr-012']")
+    author: str | None = Field(None, pattern=PERSON,
+                               description="Person id of who filed it, e.g. person:sana-brandt (optional)")
+    at: int | None = Field(None, description="Epoch seconds it was filed; defaults to now")
+    id: str | None = Field(None, pattern=r"^ticket:[A-Za-z0-9._-]{1,80}$",
+                           description="Your own id for the ticket, e.g. ticket:CR-123 (optional; from key if given; "
+                                       "without id, key or at, each call is a new ticket)")
+
+    @model_validator(mode="after")
+    def _key_is_the_id(self) -> "TicketEvent":  # a different id would not be linked by its key (422, not 404)
+        if self.key and self.id and self.id != f"ticket:{self.key}":
+            raise ValueError(f"key {self.key} makes the id ticket:{self.key}; give one or the other")
+        return self
 
 
 class OwnershipEvent(BaseModel):
@@ -712,24 +765,77 @@ def retire_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
                       queries=[q], highlight=Highlight(nodes=[a.caller, a.callee]))
 
 
+def _known(ctx: ToolContext, *ids: str | None) -> QueryRun:
+    """Look up every id a record names (author, links, mentions) before writing it. An unknown id is refused by name,
+    so a doc, ticket or message is never written half-linked."""
+    want = list(dict.fromkeys(i for i in ids if i))
+    q = ctx.repo.read("known_ids", ids=want)
+    if missing := [i for i in want if i not in {r["id"] for r in q.rows}]:
+        raise ValueError(f"unknown {'id' if len(missing) == 1 else 'ids'} {', '.join(map(repr, missing))}: "
+                         "record it first or leave it out")
+    return q
+
+
+def _digest(*parts: str) -> str:
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:8]
+
+
 @tool(writes=True, agent=False)
 def record_doc(ctx: ToolContext, a: DocEvent) -> ToolOutput:
     """Record a decision record, design note, postmortem or runbook page as it is written (from a wiki or a human),
     with its author, the service it decides for, what it mentions and the older doc it supersedes. ask answers from
-    it at once: a new decision of record comes first and the one it replaced is flagged as superseded."""
+    it at once: a new decision of record comes first and the one it replaced is flagged as superseded. Every id it
+    names must already be in the graph."""
     at = a.at or int(time.time())
-    did = a.id or f"doc:{a.kind}-{at}"
+    did = a.id or f"doc:{a.kind}-{at}-{_digest(a.title, a.text)}"
+    known = _known(ctx, a.author, a.decides, a.supersedes, *a.mentions)
     q = ctx.repo.write("record_doc", id=did, kind=a.kind, title=a.title, text=a.text, at=at, author=a.author,
                        decides=a.decides, mentions=a.mentions, supersedes=a.supersedes)
-    row = q.rows[0] if q.rows else {}
-    if a.decides and not row.get("decides"):
-        raise ValueError(f"unknown service {a.decides!r}")
-    if a.supersedes and not row.get("supersedes"):
-        raise ValueError(f"unknown doc {a.supersedes!r}")
     what = f"Recorded {a.kind} {did} '{a.title}'" + (f", the decision of record for {a.decides}" if a.decides else "")
     return ToolOutput(summary=what + (f"; it supersedes {a.supersedes}" if a.supersedes else ""),
-                      data={"doc": did, "at": at, "decides": a.decides, "supersedes": a.supersedes}, queries=[q],
-                      highlight=Highlight(nodes=[a.decides] if a.decides else []))
+                      data={"doc": did, "at": at, "decides": a.decides, "supersedes": a.supersedes},
+                      queries=[known, q], highlight=Highlight(nodes=[a.decides] if a.decides else []))
+
+
+@tool(writes=True, agent=False)
+def record_message(ctx: ToolContext, a: MessageEvent) -> ToolOutput:
+    """Record a chat message as it is posted (from Slack or a human): its channel, author and the services, changes,
+    incidents, docs, tickets or initiatives it mentions. ask finds it at once (full-text search, then the MENTIONS
+    edges) and change_story lists it for a change it mentions. Re-recording an id corrects the message. Every id it
+    names must already be in the graph."""
+    at = a.at or int(time.time())
+    mid = a.id or f"msg:{a.channel[1:41]}-{at}-{_digest(a.channel, a.text)}"  # fits the id pattern
+    known = _known(ctx, a.author, *a.mentions)
+    q = ctx.repo.write("record_message", id=mid, channel=a.channel, text=a.text, at=at, author=a.author,
+                       mentions=a.mentions)
+    return ToolOutput(summary=f"Recorded message {mid} in {a.channel}"
+                      + (f", mentioning {', '.join(a.mentions)}" if a.mentions else ""),
+                      data={"message": mid, "at": at, "channel": a.channel, "mentions": a.mentions},
+                      queries=[known, q], highlight=Highlight(nodes=[mid, *a.mentions],
+                                                              edges=[(mid, m, "MENTIONS") for m in a.mentions]))
+
+
+@tool(writes=True, agent=False)
+def record_ticket(ctx: ToolContext, a: TicketEvent) -> ToolOutput:
+    """Record a ticket as it is filed or updated (from your tracker or a human): its status, author, the change it
+    requested (change_story then lists it), the initiative it is part of (ask's "what is X changing" then lists it)
+    and what it mentions. ask finds it at once, and a question that names its key (CR-123) links it. Re-recording an
+    id corrects the ticket. Every id it names must already be in the graph."""
+    at = a.at or int(time.time())
+    tid = a.id or (f"ticket:{a.key}" if a.key else f"ticket:{at}-{_digest(a.title, a.text)}")
+    title = f"{a.key} {a.title}" if a.key and not a.title.startswith(a.key) else a.title
+    known = _known(ctx, a.author, a.requests, a.part_of, *a.mentions)
+    q = ctx.repo.write("record_ticket", id=tid, title=title, text=a.text, status=a.status, at=at, author=a.author,
+                       requests=a.requests, part_of=a.part_of, mentions=a.mentions)
+    edges = [(tid, x, rel) for x, rel in ((a.requests, "REQUESTED"), (a.part_of, "PART_OF")) if x]
+    edges += [(tid, m, "MENTIONS") for m in a.mentions]
+    return ToolOutput(summary=f"Recorded {a.status} ticket {tid} '{title}'"
+                      + (f", requesting {a.requests}" if a.requests else "")
+                      + (f", part of {a.part_of}" if a.part_of else ""),
+                      data={"ticket": tid, "at": at, "title": title, "status": a.status, "requests": a.requests,
+                            "part_of": a.part_of, "mentions": a.mentions},
+                      queries=[known, q], highlight=Highlight(nodes=list(dict.fromkeys([tid, *(e[1] for e in edges)])),
+                                                              edges=edges))
 
 
 @tool(writes=True, agent=False)

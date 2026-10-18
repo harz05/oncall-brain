@@ -2,8 +2,8 @@
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
 same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 26 registry tools plus two use-case tools,
-28 in all.
+the MCP Inspector or any other MCP client can call the tools directly: 28 registry tools plus two use-case tools,
+30 in all.
 
 | Tool | What it does |
 |---|---|
@@ -13,7 +13,7 @@ the MCP Inspector or any other MCP client can call the tools directly: 26 regist
 | human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
 | company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; no LLM. With a `user` and a `session` key the question is remembered in that person's session in the graph, a follow-up can say "it" or "them", and "what did I ask about payments-gw" is answered from it; "what is the Q4 cost review changing and who is on it" walks the `Initiative` behind the tickets), `my_questions` (the same recall as a tool: a user's earlier questions, newest first, with what each was about and the sources it cited, by subject or session), `who_knows`, `change_story` |
 | read tools | `dependency_path`, `service_map`, `incident_board` |
-| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision), `transfer_ownership` (a team takes over a service: the old owner's `OWNS` edge is closed, never deleted, so an alert from before the handover still pages the old team and "who owned payments-gw at the time of inc:0911" still names it): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
+| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision), `record_message` (a chat message, its channel, author and what it mentions; `ask` cites it at once), `record_ticket` (a ticket with its status, the change it requested and the initiative it is part of; `change_story` and the initiative's story list it), `transfer_ownership` (a team takes over a service: the old owner's `OWNS` edge is closed, never deleted, so an alert from before the handover still pages the old team and "who owned payments-gw at the time of inc:0911" still names it): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
 Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
@@ -47,7 +47,7 @@ servers, not a redirect. There is no per-user auth: anyone with the token can us
 
 ## What an outside model sees, and whether it picks right
 
-The server publishes `instructions` (the three ways to use it and what ids look like), 28 tools with a description
+The server publishes `instructions` (the three ways to use it and what ids look like), 30 tools with a description
 and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
 `readOnlyHint` annotations, and two prompts:
 
@@ -112,9 +112,9 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace <owner>/<repo>`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 28 tools, 2 prompts, and the who-owns skill's three calls on a
+the server through the launcher with an MCP client: 30 tools, 2 prompts, and the who-owns skill's three calls on a
 freshly reset tenant, every answer carrying its Cypher. Remote mode is tested the same way: the `oncall-brain-remote`
-entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 28 tools
+entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 30 tools
 and answers `ask`; a wrong token gets 401
 (`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`). Claude Code itself agrees:
 `claude --plugin-dir ./plugin mcp list` (2.1.301) shows `plugin:oncall-brain:oncall-brain` Connected over stdio and,
@@ -247,4 +247,4 @@ described, the prompts render, and the remote transport refuses requests without
 `tests/unit/test_serve.py` covers the deployment app: `/mcp` refused until a token is set while the API stays open,
 opened by `MCP_TOKEN` at the exact path, one `API_TOKEN` guarding both halves, the platform hostnames accepted;
 `tests/integration/test_deploy.py` starts it as the Dockerfile does and drives it from outside (`/health`, the UI,
-the Host checks, 28 tools and an `ask` over `/mcp`, 401 on a wrong token).
+the Host checks, 30 tools and an `ask` over `/mcp`, 401 on a wrong token).

@@ -8,10 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from redis.exceptions import ResponseError
 
+from oncall_brain.agents.loop import STORED_PARAMS_BUDGET
 from oncall_brain.api import app as app_module
 from oncall_brain.api.app import app
 from oncall_brain.config import get_settings
 from oncall_brain.datagen import ACTS, T1
+from oncall_brain.domain.models import cypher_sha
 
 pytestmark = pytest.mark.integration
 
@@ -89,6 +91,9 @@ def test_graph_tools_and_errors(api):
     assert c.post(f"{base}/tools/nope", json={}).status_code == 404
     bad = c.post(f"{base}/tools/dependency_path", json={})
     assert bad.status_code == 422 and isinstance(bad.json()["detail"], str)
+    clash = c.post(f"{base}/tools/record_ticket", json={"title": "x", "text": "y", "status": "open", "key": "CR-992",
+                                                        "id": "ticket:jira-77"})  # bad input (422), not unknown (404)
+    assert clash.status_code == 422 and "makes the id ticket:CR-992" in clash.json()["detail"]
     assert c.get("/api/health").json()["falkordb"] is True
 
 
@@ -188,6 +193,32 @@ def test_inbox_stream_webhook_and_stored_incident(api):
     stored = c.get(f"{base}/incidents/{run['incident_id']}").json()
     assert stored["outcome"]["confidence"]["level"] in ("none", "high", "medium")
     assert c.post(f"{base}/alerts", json={"service": "svc:nope", "symptom": "errors", "name": "x"}).status_code == 404
+
+
+def test_a_stored_incident_keeps_the_queries_behind_every_step(api):
+    """"Show me why" on an incident opened from the inbox: each stored step names its queries, with their row counts,
+    ms, params and Cypher sha, and the Cypher comes from the catalogue endpoint, whose sha says it is the text that
+    ran. The params cap is tests/unit/test_stored_queries.py."""
+    c, base = api
+    c.post(f"{base}/reset")
+    run = c.post(f"{base}/alerts/{ACTS[1]}/respond").json()
+    stored = c.get(f"{base}/incidents/{run['incident_id']}").json()["steps"]
+    assert len(stored) == len(run["steps"])
+    for live, kept in zip(run["steps"], stored, strict=True):
+        assert [q["name"] for q in kept["queries"]] == [q["name"] for q in live["queries"]]
+        assert [q["row_count"] for q in kept["queries"]] == [len(q["rows"]) for q in live["queries"]]
+        assert [q["readonly"] for q in kept["queries"]] == [q["readonly"] for q in live["queries"]]
+        assert sum(len(json.dumps(q["params"])) for q in kept["queries"] if q["params"] is not None) \
+            <= STORED_PARAMS_BUDGET
+        for lq, kq in zip(live["queries"], kept["queries"], strict=True):
+            assert kq["params"] in (None, lq["params"]) and kq["sha"] == cypher_sha(lq["cypher"])
+    board = stored[1]["queries"][0]
+    assert board["name"] == "incident_board" and board["params"]["incident_id"] == run["incident_id"]
+    assert c.get(f"{base}/incidents/{run['incident_id']}/steps").json() == stored
+
+    q = c.get("/api/queries/incident_board").json()
+    assert q["cypher"] == run["steps"][1]["queries"][0]["cypher"] and q["purpose"] and q["sha"] == board["sha"]
+    assert c.get("/api/queries/no_such_query").status_code == 404
 
 
 def test_the_documented_webhook_sample_finds_the_cause_on_the_demo_company(api):
