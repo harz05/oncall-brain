@@ -16,7 +16,7 @@ a web inbox that is one window onto the same brain.
 **Tracks entered:** 01 Agents That Act on Connected Data, 02 Agent Memory and Coordination, 03 Company Brain.
 Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthetic (seeded generator, fake names).
 
-<!-- DEMO VIDEO LINK: add after recording -->
+**Demo video:** https://youtu.be/CwVJMSbQTr4
 
 **Live:** https://13-127-186-74.sslip.io/ runs the real thing on one AWS box: FalkorDB, the three agents on Claude
 Opus 5.5 and the MCP server at `/mcp` (judges get the token with the submission). Press **Simulate an incident** and

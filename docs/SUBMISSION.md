@@ -68,7 +68,7 @@ and the agents keep no state outside the graph.
 - Live deployment: https://13-127-186-74.sslip.io/ (the UI at `/`, MCP at `/mcp` with the bearer token given to the
   judges, health at `/health`; the recorded replay at `/?offline=1`)
 - Recorded replay, no server needed: https://harz05.github.io/oncall-brain/
-- Demo video: <VIDEO_URL>
+- Demo video: https://youtu.be/CwVJMSbQTr4
 - For judges: `docs/WALKTHROUGH.md` (a 45-minute reading order), `docs/SCORECARD.md` (every item of the brief with its
   evidence), `docs/AI_USAGE.md` (how AI tools were used to build it)
 
