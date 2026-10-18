@@ -25,8 +25,8 @@ camera and leave the jargon (p99, episodic, procedural, Cypher) to the README. T
 | 2:48-2:58 | Click **Incidents**: the inbox with Open and Confirmed. | "One graph per company in FalkorDB. Agents that act on it, shared memory, and a company brain: that covers all three tracks. The code is at <GITHUB_REPO_URL>." |
 
 While recording:
-- Do not reload the page between act 1 and Show me why. The Cypher behind each step shows only for a run started
-  in this tab. A reloaded incident links to the recorded run instead.
+- Reloading is fine: an incident opened from the inbox keeps the queries behind every step, so Show me why
+  shows the Cypher either way.
 - Claude's step order and reasons change a little from run to run. The cause, the ruled-out list and the "Without
   the graph" row come from graph queries, so they should match this script. Read numbers off the screen, not from
   here. If the cause differs, use the backup take.
