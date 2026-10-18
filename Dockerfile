@@ -7,9 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_
 WORKDIR /app
 
 # Install the package before copying scripts/ and web/, so edits there reuse this layer.
-COPY pyproject.toml ./
+# constraints.txt pins the versions the tests ran with (dependencies in pyproject.toml are lower bounds only).
+COPY pyproject.toml constraints.txt ./
 COPY src/ src/
-RUN pip install .
+RUN pip install -c constraints.txt .
 COPY scripts/ scripts/
 COPY web/ web/
 

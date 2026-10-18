@@ -211,6 +211,135 @@ the 100 GB a month of outbound traffic AWS does not bill.
   `sudo docker compose restart caddy`. A domain of your own (an A record to the box, `DOMAIN=<it>` in `.env`,
   `sudo docker compose up -d`) avoids the shared limit.
 
+## E. AWS from the CLI (what we run)
+
+The same one-box setup as section D, made from your terminal by four scripts in `deploy/aws/`, on a Graviton (ARM)
+box with Amazon Linux 2023. There is no console step, no SSH and no key pair: commands reach the box through AWS
+Systems Manager (SSM) Run Command, and the box reads its settings from SSM Parameter Store. Everything the scripts
+create is named `oncall-brain-*` and tagged `Project=graphhacks`. Section D stays the console alternative.
+
+What `provision.sh` creates, in ap-south-1 (Mumbai):
+
+- **The box.** One t4g.small (2 vCPU, 2 GiB) in the default VPC, Amazon Linux 2023 arm64 (the AMI comes from the
+  public SSM parameter), a 20 GB encrypted gp3 disk, and IMDSv2 only with hop limit 1, so the containers cannot read
+  instance metadata. Its user data, `deploy/aws/bootstrap-al2023.sh`, installs Docker, the Compose and Buildx plugins
+  (pinned versions, checksums checked) and 2 GB of swap. Nothing secret goes into user data.
+- **Its role**, `oncall-brain-host`, with an instance profile of the same name. It has `AmazonSSMManagedInstanceCore`
+  (so Run Command and Session Manager work), read access to `s3://<bucket>/oncall-brain/*` and to the parameters
+  under `/graphhacks/`, and `kms:Decrypt` on the AWS-managed SSM key only when SSM asks. The managed policy alone
+  would let the box read and decrypt every parameter in the account, so an explicit Deny limits its parameter reads
+  to `/graphhacks/`.
+- **A security group**, `oncall-brain-web`. It opens 80 and 443 (TCP, and UDP 443 for HTTP/3) to the internet and
+  nothing else. FalkorDB's 6379 and the app's 8000 are never published.
+- **An Elastic IP**, `oncall-brain-ip`. The site's name is that address with dashes plus `.sslip.io`, so the name and
+  its certificate survive a stop and start.
+- **A private bucket**, `oncall-brain-<account-id>-ap-south-1`, for the code: public access blocked, SSE-S3 encryption,
+  tarballs deleted after 14 days.
+
+### Before you start
+
+- The AWS CLI v2, signed in: `aws sts get-caller-identity --query Arn --output text` prints your user. The scripts use
+  ap-south-1; to move, change `REGION` at the top of each script.
+- git, curl, openssl and python3 (provision.sh uses it to read the price list). Docker is not needed on your machine:
+  the box builds the image itself.
+- For Claude as the planner: `LLM_API_KEY` (an Anthropic key) in this repository's `.env`. deploy.sh copies it to
+  Parameter Store once and never prints it. Without a key the box runs the deterministic planner.
+- Commit what you want to ship. deploy.sh sends `git archive HEAD`, not your working tree, and refuses to run while
+  tracked files have uncommitted changes (`--allow-dirty` ships HEAD anyway). New files too: `git add` them (for
+  example `web/vendor/fonts/`) before committing; deploy.sh also refuses to run while files the image needs are
+  untracked.
+
+### The four commands
+
+Run them from the repository root, in this order.
+
+| Step | Command | What it does | Time |
+|---|---|---|---|
+| 1 | `deploy/aws/provision.sh --dry-run` | Prints the plan (what exists, what would be created), the monthly estimate from the live AWS price list, and EC2's answers to dry-run requests. Makes only read-only calls; creates nothing. | about 1 min |
+| 2 | `deploy/aws/provision.sh` | Prints the same plan, asks `Create these? [y/N]` (`--yes` skips the question), creates what is missing, launches the box and attaches the Elastic IP. Ends with the instance id, the Elastic IP and the domain. Safe to run again: it creates only what is missing, and starts the box if it is stopped. | about 2 min, then 2 to 3 min of first boot in the background |
+| 3 | `deploy/aws/deploy.sh` | Uploads HEAD as `s3://<bucket>/oncall-brain/<sha>.tar.gz`. Writes the settings that are missing under `/graphhacks/`: `MCP_TOKEN` and `FALKORDB_PASSWORD` are generated once and kept on every later deploy, `LLM_API_KEY` (and `SLACK_WEBHOOK_URL`, `SLACK_SIGNING_SECRET` if set) come from `.env`. Then it runs `deploy/aws/host.sh` on the box through Run Command, prints the box's output, checks `https://<domain>/health` from your machine and prints the URL and how to get the token. Run it again for every new commit. | 5 to 10 min the first time, 2 to 4 min after |
+| 4 | `deploy/aws/teardown.sh` | Deletes everything above, then runs the checks from the AWS guide and says what, if anything, still bills. See "Tear down" below. | 2 to 4 min |
+
+On the box, `host.sh` waits for the first boot to finish, unpacks the tarball into a new directory and swaps it in
+for `/opt/oncall-brain`, writes `/opt/oncall-brain/.env` (mode 600) from every parameter under `/graphhacks/` plus
+`DOMAIN=<elastic-ip-with-dashes>.sslip.io`, `LLM_PROVIDER=anthropic` and `LLM_MODEL=claude-opus-5-5` (a
+`/graphhacks/LLM_PROVIDER` or `/graphhacks/LLM_MODEL` parameter wins), builds the app image while the old one still
+serves, then runs `docker compose -f docker-compose.yml -f deploy/aws/docker-compose.aws.yml up -d`, prunes the old
+image and waits for `/health`. The graphs and Caddy's certificate live in Docker volumes, so a redeploy keeps them.
+If an agent run is in flight, host.sh waits up to 150 s for it before restarting the app. It never deletes the run's
+lock: a run cut short frees the demo company by itself within 2 minutes, when its lease runs out.
+
+### Get the MCP token and connect Claude Code
+
+The token stays in Parameter Store; nothing prints it unless you ask:
+
+```bash
+export ONCALL_BRAIN_URL=https://<elastic-ip-with-dashes>.sslip.io
+export ONCALL_BRAIN_TOKEN="$(aws ssm get-parameter --region ap-south-1 --name /graphhacks/MCP_TOKEN \
+  --with-decryption --query Parameter.Value --output text)"
+claude --plugin-dir ./plugin mcp list      # plugin:oncall-brain:oncall-brain-remote ... Connected
+```
+
+Then use the plugin as in step 6 of section A.
+
+### Change a setting, e.g. RUNS_PER_HOUR for the recording session
+
+Every deploy rewrites the box's `.env` from Parameter Store, so a lasting change is a parameter plus a redeploy. The
+redeploy takes about 2 minutes, because the image is cached, and keeps the graphs:
+
+```bash
+aws ssm put-parameter --region ap-south-1 --name /graphhacks/RUNS_PER_HOUR --type String --value 30 \
+  --tags Key=Project,Value=graphhacks      # to change it later: --overwrite instead of --tags
+deploy/aws/deploy.sh
+# after the recording
+aws ssm delete-parameter --region ap-south-1 --name /graphhacks/RUNS_PER_HOUR && deploy/aws/deploy.sh
+```
+
+The same works for `LLM_MODEL` and every limit in section D's table. To change the Anthropic key, delete
+`/graphhacks/LLM_API_KEY`, put the new key in `.env` and run `deploy/aws/deploy.sh`, which copies it without putting
+it on a command line.
+
+For a quick change without a redeploy, open a shell on the box (`aws ssm start-session --region ap-south-1 --target
+<instance-id>`; deploy.sh prints the id), then
+`cd /opt/oncall-brain && echo RUNS_PER_HOUR=30 | sudo tee -a .env && sudo docker compose up -d`. The next deploy
+overwrites it.
+
+### Cost
+
+About $13.65 a month at today's on-demand prices from the AWS price list: t4g.small $0.0112/h ($8.18), the public
+IPv4 address $0.005/h ($3.65) and 20 GB of gp3 at $0.0912 per GB-month ($1.82). The account's credits cover it.
+`provision.sh --dry-run` looks the prices up again and prints the sum. S3 and standard parameters cost cents.
+Anthropic usage comes on top, bounded by `LLM_DAILY_TOKEN_CAP` and the Console spend limit (section D, step 12). A
+t4g box uses unlimited CPU credits by default: an idle demo stays below its baseline, while hours of full CPU would
+add a small charge.
+
+To pause it, run `aws ec2 stop-instances --region ap-south-1 --instance-ids <instance-id>`. A stopped box costs
+about $5.50 a month: the disk, plus the Elastic IP, which bills while idle too. `deploy/aws/provision.sh` starts it
+again with the same address, name and data.
+
+### Tear down
+
+`deploy/aws/teardown.sh` lists what it found and asks before deleting (`--yes` skips the questions). It terminates the
+box, which deletes its disk and the graphs on it, so back them up first if you want them (section D, "Back up only
+the graphs"). Then it releases the Elastic IP and deletes the security group, the instance profile and role, and the
+bucket with its tarballs. It asks a second time before deleting the parameters under `/graphhacks/` (they are free;
+a new deploy makes new tokens). Last, it runs the AWS guide's region-wide checks (instances, volumes, snapshots,
+Elastic IPs, NAT gateways, RDS, load balancers) and says whether anything still bills. Revoke the Anthropic key in
+the Console too if you made it for this deployment.
+
+### If something fails
+
+- deploy.sh prints the box's output. The full logs are on the box: `/var/log/oncall-brain-deploy.log` and, for the
+  first boot, `/var/log/oncall-brain-bootstrap.log`. Read them in a Session Manager shell (above).
+- When the health check fails, host.sh prints `docker compose ps` and the last 50 lines of the app's log.
+- "Not Online in Systems Manager": the box is still booting, or it has no route out. Give it a minute and run
+  deploy.sh again.
+- No certificate: in a Session Manager shell, `cd /opt/oncall-brain && sudo docker compose logs caddy | grep -i -E
+  'rateLimited|too many'`. A match means Let's Encrypt refused the shared sslip.io name. To add ZeroSSL as a second
+  CA, put `email you@your-domain` as the first line inside the top `{ }` block of `deploy/aws/Caddyfile` in the
+  repository, commit, and run deploy.sh: host.sh recreates Caddy whenever the Caddyfile changes. (Section D's fix,
+  editing the file on the box, is undone by the next deploy.)
+
 ## Settings that matter in public
 
 | Setting | Why |
