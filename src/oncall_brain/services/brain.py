@@ -219,7 +219,7 @@ def _owner(ctx: ToolContext, ans: _Answer, ents: list[dict], words: list[str], a
         when = {"given": f"at {_ts(r['at'])}", "latest alert": f"as of the latest alert in the graph ({_ts(r['at'])})",
                 "clock": "now"}[r["clock"]]
         be = "was" if past else "is"
-        duty = f"nobody {be} on call {when}"
+        duty = f"no on-call rotation is recorded {when}" if past else f"nobody is on call {when}"  # R36
         if r["on_call"]:
             ans.link(r["on_call"], "ON_CALL", team, r["on_call"], "person", r["on_call_name"])
             duty = f"{r['on_call_name']} ({r['handle']}) {be} on call {when}"
