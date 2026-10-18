@@ -17,11 +17,14 @@ a web inbox that is one window onto the same brain.
 Built for Graph Hacks (WeMakeDevs x FalkorDB), October 2026. All data is synthetic (seeded generator, fake names).
 
 <!-- DEMO VIDEO LINK: add after recording -->
-<!-- LIVE REPLAY: https://<user>.github.io/<repo>/ once GitHub Pages is enabled (Settings -> Pages -> GitHub Actions) -->
 
-**Try it without installing anything:** the web UI replays all three incidents from recorded runs (Claude Opus 5.5
+**Live:** https://13-127-186-74.sslip.io/ runs the real thing on one AWS box: FalkorDB, the three agents on Claude
+Opus 5.5 and the MCP server at `/mcp` (judges get the token with the submission). Press **Simulate an incident** and
+watch the agents work; the limits that keep a public demo affordable are in [docs/SECURITY.md](docs/SECURITY.md).
+
+**Try it without the server:** the web UI replays all three incidents from recorded runs (Claude Opus 5.5
 choosing every step) when no backend is reachable, so the GitHub Pages build of `web/` (`.github/workflows/pages.yml`)
-is a zero-setup look at the product. For live runs, use the quick start below; to use it from Claude Code, see
+is a zero-setup look at the product; `?offline=1` does the same on the live site. For live runs, use the quick start below; to use it from Claude Code, see
 [Use it from Claude Code](#use-it-from-claude-code-in-one-minute).
 
 ![The incident answer for "checkout p99 latency above 2s": a readout of 40 min from change to alert, 4 services hurt, 5 suspects tested and 2 people paged; Confirm cause / Wrong cause; the cause, a payments-gw config change by Sana Brandt 40 min before the alert, labelled "Very likely" with "4 of 5 suspects ruled out"; and the evidence path from the change through payments-gw and payments to checkout, with the time each hop slowed down](docs/img/answer.png)
