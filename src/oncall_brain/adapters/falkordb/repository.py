@@ -136,7 +136,8 @@ class FalkorGraphStore:
     def __init__(self, host: str = "localhost", port: int = 6379, username: str | None = None,
                  password: str | None = None, ssl: bool = False, url: str = "", lock_wait: float = 120):
         self.db = (FalkorDB.from_url(url) if url
-                   else FalkorDB(host=host, port=port, username=username, password=password, ssl=ssl))
+                   else FalkorDB(host=host, port=port, username=username, password=password, ssl=ssl,
+                                 ssl_check_hostname=ssl))  # the falkordb client defaults this to False
         self.lock_wait = lock_wait
 
     def tenant(self, tenant: str) -> FalkorRepository:

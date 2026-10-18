@@ -8,8 +8,9 @@ FALKORDB_VERSION=v4.22.0
 FALKORDB_SHA=c3ba3e0fdda567fbe436c985c46d8021d8582d41e514f63f4123e62758106100
 REDIS_VERSION=8.10.2
 REDIS_SHA=b9ffee226b5eecdba98a679260dad764b2a4ebd90dce4ad5ac9e9f3eef9c02b3
-WORK="${TMPDIR:-/tmp}/falkordb-build"
-mkdir -p "$FALKORDB_BIN" "$WORK"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/falkordb-build.XXXXXX")"  # private (mode 700): the checked file is the used file
+trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$FALKORDB_BIN"
 
 if [[ ! -f "$FALKORDB_BIN/falkordb.so" ]]; then
   curl -fsSL -o "$WORK/falkordb.so" \

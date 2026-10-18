@@ -191,6 +191,22 @@ def index(request: Request) -> RedirectResponse:
     return RedirectResponse(f"/web/{'?' + request.url.query if request.url.query else ''}")
 
 
+def _db_category(e: Exception) -> str:
+    """A fixed description of why FalkorDB did not answer, safe for an unauthenticated response."""
+    from redis.exceptions import AuthenticationError
+    from redis.exceptions import TimeoutError as RedisTimeout
+
+    if isinstance(e, AuthenticationError):
+        return "authentication failed (check FALKORDB_PASSWORD or FALKORDB_URL)"
+    if isinstance(e, RedisTimeout):
+        return "timed out"
+    if isinstance(e, RedisConnectionError):
+        return "connection refused or unreachable (is FalkorDB running? make db)"
+    if isinstance(e, ValueError):
+        return "FALKORDB_URL is invalid (percent-encode / ? # @ : in the password)"
+    return f"{type(e).__name__} (see the server log)"
+
+
 def health_body() -> dict[str, Any]:
     """ok only when the planner is configured AND FalkorDB answers a ping; a platform health check reads the
     status (503 when not ok), a human reads falkordb_error."""
@@ -198,8 +214,9 @@ def health_body() -> dict[str, Any]:
         up, db_error = bool(store().db.connection.ping()), None
         budget = daily_budget()
         used, hour = budget.used_today(), budget.used_this_hour()
-    except Exception as e:  # health itself must answer; keep the reason (a bad URL, a refused connection, auth)
-        up, db_error, used, hour = False, f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:160]}", None, None
+    except Exception as e:  # health must answer; say what kind of failure, log the details (they can hold the URL)
+        log.warning("health: FalkorDB check failed: %s", e)
+        up, db_error, used, hour = False, _db_category(e), None, None
     try:
         planner, ok = llm().name, True
     except HTTPException as e:
@@ -323,7 +340,8 @@ def resolve(repo: Repo, incident_id: str, body: ResolveBody) -> dict[str, Any]:
     out = respond_svc.resolve(repo, incident_id, body.change_id)
     update = repo.read("incident_update", incident_id=incident_id).rows  # re-posted with the confirmed cause
     out["update_text"] = update[0]["text"] if update else None
-    out["slack"] = slack.post(out["update_text"])
+    # Already resolved (data None): nothing changed, so nothing is re-posted; repeat calls cannot flood Slack.
+    out["slack"] = slack.post(out["update_text"]) if out.get("data") is not None else "nothing to post"
     return out
 
 
@@ -360,6 +378,10 @@ def call_tool(request: Request, repo: Repo, name: str,
         raise HTTPException(404, f"unknown tool {name!r}")
     if sessions.reserved((args or {}).get("user")):
         raise HTTPException(403, sessions.RESERVED)
+    user, token = str((args or {}).get("user") or ""), get_settings().mcp_bearer()
+    if user and token and not user.startswith("web-") and not _bearer_ok(request, token):
+        raise HTTPException(403, "only web-* conversation ids are open here; a named user (person:..., @handle) "
+                                 "needs Authorization: Bearer <the MCP_TOKEN>")
     # The UI only reads through this route (ask, graph tools). Writing facts (record_change, transfer_ownership,
     # retire_dependency...) would rewrite the shared demo company for every visitor after you, so on a deployment
     # (a token is set) a write needs it, the same one /mcp takes. Locally, with no token, everything stays open.

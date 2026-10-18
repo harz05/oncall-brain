@@ -63,7 +63,8 @@ def test_health_is_503_with_the_reason_when_falkordb_is_unreachable(env):
         body = r.json()
         assert r.status_code == 503, path
         assert body["ok"] is False and body["falkordb"] is False, path
-        assert body["falkordb_error"].startswith("ConnectionError"), path
+        assert body["falkordb_error"].startswith("connection refused or unreachable"), path
+        assert "127.0.0.1" not in body["falkordb_error"], path  # a category, never the client's text
 
 
 def test_a_held_tenant_lock_is_409_on_the_api_not_a_database_outage(env, monkeypatch):

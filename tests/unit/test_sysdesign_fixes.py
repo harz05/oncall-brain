@@ -84,4 +84,5 @@ def test_slack_text_cannot_ping_a_channel_or_hide_a_link(monkeypatch):
     monkeypatch.setattr(httpx, "post", lambda url, json, timeout: sent.update(json) or httpx.Response(
         200, request=httpx.Request("POST", url)))
     assert slack.post("cause: <!channel> see <https://evil|docs> & co") == "posted"
-    assert sent["text"] == "cause: &lt;!channel&gt; see &lt;https://evil|docs&gt; &amp; co"
+    # a code block: Slack neither links URLs nor resolves mentions in it
+    assert sent["text"] == "```\ncause: &lt;!channel&gt; see &lt;https://evil|docs&gt; &amp; co\n```"

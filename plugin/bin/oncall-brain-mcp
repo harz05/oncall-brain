@@ -13,7 +13,7 @@ if [[ ! -x "$PY" ]]; then
   echo "oncall-brain: no interpreter at $PY. Run 'make setup' in the On-call Brain checkout, point ONCALL_BRAIN_HOME at it, or set ONCALL_BRAIN_PYTHON." >&2
   exit 1
 fi
-if ! "$PY" -c 'import oncall_brain' 2>/dev/null; then
+if ! "$PY" -P -c 'import oncall_brain' 2>/dev/null; then  # -P: never import from the current directory
   echo "oncall-brain: $PY cannot import oncall_brain. Is it the venv 'make setup' created in $HOME_DIR? Set ONCALL_BRAIN_PYTHON or ONCALL_BRAIN_HOME." >&2
   exit 1
 fi

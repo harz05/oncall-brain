@@ -14,8 +14,10 @@ def post(text: str | None) -> str:
         return "off"
     if not text:
         return "nothing to post"
-    # Slack control sequences (<!channel>, <url|label>) can come from public input: escape as Slack documents.
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # The update quotes public input (alert names, change summaries, doc titles): escape Slack's control sequences
+    # (<!channel>, <url|label>) and post it as a code block, where Slack neither links URLs nor resolves mentions.
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("```", "'''")
+    text = f"```\n{text}\n```"
     try:
         httpx.post(url, json={"text": text}, timeout=5).raise_for_status()
         return "posted"

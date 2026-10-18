@@ -14,6 +14,10 @@ import httpx
 from oncall_brain.datagen import T1
 
 
+def clean(text: str) -> str:
+    """Graph text can come from public input: show control characters (ESC sequences) escaped, never run them."""
+    return "".join(ch if ch in "\n\t" or ch.isprintable() else repr(ch)[1:-1] for ch in text)
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--api", default="http://localhost:8000")
@@ -42,14 +46,15 @@ def main() -> int:
     o, rc = run["outcome"], run["outcome"]["root_cause"]
     print(f"\nIncident {run['incident_id']} · {len(run['steps'])} steps · {run.get('llm_tokens', 0):,} tokens")
     if rc:
-        print(f"Likely cause: {rc['summary']} ({rc['service']}) · {o['confidence']['label']}: {o['confidence']['why']}")
+        conf = o["confidence"]
+        print(clean(f"Likely cause: {rc['summary']} ({rc['service']}) · {conf['label']}: {conf['why']}"))
     else:
         print(f"No cause found: {o['confidence']['why']}")
     paged = ", ".join(f"{x['name']} ({x['team_name']})" for x in o["paged"])
     print(f"Paged: {paged or 'nobody'}")
     print(f"Ruled out: {len(o['refuted'])} · sources: {len(o['sources'])} · Slack: {run.get('slack')}")
     print("\n--- status update, as posted ---")
-    print(o["update_text"] or "(none)")
+    print(clean(o["update_text"] or "(none)"))
     return 0 if rc else 1
 
 
