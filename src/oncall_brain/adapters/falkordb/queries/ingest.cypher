@@ -20,14 +20,16 @@ MERGE (s:Service {id: r.id})
 SET s.name = r.name, s.tier = r.tier
 WITH s, r
 MATCH (t:Team {id: r.team})
-MERGE (t)-[o:OWNS]->(s)
-SET o.valid_from = coalesce(o.valid_from, r.since, 0)
+// The date is part of the pattern, as in ingest_depends_on: FalkorDB checks the MANDATORY valid_from constraint the
+// moment an edge is made, before any SET (even ON CREATE SET) runs.
+MERGE (t)-[o:OWNS {valid_from: coalesce(r.since, 0)}]->(s)
 
 // name: ingest_depends_on
 // purpose: Upsert caller -> callee dependencies. valid_from / valid_to make the dependency map temporal.
 UNWIND $rows AS r
 MATCH (a:Service {id: r.src}), (b:Service {id: r.dst})
-MERGE (a)-[d:DEPENDS_ON {valid_from: r.valid_from}]->(b)
+// The key is the edge's identity (UNIQUE): in the pattern, since FalkorDB checks constraints as the edge is made.
+MERGE (a)-[d:DEPENDS_ON {key: a.id + '>' + b.id + '@' + toString(r.valid_from), valid_from: r.valid_from}]->(b)
 SET d.valid_to = r.valid_to
 
 // name: ingest_on_call
@@ -181,3 +183,9 @@ SET m.version = $version, m.seed = $seed
 // purpose: Read the data fingerprint and generator seed a graph was seeded with.
 MATCH (m:Meta {id: 'meta'})
 RETURN m.version AS version, m.seed AS seed
+
+// name: backfill_dependency_keys
+// purpose: Give every DEPENDS_ON edge from before the dependency key its key (caller>callee@valid_from), so the UNIQUE and MANDATORY key constraints can be built on an older graph (ensure_schema runs it only when they are missing).
+MATCH (a:Service)-[d:DEPENDS_ON]->(b:Service)
+WHERE d.key IS NULL
+SET d.key = a.id + '>' + b.id + '@' + toString(d.valid_from)

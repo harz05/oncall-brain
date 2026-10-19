@@ -35,6 +35,9 @@ services:
       ALLOWED_HOSTS: ${DOMAIN:?set DOMAIN in .env (see deploy/aws/env.example)}
       MCP_TOKEN: ${MCP_TOKEN:?set MCP_TOKEN in .env (user-data.sh generates one)}
       FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?set FALKORDB_PASSWORD in .env (user-data.sh generates one)}
+      # FalkorDB Cloud (docs/DEPLOY.md section F): redis://falkordb:<password>@<host>:<port>. Set, the graphs live
+      # there and the falkordb service below sits idle as the fallback; unset, the app uses that service.
+      FALKORDB_URL: ${FALKORDB_URL:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}  # with LLM_API_KEY empty the deterministic planner runs
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
@@ -50,7 +53,7 @@ services:
       LLM_HOURLY_TOKEN_CAP: ${LLM_HOURLY_TOKEN_CAP:-500000}  # no single hour spends the whole day
       LOCK_WAIT_SECONDS: ${LOCK_WAIT_SECONDS:-5}  # a busy demo company answers "busy" at once instead of hanging
       LLM_RUN_TOKEN_CAP: ${LLM_RUN_TOKEN_CAP:-150000}  # one run; a normal one is 60-100k
-      MAX_TENANTS: ${MAX_TENANTS:-20}  # room for judges' own copies (?tenant=<name>), a few MB each
+      MAX_TENANTS: ${MAX_TENANTS:-8}  # judges' own copies (?tenant=<name>): two ~4 MB graphs each, 8 fit Cloud Free
       MAX_BODY_BYTES: ${MAX_BODY_BYTES:-65536}
     logging: *logging
 

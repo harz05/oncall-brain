@@ -38,7 +38,7 @@ const TOOL_WORD = { open_incident: 'opening the incident', correlate_alerts: 'th
   propose_hypotheses: 'the change search', check_hypothesis: 'the suspect test', conclude: 'the final ranking',
   who_knows: 'who knows', warn_owners: 'heads-ups', post_update: 'the status update', incident_board: 'the incident board' };
 const TOOL_RE = new RegExp(`\\b(${Object.keys(TOOL_WORD).filter((k) => k.includes('_')).join('|')})\\b`, 'g');
-const PLURAL = { query: 'queries', dependency: 'dependencies', person: 'people', company: 'companies' };
+const PLURAL = { query: 'queries', dependency: 'dependencies', person: 'people', company: 'companies', property: 'properties' };
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -456,7 +456,7 @@ function renderHealth(rows = state.loaded && !state.loadError ? inboxItems() : [
   const times = rows.length > 0; // the list shows times
   const zone = !times || state.current || state.zoneShown ? '' : ` Times are in ${ZONE}.`;
   set('health', OFFLINE ? [`A recorded replay of real runs; ${plannerLabel()} chose the steps. There is no database behind this page.`, zone]
-    : !hl ? '' : [hl.falkordb ? 'FalkorDB is connected. ' : h('span', { class: 'down' }, 'FalkorDB is not reachable. '),
+    : !hl ? '' : [hl.falkordb ? `${hl.database || 'FalkorDB'} is connected. ` : h('span', { class: 'down' }, 'FalkorDB is not reachable. '),
       `${plannerSentence()} Company: ${state.loadError ? 'none loaded' : companyLabel()}.`, zone, state.stale ? ' The list could not refresh, so it may be out of date.' : '']);
 }
 
@@ -895,6 +895,15 @@ function alsoWhy(r, rc) {
   return plain(r.reason).replace(/^outranked:\s*/, '');
 }
 
+// Bi-temporal memory (learned_late): facts the investigation used that the graph learned after the incident opened,
+// each with when it was true and when the graph learned it (a change CI/CD reported late, say).
+function lateRow(cur, f) {
+  const xs = !isLive(cur) && f.o?.learned_late || [];
+  if (!xs.length) return null;
+  return h('ul', { class: 'ruled' }, xs.map((x) => h('li', {}, h('b', {}, short(x.id)),
+    h('span', { class: 'why-not' }, `${x.kind === 'change' ? 'Happened' : 'Seen'} ${dmon(x.at)} ${hhmm(x.at)}; the graph learned of it ${dmon(x.recorded_at)} ${hhmm(x.recorded_at)}, after this incident opened.`))));
+}
+
 function sourcesRow(cur, f) {
   if (!f.sources.length) return isLive(cur) ? skel('w60') : null;
   return h('ul', { class: 'sources' }, f.sources.map((s) => h('li', {}, h('span', {}, kindWord(s.kind)),
@@ -905,7 +914,8 @@ function renderDispatch(cur, f) {
   const live = isLive(cur);
   const rows = [['Cause', causeRow(cur, f)], ['Where', whereRow(cur, f)], ['Since', sinceRow(cur, f)], ['Who', whoRow(cur, f)],
     ['Do this', doRow(cur, f)], ['Also possible', alsoRow(cur, f, 'outranked')], ['Also contributing', alsoRow(cur, f, 'co')],
-    [live ? 'Suspects' : 'Ruled out', ruledRow(cur, f)], ['Without the graph', nographRow(cur, f)], ['Sources', sourcesRow(cur, f)]]
+    [live ? 'Suspects' : 'Ruled out', ruledRow(cur, f)], ['Learned late', lateRow(cur, f)], ['Without the graph', nographRow(cur, f)],
+    ['Sources', sourcesRow(cur, f)]]
     .filter(([, v]) => v != null && !(Array.isArray(v) && !v.flat(Infinity).filter(Boolean).length));
   set('dispatch', rows.map(([k, v], i) => h('div', { style: `--i:${i + 1}` }, h('dt', {}, k), h('dd', {}, v))));
   return rows.length;
@@ -1046,14 +1056,60 @@ function fillCypher(details) {
   }
 }
 
+// FalkorDB's own account of a query, from its reply: time inside the database (the rest of q.ms is the network and
+// the client), whether the plan came from its cache, what a write changed. Recorded runs from before Oct 19 lack it.
+const WROTE = { nodes_created: ['node', ''], relationships_created: ['edge', ''], properties_set: ['property', ''],
+  nodes_deleted: ['node', ' deleted'], relationships_deleted: ['edge', ' deleted'] };
+function falkorStats(q) {
+  if (q.db_ms == null) return null;
+  const wrote = Object.entries(q.wrote || {}).map(([k, v]) => plural(v, (WROTE[k] || [k, ''])[0]) + (WROTE[k] || [k, ''])[1]);
+  return h('span', { class: 'fdb', title: 'From FalkorDB\'s reply: its own execution time, the query-plan cache, and what the write changed' },
+    `${q.db_ms} ms in FalkorDB${q.cached ? ', plan cached' : ''}${wrote.length ? `, wrote ${wrote.join(', ')}` : ''}`);
+}
+
+// FalkorDB's own plan for the query with this step's parameters (the query_plan tool): GRAPH.PROFILE for a read, run
+// again just now, with rows and time per operation; GRAPH.EXPLAIN for a write, which is planned and not run. Plans are
+// kept by query and parameters, so the trace re-rendering (every step of a live run) shows them again.
+const PLANS = new Map();
+const planKey = (q) => `${q.name} ${JSON.stringify(q.params)}`;
+function planBlock(r, name) {
+  return h('div', { class: 'plan' },
+    h('p', { class: 'small muted' }, r.ran ? 'GRAPH.PROFILE, run when you pressed Plan: rows and time per operation inside FalkorDB, read from the bottom up.'
+      : 'GRAPH.EXPLAIN: this query writes, so FalkorDB planned it without running it. Read from the bottom up.'),
+    h('pre', { tabindex: 0, 'aria-label': `${name} plan` }, h('code', {}, r.plan.join('\n'))));
+}
+function planBtn(q, key) {
+  if (OFFLINE || q.params == null || !state.tenant) return null;
+  return h('button', { class: 'btn small', type: 'button', 'data-key': `plan-${key}`, 'aria-label': `Show FalkorDB's plan for ${q.name}`,
+    onclick: async (e) => {
+      e.preventDefault();
+      const btn = e.currentTarget;
+      if (btn.getAttribute('aria-disabled') === 'true') return; // aria-disabled, not disabled: focus stays on the button
+      btn.setAttribute('aria-disabled', 'true');
+      try {
+        const r = await api('POST', `/api/tenants/${encodeURIComponent(state.tenant)}/tools/query_plan`, { query: q.name, params: q.params });
+        PLANS.set(planKey(q), r.data);
+        const block = [...document.querySelectorAll('.q[data-plan]')].find((b) => b.dataset.plan === planKey(q)); // this query's block, re-rendered or not
+        block?.querySelector('.plan')?.remove();
+        block?.append(planBlock(r.data, q.name));
+        announce(`FalkorDB's plan for ${q.name} is shown below the parameters.`);
+      } catch (err) {
+        toast(`FalkorDB did not return a plan: ${err.message}`, true);
+      } finally {
+        document.querySelector(`[data-key="plan-${key}"]`)?.removeAttribute('aria-disabled');
+      }
+    } }, 'Plan');
+}
+
 function queryBlock(q, key) {
   const cypher = knownCypher(q), n = rowCount(q);
-  return h('div', { class: 'q' },
+  return h('div', { class: 'q', 'data-plan': q.params == null ? null : planKey(q) },
     h('div', { class: 'qhead' }, h('b', {}, q.name),
       h('span', { class: 'rw', title: q.readonly ? 'GRAPH.RO_QUERY' : 'GRAPH.QUERY (writes)' }, q.readonly ? 'read' : 'write'),
       h('span', {}, `${plural(n, 'row')}, ${q.ms} ms`),
+      falkorStats(q),
       q.name === 'incident_board' ? h('span', {}, 'the agent re-reads the shared board') : null,
-      copyBtn(() => knownCypher(q), 'Copy', `Copy the ${q.name} query`, `copy-${key}`)),
+      copyBtn(() => knownCypher(q), 'Copy', `Copy the ${q.name} query`, `copy-${key}`), planBtn(q, key)),
     // focusable, so a keyboard can scroll a wide block sideways (Safari does not make scrollers focusable itself)
     h('pre', { tabindex: 0, 'aria-label': `${q.name} Cypher` },
       h('code', { 'data-query': cypher == null ? q.name : null, 'data-sha': q.sha }, cypher ?? 'Loading the Cypher…')),
@@ -1061,7 +1117,8 @@ function queryBlock(q, key) {
     h('pre', { tabindex: 0, 'aria-label': `${q.name} parameters` }, h('code', {},
       q.params == null ? 'params not stored (too long to keep with the step)' : `params ${JSON.stringify(q.params)}`)),
     q.rows?.length ? h('details', { 'data-key': `rows-${key}` }, h('summary', {}, `Rows (${n})`),
-      h('pre', { tabindex: 0, 'aria-label': `${q.name} rows` }, h('code', {}, JSON.stringify(q.rows, null, 1)))) : null);
+      h('pre', { tabindex: 0, 'aria-label': `${q.name} rows` }, h('code', {}, JSON.stringify(q.rows, null, 1)))) : null,
+    PLANS.has(planKey(q)) ? planBlock(PLANS.get(planKey(q)), q.name) : null);
 }
 
 function cypherList(queries, key) {
@@ -1619,6 +1676,7 @@ async function resolve(cur, change) {
 }
 
 async function doReset() {
+  PLANS.clear(); // a reset replaces the graph: no plan from before it is current
   if (state.running) return;
   try {
     const r = await api('POST', `${T()}/reset`);

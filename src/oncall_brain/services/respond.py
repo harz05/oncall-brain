@@ -101,7 +101,7 @@ def without_memory(store: GraphStore, tenant: str, alert_id: str, llm: LLMProvid
     since seeding: the fair way to show what memory saved (same incident, same planner, memory removed). Its tokens
     count against `daily`; it takes no run slot of its own, being the second half of the run that asked for it."""
     scratch = f"{tenant[:30]}_nm{secrets.token_hex(3)}"  # per run: two act-2 replays never share (or drop) one copy
-    if not store.clone_pristine(tenant, scratch):
+    if not store.clone_pristine(tenant, scratch, ttl=900):  # a replay takes 2-3 min; a killed one cannot keep a slot
         return None
     try:
         o = respond(store.tenant(scratch), alert_id, llm, daily=daily)["outcome"]
@@ -172,6 +172,7 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
     update = (repo.read("incident_update", incident_id=incident_id).rows or [{"text": None}])[0]["text"]
     posted = _data(trace, "post_update")
     co = repo.read("co_causes", incident_id=incident_id).rows
+    late = (repo.read("learned_late", incident_id=incident_id, window=WINDOW).rows or [{"facts": []}])[0]["facts"]
     return {
         "root_cause": cause,
         "confidence": confidence(cause, len(alerting), len(co)),
@@ -195,4 +196,5 @@ def outcome(repo: GraphRepository, incident_id: str, trace: list[TraceStep]) -> 
         "runbook": posted[0]["runbook"] if posted else None,
         "expert": posted[0]["expert"] if posted else None,
         "storm": storm,
+        "learned_late": sorted(late, key=lambda f: f["recorded_at"]),
     }

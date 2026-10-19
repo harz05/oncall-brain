@@ -339,6 +339,9 @@ def test_add_dependency_can_move_a_live_edge_start_earlier(store, tenant):
     out = call("add_dependency", ctx, {"caller": "svc:search", "callee": "svc:cart", "at": 8500})
     assert out.data["valid_from"] == 8500
     assert call("dependency_path", ctx, {"from_service": "svc:search", "to_service": "svc:cart", "at": 8600}).data
+    keys = store.tenant(tenant)._graph.ro_query("MATCH (:Service {id: 'svc:search'})-[d:DEPENDS_ON]->"
+                                                "(:Service {id: 'svc:cart'}) RETURN d.key").result_set
+    assert keys == [["svc:search>svc:cart@8500"]]  # the key moved with the start
 
 
 def test_resolving_over_any_surface_reposts_the_update(store, tenant):
@@ -376,3 +379,108 @@ def test_reads_without_an_incident_do_not_wait_for_the_tenant_lock(store, tenant
     taken.clear()
     run_tool(repo, "who_knows", {"service": "svc:payments-gw", "incident_id": run["incident_id"]})
     assert taken == [1]  # writes CONSULTED on the incident, so it locks
+
+
+def test_a_recheck_that_flips_the_verdict_leaves_one_edge(store, tenant):
+    """The Evidence node of a hypothesis is reused by every re-check: the earlier verdict's edge goes, so the board
+    never shows one check both supporting and refuting."""
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[1], MockProvider())
+    hyp = repo._graph.ro_query("MATCH (:Incident {id: $i})-[:HAS_HYPOTHESIS]->(h:Hypothesis) RETURN h.id LIMIT 1",
+                               {"i": run["incident_id"]}).result_set[0][0]
+    ev = "ev:" + hyp.removeprefix("hyp:")
+    for verdict in ("supports", "refutes", "supports"):
+        repo.write("record_evidence", hypothesis_id=hyp, evidence_id=ev, verdict=verdict, reason="re-check", tag="t",
+                   path=[], at=0, explained=[], onset=None, gaps=[], red_before=None)
+        edges = repo._graph.ro_query("MATCH (:Evidence {id: $e})-[r]->(:Hypothesis {id: $h}) RETURN type(r)",
+                                     {"e": ev, "h": hyp}).result_set
+        assert edges == [[verdict.upper()]], (verdict, edges)
+
+
+def test_list_incidents_finds_the_ids_an_outside_agent_needs(store, tenant):
+    from oncall_brain.agents.registry import ToolContext, call
+
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    before = call("list_incidents", ctx, {}).data
+    assert before[0]["id"] == ACTS[1] and not before[0]["incident"]
+    run = respond(store.tenant(tenant), ACTS[1], MockProvider())
+    after = call("list_incidents", ctx, {"status": "open"}).data
+    assert [r["incident"] for r in after] == [run["incident_id"]] and after[0]["has_cause"]
+
+
+def test_a_memory_ablation_clone_expires_even_if_its_run_dies(store, tenant):
+    seed(store, tenant)
+    into = f"{tenant[:30]}_nmtest"
+    assert store.clone_pristine(tenant, into, ttl=60)
+    try:
+        assert 0 < store.db.connection.ttl(f"tenant_{into}") <= 60
+    finally:
+        store.drop(into)
+
+
+def test_a_change_reported_after_the_incident_opened_is_used_and_marked_learned_late(store, tenant):
+    """Bi-temporal memory: valid time (when the change happened, before the alert) and transaction time (when the
+    graph learned of it, after the incident opened). The agents use the late change, and the outcome says it came in
+    late instead of the graph quietly rewriting what was known; facts seeded before the incident are not listed."""
+    import time as clock
+
+    from oncall_brain.agents.registry import ToolContext, call
+    from oncall_brain.datagen import T1
+    from oncall_brain.services.tools import incident_id_for
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    repo.write("open_incident", alert_id=ACTS[1], incident_id=incident_id_for(ACTS[1]))
+    clock.sleep(0.05)
+    call("record_change", ToolContext(repo), {"id": "chg:late-ci-1", "service": "svc:payments", "kind": "deploy",
+                                              "summary": "payments v7.3 (reported by CI/CD after the fact)",
+                                              "at": T1 - 1200})
+    run = respond(repo, ACTS[1], MockProvider())
+    late = run["outcome"]["learned_late"]
+    assert [f["id"] for f in late] == ["chg:late-ci-1"], late
+    assert late[0]["at"] == T1 - 1200 and late[0]["recorded_at"] > 0
+
+
+def test_re_adding_a_retired_dependency_reopens_it_and_a_colliding_move_is_refused_in_words(store, tenant):
+    """The dependency key is unique, and a retired record keeps its key: re-adding at its own start reopens it (also
+    a retire and a re-add in one second), and moving a live edge's start onto a retired record's start is refused as
+    a ValueError (a 4xx), never a database error (503)."""
+    from oncall_brain.agents.registry import ToolContext, call
+    from oncall_brain.datagen import EPOCH
+
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    retired = {"caller": "svc:checkout", "callee": "svc:legacy-billing"}
+    assert call("add_dependency", ctx, {**retired, "at": EPOCH}).data["valid_from"] == EPOCH  # seeded record, reopened
+    pair = {"caller": "svc:search", "callee": "svc:cart"}
+    call("add_dependency", ctx, {**pair, "at": 5000})
+    call("retire_dependency", ctx, {**pair, "at": 5000})
+    assert call("add_dependency", ctx, {**pair, "at": 5000}).data["valid_from"] == 5000  # same second: reopened
+    call("retire_dependency", ctx, {**pair, "at": 6000})
+    call("add_dependency", ctx, {**pair, "at": 7000})
+    with pytest.raises(ValueError, match="a retired record of it already starts at 5000"):
+        call("add_dependency", ctx, {**pair, "at": 5000})
+    edges = store.tenant(tenant)._graph.ro_query("MATCH (:Service {id: 'svc:search'})-[d:DEPENDS_ON]->(:Service "
+                                                 "{id: 'svc:cart'}) RETURN d.key, d.valid_to ORDER BY d.key").result_set
+    assert edges == [["svc:search>svc:cart@5000", 6000], ["svc:search>svc:cart@7000", None]]
+
+
+def test_learned_late_lists_what_the_checks_read_not_later_anomalies_on_callers(store, tenant):
+    """An anomaly recorded later on an impacted caller, two days after the alert, is not something the checks read:
+    learned_late leaves it out. One recorded late on the cause's service inside the alert window is listed."""
+    from oncall_brain.agents.registry import ToolContext, call
+    from oncall_brain.datagen import DAY, T1
+    from oncall_brain.services.respond import outcome
+
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    run = respond(repo, ACTS[1], MockProvider())
+    ctx = ToolContext(repo)
+    call("record_anomaly", ctx, {"service": "svc:api-gateway", "kind": "errors", "summary": "later",
+                                 "at": T1 + 2 * DAY})
+    call("record_anomaly", ctx, {"service": "svc:payments-gw", "kind": "latency", "summary": "late report",
+                                 "at": T1 - 300})
+    late = outcome(repo, run["incident_id"], [])["learned_late"]
+    assert [f["id"] for f in late] == [f"anom:payments-gw-latency-{T1 - 300}"], late

@@ -1,23 +1,12 @@
 // name: recall_similar
 // purpose: Episodic recall by structure, not text: resolved incidents whose root-cause service is on the alerting service's live dependency path. Same symptom scores higher.
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o:Service)
+// One walk from the alerting service (oncall.live_reach, see path_suspects), then each past cause looked up in it.
+WITH i, a, o, oncall.live_reach(o, a.at, 6) AS reach
 MATCH (past:Incident {status: 'resolved'})-[:CAUSED_BY]->(c:Change)-[:CHANGED]->(s:Service)
 WHERE past.opened_at < a.at AND past.id <> i.id
-WITH o, s, a.at AS alert_at, a, past, c
-CALL {
-  // Live hops o -> s (same block as path_suspects, which explains it).
-  WITH o, s, alert_at
-  WITH o, s, alert_at, shortestPath((o)-[:DEPENDS_ON*0..6]->(s)) AS sp
-  WHERE sp IS NOT NULL
-  WITH o, s, alert_at, sp,
-       all(r IN relationships(sp) WHERE r.valid_from <= alert_at AND (r.valid_to IS NULL OR r.valid_to > alert_at)) AS live
-  OPTIONAL MATCH p = (o)-[e:DEPENDS_ON*0..6]->(s)
-  WHERE NOT live AND e.valid_from <= alert_at AND (e.valid_to IS NULL OR e.valid_to > alert_at)
-  WITH live, sp, min(length(p)) AS shortest_live
-  WITH CASE WHEN live THEN length(sp) ELSE shortest_live END AS hops
-  WHERE hops IS NOT NULL
-  RETURN hops
-}
+WITH o, s, a, past, c, reach[s.id] AS hops
+WHERE hops IS NOT NULL
 OPTIONAL MATCH (past)-[:FIXED_WITH]->(rb:Runbook)
 RETURN past.id AS incident, past.title AS title, past.symptom AS symptom, s.id AS cause_service,
        c.kind AS cause_kind, c.id AS cause_change, hops, rb.id AS runbook, rb.title AS runbook_title,
@@ -64,30 +53,20 @@ ORDER BY toFloat(successes) / uses DESC, at DESC
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)-[:FIRED_ON]->(o0:Service)
 OPTIONAL MATCH (i)-[:CORRELATED_WITH]->(:Alert)-[:FIRED_ON]->(cs:Service)
 WITH o0, a.at AS alert_at, collect(DISTINCT cs) AS folded
-WITH o0, alert_at, [o0] + folded AS origins
 MATCH (c:Change)
 WHERE c.at >= alert_at - $window AND c.at <= alert_at
 MATCH (c)-[:CHANGED]->(s:Service)
-WITH o0, origins, s, alert_at, collect(c) AS changes
-UNWIND origins AS o
-WITH DISTINCT o0, o, s, alert_at, changes
-CALL {
-  // Live hops o -> s: the fewest DEPENDS_ON hops (0..6) over edges valid at alert_at, without listing paths.
-  // shortestPath ignores validity, so it is only a lower bound: kept when every edge on it is live at alert_at.
-  // When it crosses a retired (or not yet live) edge, the traversal with the validity test on each hop (FalkorDB
-  // checks a WHERE on the variable-length edge `e` per hop, inside the traversal) settles it, for this pair only.
-  WITH o, s, alert_at
-  WITH o, s, alert_at, shortestPath((o)-[:DEPENDS_ON*0..6]->(s)) AS sp
-  WHERE sp IS NOT NULL
-  WITH o, s, alert_at, sp,
-       all(r IN relationships(sp) WHERE r.valid_from <= alert_at AND (r.valid_to IS NULL OR r.valid_to > alert_at)) AS live
-  OPTIONAL MATCH p = (o)-[e:DEPENDS_ON*0..6]->(s)
-  WHERE NOT live AND e.valid_from <= alert_at AND (e.valid_to IS NULL OR e.valid_to > alert_at)
-  WITH live, sp, min(length(p)) AS shortest_live
-  WITH CASE WHEN live THEN length(sp) ELSE shortest_live END AS hops
-  WHERE hops IS NOT NULL
-  RETURN hops
-}
+WITH o0, folded, alert_at, s, collect(c) AS changes
+WITH o0, folded, alert_at, collect({s: s, changes: changes}) AS hits
+// One walk per alerting service (the oncall.live_reach UDF): the fewest DEPENDS_ON hops (0..6), over edges valid at
+// alert_at, to each service that changed in the window, a breadth-first walk inside FalkorDB that drops a dead edge
+// as it meets it and stops once it has found them all.
+WITH o0, hits, [o IN [o0] + folded | {o: o, reach: oncall.live_reach(o, alert_at, 6, [h IN hits | h.s.id])}] AS walks
+UNWIND walks AS w
+UNWIND hits AS h
+// Live hops o -> s, looked up; null: s is not reachable live from o.
+WITH o0, w.o AS o, h.s AS s, h.changes AS changes, w.reach[h.s.id] AS hops
+WHERE hops IS NOT NULL
 // A change counts once: at its distance from the alert that opened the incident when that alert reaches it (so a
 // storm never reorders the origin's own suspects), else from the nearest folded alert.
 WITH s, changes, min(CASE WHEN o = o0 THEN hops END) AS own, min(hops) AS nearest
@@ -195,6 +174,13 @@ WITH h, e, h.status AS before
 SET h.status = CASE WHEN h.status = 'confirmed' THEN h.status WHEN $verdict = 'supports' THEN 'supported'
                     WHEN $verdict = 'refutes' THEN 'refuted' ELSE 'inconclusive' END,
     h.explained = $explained, h.onset = $onset, h.gaps = $gaps, h.red_before = $red_before
+// A re-check reuses the Evidence node (ev:<hypothesis>): drop its edge from an earlier, different verdict, so the
+// node never says SUPPORTS and REFUTES at once.
+WITH h, e, before
+OPTIONAL MATCH (e)-[old:SUPPORTS|REFUTES]->(h)
+WHERE type(old) <> CASE $verdict WHEN 'supports' THEN 'SUPPORTS' WHEN 'refutes' THEN 'REFUTES' ELSE '' END
+DELETE old
+WITH DISTINCT h, e, before
 FOREACH (_ IN CASE WHEN $verdict = 'supports' THEN [1] ELSE [] END | MERGE (e)-[:SUPPORTS]->(h))
 FOREACH (_ IN CASE WHEN $verdict = 'refutes' THEN [1] ELSE [] END | MERGE (e)-[:REFUTES]->(h))
 WITH h, before

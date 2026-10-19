@@ -36,6 +36,10 @@ INTROS = {  # file -> one-paragraph intro; files not listed still get a section
     "knowledge.cypher": "**Knowledge (company brain).** Who knows a service and where a change came from, answered "
     "from ownership, authorship, paging and source edges.",
     "api.cypher": "**API.** Read models for the HTTP API and the UI.",
+    "coordination.cypher": "**Coordination.** What the processes share, as nodes in the `oncall_brain_coord` graph: "
+    "the per-tenant run lock and Slack's replay guard are `Lease` nodes, and a UNIQUE constraint on `Lease.key` lets "
+    "exactly one concurrent claimer create one; the throttles and the LLM token budget are `Counter` nodes. So the "
+    "product needs graph commands plus RENAME and EXPIRE, never SET, INCR or EVAL (FalkorDB Cloud refuses those).",
     "reference.cypher": "**Reference implementations (tests and bench only).** The earlier, simpler forms of the hot "
     "traversals: they enumerate every path and then filter. `tests/integration/test_query_equivalence.py` checks the "
     "shipped forms return exactly the same rows, and `scripts/bench.py` times both (docs/PERF.md).",

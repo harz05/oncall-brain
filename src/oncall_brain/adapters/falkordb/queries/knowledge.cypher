@@ -208,3 +208,16 @@ RETURN i.id AS id, i.name AS name, i.goal AS goal, i.status AS status, i.due AS 
        team.id AS team, team.name AS team_name, lead.id AS lead, lead.name AS lead_name, tickets,
        [x IN docs0 WHERE x.id IS NOT NULL] AS docs
 ORDER BY name
+
+// name: resolve_service
+// purpose: Resolve a service name against the graph before a tool runs or a question is answered: the service whose id or name is $service (with or without `svc:`), else up to three that share a word with it or spell close to it (FLEX jaroWinkler), so "payment-service" is answered with "no such service; closest: payments, payments-gw" instead of "0 services depend on it".
+MATCH (s:Service)
+// A typo shares no word but spells close: FalkorDB's FLEX library (udf/flex.js) scores it with Jaro-Winkler, so
+// "kafak" is answered "did you mean svc:kafka?" (a suggestion only: an inexact name is never resolved silently).
+WITH s, (s.id = $service OR s.id = 'svc:' + $service OR toLower(s.name) = toLower($service)) AS exact,
+     size([t IN $tokens WHERE s.name CONTAINS t]) AS shared,
+     flex.text.jaroWinkler(toLower(replace($service, 'svc:', '')), toLower(s.name)) AS sim
+WHERE exact OR shared > 0 OR sim >= 0.85
+RETURN s.id AS id, exact
+ORDER BY exact DESC, shared DESC, sim DESC, size(s.name), id
+LIMIT 3

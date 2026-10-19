@@ -38,6 +38,8 @@ class SecurityHeaders:
         extra = {k: v for k, v in HEADERS.items() if not (k == "content-security-policy" and scope["path"] in NO_CSP)}
         if scope.get("scheme") == "https":
             extra["strict-transport-security"] = "max-age=31536000"
+        if scope["path"].startswith("/web/"):  # the UI has no build step or hashed names: revalidate on every load
+            extra["cache-control"] = "no-cache"  # (a 304 when unchanged), so a redeploy never mixes old JS with new
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":

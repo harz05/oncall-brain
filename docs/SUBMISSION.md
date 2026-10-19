@@ -1,7 +1,32 @@
 # Submission draft: On-call Brain
 
-*A draft for Harsh to edit before submitting (written 2026-10-16). Everything here is true of the repository as it
+*A draft for Harsh to edit before submitting (written 2026-10-16, updated 2026-10-19). Everything here is true of the repository as it
 is; the angle-bracket placeholders in the links section are the only blanks.*
+
+## What's new since the first submission (Oct 19, paste-ready)
+
+The live site's graphs now run on **FalkorDB Cloud** (ap-south-1, 1.2 ms median round trip from the app), and the
+product needs nothing from the database but FalkorDB itself:
+
+- **Coordination in the graph.** Cloud users get no `SET`, `INCR` or `EVAL`, so run locks, throttles and the LLM budget
+  became nodes in a coordination graph: a UNIQUE constraint is the mutex (16 racing clients, one winner), counters
+  update atomically, and the graph repairs itself after a Cloud restart.
+- **FalkorDB user-defined functions.** The blast radius (`oncall.live_upstream`) and the live-hop distance to each
+  suspect (`oncall.live_reach`) are breadth-first walks inside FalkorDB that drop dead dependencies as they meet them,
+  checked row for row against the plain Cypher and 2 to 4 times faster at 2,500 services. FalkorDB's **FLEX** library
+  (`flex.text.jaroWinkler`) makes service names typo-tolerant: `kafak` gets "did you mean svc:kafka?".
+- **The database enforces the model.** UNIQUE ids on every label, MANDATORY `valid_from` on dependencies and owners, and a
+  UNIQUE dependency key, so racing writers record a dependency once.
+- **More algorithms as tools.** `independent_routes` runs `algo.maxFlow` on the live dependencies ("checkout reaches
+  payments-gw one way only, through payments"), next to PageRank and WCC.
+- **FalkorDB in the trace.** Every query shows FalkorDB's own execution time and plan cache, and a Plan button shows its
+  `GRAPH.PROFILE`; every query's plan is checked by a test that fails on an unlisted label scan.
+- **Bi-temporal memory.** Facts carry when they were true and when the graph learned them, so a change CI/CD reports
+  after the incident opened is used and marked as learned late.
+- **Honest answers about names.** An unknown service is "not in the graph", never "nothing depends on it".
+
+docs/FALKORDB_NOTES.md maps each of these to the FalkorDB behaviour or upstream issue behind it. 319 tests, the eval
+still 186/200.
 
 ## Project name
 
@@ -24,7 +49,7 @@ that was live at alert time and the anomalies on it, every refutation says why, 
 that produced it. When a human confirms the cause, the graph remembers the fix, and the next similar incident is solved
 in half the steps.
 
-It is an MCP server first: 30 tools generated from one registry, a Claude Code plugin with three skills that works
+It is an MCP server first: 33 tools generated from one registry, a Claude Code plugin with three skills that works
 from a checkout or against a deployed instance, a webhook-in and Slack-out headless flow, and a web inbox that is one
 window onto the same brain. A deterministic planner runs everything without an LLM key. With Claude choosing every step
 instead, the full three-act story finds the right cause with zero fallbacks.
@@ -40,7 +65,7 @@ it was at alert time, and comms warns the top-ranked teams nobody paged.
 **Track 02, agent memory and coordination.** Three roles share one `Incident` board in the graph and hand off through
 it. Memory is episodic (incidents and what fixed them), semantic (ownership with `valid_from` and `valid_to`, superseded
 decisions flagged), procedural (runbooks learned from confirmed fixes) and conversational (per-engineer sessions where
-a follow-up can say "it"). One graph per tenant, a per-tenant lock for concurrent responders, and a measured ablation:
+a follow-up can say "it"). One graph per tenant, a per-tenant lease for concurrent responders (a node in a FalkorDB coordination graph, exclusive by a UNIQUE constraint), and a measured ablation:
 with memory, act 2 takes 3 investigator calls instead of 6.
 
 **Track 03, company brain.** Docs, tickets, chat, initiatives, people and services live in the same graph as the
@@ -51,7 +76,7 @@ an ownership transfer flips the answer at once, and "who owned it at the time of
 ## Would it work without FalkorDB?
 
 No. Suspects, refutations, blast radius, storm splitting, memory recall, ownership at a point in time and every `ask`
-answer are Cypher queries or graph algorithms (104 named statements in `.cypher` files, listed in `docs/QUERIES.md`),
+answer are Cypher queries or graph algorithms (120 named statements in `.cypher` files, listed in `docs/QUERIES.md`, two of them FalkorDB user-defined functions),
 and the agents keep no state outside the graph.
 
 ## Try it

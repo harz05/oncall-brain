@@ -91,3 +91,45 @@ WHERE all(r IN relationships(p) WHERE r.valid_from <= $at AND (r.valid_to IS NUL
 WITH u, sid, min(length(p)) AS hops
 RETURN u.id AS service, sid AS alerting, hops,
        size([(x:Anomaly)-[:ON]->(u) WHERE x.at >= $since AND x.at <= $at | x]) > 0 AS red
+
+// name: blast_radius_cypher
+// purpose: The pure-Cypher form of blast_radius that shipped before the user-defined function: the same breadth-first search unrolled into six CALL {} levels. Kept for scripts/bench.py, which times it against the function and against blast_radius_reference; never used by the product.
+MATCH (target:Service {id: $service})
+WITH [[target]] AS f0
+// Breadth-first against the edge direction, one hop per CALL, over edges live at $at: level k lists one path
+// [caller, ..., target] per caller k hops away, so each service is expanded once per level instead of once per path.
+// A caller keeps its path through its first parent in level order, and callers are ordered by that parent, then by
+// id descending: the order a depth-first traversal meets them, so ties pick the same path the plain
+// (caller)-[:DEPENDS_ON*1..6]->(target) query does (queries/reference.cypher).
+CALL { WITH f0 UNWIND range(0, size(f0) - 1) AS i WITH i, f0[i] AS path, f0[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f1 }
+CALL { WITH f1 UNWIND range(0, size(f1) - 1) AS i WITH i, f1[i] AS path, f1[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f2 }
+CALL { WITH f2 UNWIND range(0, size(f2) - 1) AS i WITH i, f2[i] AS path, f2[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f3 }
+CALL { WITH f3 UNWIND range(0, size(f3) - 1) AS i WITH i, f3[i] AS path, f3[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f4 }
+CALL { WITH f4 UNWIND range(0, size(f4) - 1) AS i WITH i, f4[i] AS path, f4[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f5 }
+CALL { WITH f5 UNWIND range(0, size(f5) - 1) AS i WITH i, f5[i] AS path, f5[i][0] AS x
+       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
+       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
+       RETURN collect([n] + path) AS f6 }
+// A service can come back at a later level (a longer walk); its first level is its distance.
+UNWIND [f1, f2, f3, f4, f5, f6] AS level
+UNWIND level AS path
+WITH path[0] AS caller, collect(path)[0] AS path
+MATCH (t:Team)-[o:OWNS]->(caller)
+WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
+RETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path
+ORDER BY hops, service

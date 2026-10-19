@@ -33,8 +33,15 @@ def test_who_owns_with_no_owner_valid_then_says_so(ctx):
     assert d["answer"].startswith("No team is recorded as owning payments-gw at 2025-09-09 04:00 UTC.")
 
 
-def test_an_owns_edge_without_valid_from_still_owns(ctx):
-    ctx.repo._graph.query("MATCH (:Team)-[o:OWNS]->(:Service {id: 'svc:payments-gw'}) REMOVE o.valid_from")
+def test_the_database_refuses_an_undated_dependency_or_owner(ctx):
+    """MANDATORY valid_from on DEPENDS_ON and OWNS (ensure_schema): an undated edge never reaches the point-in-time
+    queries, whoever writes it. Removing the date from an existing edge is refused the same way."""
+    for rel in ("DEPENDS_ON", "OWNS"):
+        with pytest.raises(ResponseError, match=f"mandatory constraint violation.*{rel}"):
+            ctx.repo._graph.query(f"MATCH (a:Service {{id: 'svc:checkout'}}), (b:Service {{id: 'svc:search'}}) "
+                                  f"CREATE (a)-[:{rel}]->(b)")
+    with pytest.raises(ResponseError, match="mandatory constraint violation"):
+        ctx.repo._graph.query("MATCH (:Team)-[o:OWNS]->(:Service {id: 'svc:payments-gw'}) REMOVE o.valid_from")
     d = call("ask", ctx, {"question": "who owns payments-gw", "at": EPOCH + DAY}).data
     assert d["answer"].startswith("payments-gw was owned by Payments at ")
 
@@ -166,3 +173,30 @@ def test_scan_f4_a_repeat_resolve_does_not_post_to_slack_again(store, tenant, mo
     again = c.post(f"{base}/incidents/{run['incident_id']}/resolve", json={"change_id": cause}).json()
     assert first["slack"] == "posted" and again["slack"] == "nothing to post" and len(posts) == 1
     assert slack.post is not None
+
+
+def test_a_runaway_read_is_cut_off_by_the_read_timeout(store, tenant):
+    """READ_TIMEOUT_MS goes with every GRAPH.RO_QUERY: FalkorDB Cloud sets no limit itself, so this is what stops a
+    read that would otherwise hold a database thread."""
+    from oncall_brain.adapters.falkordb.repository import FalkorRepository
+
+    seed(store, tenant)
+    slow = FalkorRepository(store.db, tenant, coord=store.coord, read_timeout_ms=1)
+    with pytest.raises(ResponseError, match="Query timed out"):
+        slow._send("MATCH (a)-[*1..12]-(b) RETURN count(*)", {}, readonly=True)
+    assert store.tenant(tenant).read("service_map", at=EPOCH + DAY).rows  # the store's own 3 s cap lets real reads by
+
+
+def test_every_query_carries_falkordbs_own_numbers(store, tenant):
+    """From FalkorDB's reply: execution time inside the database, the plan cache, and what a write changed. The trace,
+    the stored steps and the MCP output show them next to the round trip."""
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    first, again = (repo.read("service_map", at=EPOCH + DAY) for _ in range(2))
+    assert first.db_ms is not None and 0 <= first.db_ms <= first.ms and again.cached and first.wrote is None
+    w = repo.write("ingest_meta", version="itest", seed=7)
+    assert w.wrote and w.wrote.get("properties_set", 0) > 0 and w.db_ms is not None
+    from oncall_brain.agents.loop import stored_queries
+
+    kept = __import__("json").loads(stored_queries([first, w]))
+    assert kept[0]["db_ms"] == first.db_ms and kept[1]["wrote"] == w.wrote

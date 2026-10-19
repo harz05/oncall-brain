@@ -114,3 +114,49 @@ def test_reads_keep_answering_while_the_tenant_is_reset(store, tenant):
     assert errors == []
     assert done[0] > 8
     assert store.tenants().count(tenant) == 1 and not any(n.startswith("restoring_") for n in store.db.list_graphs())
+
+
+def test_racing_writers_record_one_dependency_once_without_any_lock(store, tenant):
+    """The dependency key is UNIQUE (with MANDATORY, since UNIQUE skips a missing value): 12 clients racing the ingest
+    MERGE for one new dependency, outside the tenant lock, leave exactly one edge. A loser's MERGE is refused by the
+    database (unique constraint violation) or finds the winner's edge."""
+    seed(store, tenant)
+    repo = store.tenant(tenant)
+    row = {"src": "svc:search", "dst": "svc:kafka", "valid_from": 1_700_000_123, "valid_to": None}
+    errors: list[str] = []
+
+    def merge(_):
+        try:
+            repo.write("ingest_depends_on", rows=[row])
+        except ResponseError as e:
+            errors.append(str(e))
+
+    with ThreadPoolExecutor(12) as pool:
+        list(pool.map(merge, range(48)))
+    assert repo._graph.ro_query("MATCH (:Service {id: 'svc:search'})-[d:DEPENDS_ON]->(:Service {id: 'svc:kafka'}) "
+                                "WHERE d.valid_from = 1700000123 RETURN count(d), collect(d.key)").result_set == [
+        [1, ["svc:search>svc:kafka@1700000123"]]]
+    assert all("unique constraint" in e for e in errors), errors
+    with pytest.raises(ResponseError, match="unique constraint violation"):
+        repo._graph.query("MATCH (a:Service {id: 'svc:search'}), (b:Service {id: 'svc:kafka'}) CREATE (a)-[:DEPENDS_ON "
+                          "{key: 'svc:search>svc:kafka@1700000123', valid_from: 1700000123}]->(b)")
+
+
+def test_a_graph_from_before_the_dependency_key_gets_its_keys_and_constraints(store):
+    """A pristine copy made before the key: ensure_schema backfills every dependency's key, then builds the
+    constraints, which come up OPERATIONAL instead of FAILED."""
+    from oncall_brain.adapters.falkordb.repository import FalkorRepository
+
+    name = f"zz_itest_oldgraph_{os.getpid()}"
+    old = store.db.select_graph(name)
+    try:
+        old.query("CREATE (a:Service {id: 'svc:a'})-[:DEPENDS_ON {valid_from: 1}]->(b:Service {id: 'svc:b'}), "
+                  "(a)-[:DEPENDS_ON {valid_from: 5, valid_to: 9}]->(b)")
+        FalkorRepository(store.db, "itest", graph=name, coord=store.coord).ensure_schema()
+        assert sorted(r[0] for r in old.ro_query("MATCH ()-[d:DEPENDS_ON]->() RETURN d.key").result_set) == [
+            "svc:a>svc:b@1", "svc:a>svc:b@5"]
+        rel = {(c["type"], c["label"], tuple(c["properties"])): c["status"] for c in old.list_constraints()
+               if c["entitytype"] == "RELATIONSHIP"}
+        assert rel[("UNIQUE", "DEPENDS_ON", ("key",))] == rel[("MANDATORY", "DEPENDS_ON", ("key",))] == "OPERATIONAL"
+    finally:
+        old.delete()

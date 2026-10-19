@@ -44,3 +44,12 @@ def test_remote_mcp_requires_the_token_when_one_is_set(monkeypatch):
             assert with_slash.status_code not in (307, 308, 404)  # /mcp/ is the same endpoint, not a redirect
     finally:
         get_settings.cache_clear()
+
+
+def test_only_tools_that_wipe_or_overwrite_are_marked_destructive_and_reads_are_read_only():
+    """MCP clients treat a write tool as destructive unless told otherwise: ours add facts, so only reset_tenant
+    (wipes what the graph learned) and the record_* tools that overwrite a record given an existing id say so."""
+    tools = {name: tool.annotations for name, (tool, _) in catalogue().items()}
+    assert {n for n, a in tools.items() if a.destructive_hint} == {
+        "reset_tenant", "record_change", "record_doc", "record_message", "record_ticket"}
+    assert tools["list_incidents"].read_only_hint and tools["blast_radius"].read_only_hint is False

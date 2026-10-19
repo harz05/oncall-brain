@@ -269,3 +269,30 @@ def test_event_tools_refuse_unknown_ids_before_writing_anything(store, tenant):
     # A doc with no mentions is recorded (an empty list used to end the write before it returned its row).
     assert call("record_doc", ctx, {"kind": "design", "title": "x", "text": "y", "decides": "svc:kafka"}).data[
         "decides"] == "svc:kafka"
+
+
+def test_a_service_the_graph_does_not_hold_is_named_unknown_not_answered_about(store, tenant):
+    """Names are resolved against the graph (resolve_service): a tool refuses a made-up service with the closest real
+    ones instead of answering "0 services depend on it", a name without svc: or by its display name resolves, and ask
+    says the service is unknown before anything else; "on-call" and dates are no service names and pass."""
+    seed(store, tenant)
+    ctx = ToolContext(store.tenant(tenant))
+    with pytest.raises(ValueError, match=r"No service named 'payment-service' in the graph; did you mean svc:payments"):
+        call("blast_radius", ctx, {"service": "payment-service"})
+    with pytest.raises(ValueError, match=r"No service named 'svc:nope' in the graph$"):
+        call("who_knows", ctx, {"service": "svc:nope"})
+    for typo, meant in (("kafak", "svc:kafka"), ("chekout", "svc:checkout"), ("postgres-ordrs", "svc:postgres-orders")):
+        with pytest.raises(ValueError, match=rf"did you mean {meant}"):  # FLEX jaroWinkler, inside FalkorDB
+            call("blast_radius", ctx, {"service": typo})
+    with pytest.raises(ValueError, match=r"No service named 'database' in the graph$"):  # nothing close: no guess
+        call("blast_radius", ctx, {"service": "database"})
+    assert call("blast_radius", ctx, {"service": "payments-gw"}).data == call(
+        "blast_radius", ctx, {"service": "svc:payments-gw"}).data
+    assert call("who_knows", ctx, {"service": "Payments-GW"}).data == call(
+        "who_knows", ctx, {"service": "svc:payments-gw"}).data
+    answer = call("ask", ctx, {"question": "who owns payment-service?"}).data["answer"]
+    assert answer.startswith("No service named 'payment-service' in the graph (closest: payments, payments-gw). ")
+    for question in ("who is on-call for payments-gw", "what happened on 2026-10-18 to postgres-orders",
+                     "why was chg:inv-880 made", "show the post-mortem for inc:0911",
+                     "the alert:checkout-latency story"):
+        assert "No service named" not in call("ask", ctx, {"question": question}).data["answer"]

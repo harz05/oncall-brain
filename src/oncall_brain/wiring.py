@@ -1,5 +1,9 @@
 """Composition root: the only place that picks concrete adapters."""
 
+import logging
+
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.adapters.llm.mock import MockProvider
 from oncall_brain.config import LOCAL_HOSTS, Settings, get_settings
@@ -15,10 +19,23 @@ PRESETS = {
 }
 
 
+class BadDatabaseUrl(RedisConnectionError):
+    """FALKORDB_URL does not parse. The parser's message can quote the password, so only this fixed text is sent."""
+
+
 def make_store(s: Settings | None = None) -> FalkorGraphStore:
     s = s or get_settings()
+    try:
+        return _store(s)
+    except ValueError as e:  # every surface answers with fixed text (never the URL); the details are logged
+        logging.getLogger(__name__).warning("FALKORDB_URL is invalid: %s", e)
+        raise BadDatabaseUrl("FALKORDB_URL is invalid (percent-encode / ? # @ : in the password)") from None
+
+
+def _store(s: Settings) -> FalkorGraphStore:
     return FalkorGraphStore(s.falkordb_host, s.falkordb_port, s.falkordb_username, s.falkordb_password,
-                            s.falkordb_ssl, s.falkordb_url, lock_wait=s.lock_wait_seconds)
+                            s.falkordb_ssl, s.falkordb_url, lock_wait=s.lock_wait_seconds,
+                            read_timeout_ms=s.read_timeout_ms)
 
 
 def make_llm(s: Settings | None = None) -> LLMProvider:

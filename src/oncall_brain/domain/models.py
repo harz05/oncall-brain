@@ -18,8 +18,13 @@ class QueryRun(BaseModel):
     cypher: str
     params: dict[str, Any]
     rows: list[dict[str, Any]]
-    ms: float
+    ms: float  # the round trip, as the app saw it
     readonly: bool
+    # FalkorDB's own account of the run, from its reply: execution time inside the database, whether the plan came
+    # from its cache, and what a write changed (only the non-zero counts: nodes_created, relationships_created, ...).
+    db_ms: float | None = None
+    cached: bool | None = None
+    wrote: dict[str, int] | None = None
 
     @property
     def row_count(self) -> int:

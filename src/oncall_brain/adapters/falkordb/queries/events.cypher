@@ -2,7 +2,10 @@
 // purpose: Keep knowledge current: record a deploy or config change as it happens (idempotent on id).
 MATCH (s:Service {id: $service})
 MERGE (c:Change {id: $id})
-SET c.kind = $kind, c.summary = $summary, c.at = $at, c.rolled_back_at = $rolled_back_at
+// Two times: at is when the change happened (valid time), recorded_at when the graph first learned of it
+// (transaction time, the server clock), so a change reported late by CI/CD is seen as late (learned_late).
+SET c.kind = $kind, c.summary = $summary, c.at = $at, c.rolled_back_at = $rolled_back_at,
+    c.recorded_at = coalesce(c.recorded_at, timestamp() / 1000.0)
 WITH s, c
 // Re-recording an id corrects the change: drop its old service and author links first.
 OPTIONAL MATCH (c)-[old:CHANGED|AUTHORED_BY]->()
@@ -18,7 +21,7 @@ RETURN c.id AS change
 // purpose: Keep knowledge current: record a monitoring anomaly on a service.
 MATCH (s:Service {id: $service})
 MERGE (x:Anomaly {id: $id})
-SET x.kind = $kind, x.summary = $summary, x.at = $at
+SET x.kind = $kind, x.summary = $summary, x.at = $at, x.recorded_at = coalesce(x.recorded_at, timestamp() / 1000.0)
 MERGE (x)-[:ON]->(s)
 RETURN x.id AS anomaly
 
@@ -36,14 +39,24 @@ MATCH (a:Service {id: $caller}), (b:Service {id: $callee})
 OPTIONAL MATCH (a)-[live:DEPENDS_ON]->(b)
 WHERE live.valid_to IS NULL
 WITH a, b, collect(live) AS existing
-// Only one live edge per pair: if the dependency already exists, keep it (moving its start earlier if $at is).
-FOREACH (_ IN CASE WHEN size(existing) = 0 THEN [1] ELSE [] END |
-  CREATE (a)-[:DEPENDS_ON {valid_from: $at}]->(b))
-FOREACH (d IN existing | SET d.valid_from = CASE WHEN $at < d.valid_from THEN $at ELSE d.valid_from END)
-WITH a, b
+// The record that already starts at $at, if any (its key is unique): a retired one is reopened, not duplicated.
+OPTIONAL MATCH (a)-[same:DEPENDS_ON {key: a.id + '>' + b.id + '@' + toString($at)}]->(b)
+WITH a, b, existing, same, size(existing) > 0 AND same IS NOT NULL AND same.valid_to IS NOT NULL
+                           AND any(x IN existing WHERE $at < x.valid_from) AS refused
+// No live edge: reopen the record that starts at $at (a retire and a re-add in one second, or a retired dependency
+// re-added at its own start), else start a new one.
+FOREACH (_ IN CASE WHEN size(existing) = 0 AND same IS NOT NULL THEN [1] ELSE [] END | SET same.valid_to = NULL)
+FOREACH (_ IN CASE WHEN size(existing) = 0 AND same IS NULL THEN [1] ELSE [] END |
+  CREATE (a)-[:DEPENDS_ON {key: a.id + '>' + b.id + '@' + toString($at), valid_from: $at,
+                           recorded_at: timestamp() / 1000.0}]->(b))
+// Only one live edge per pair: a live dependency keeps going, its start moved earlier if $at is (the key moves with
+// it), unless a retired record already starts there (refused: the tool says so).
+FOREACH (d IN [x IN existing WHERE $at < x.valid_from AND NOT refused] |
+  SET d.valid_from = $at, d.key = a.id + '>' + b.id + '@' + toString($at))
+WITH a, b, refused
 MATCH (a)-[d:DEPENDS_ON]->(b)
 WHERE d.valid_to IS NULL
-RETURN a.id AS caller, b.id AS callee, d.valid_from AS valid_from
+RETURN a.id AS caller, b.id AS callee, d.valid_from AS valid_from, refused
 
 // name: retire_dependency
 // purpose: Keep knowledge current: close the live caller -> callee dependency at $at (history is kept; queries at later times stop using it).

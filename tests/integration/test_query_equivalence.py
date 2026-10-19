@@ -31,7 +31,7 @@ def sweep_at(repo, at: int, origins: list[str]) -> None:
     check(repo, "storm_upstream", services=services, at=at, since=at - WINDOW)
     check(repo, "depends_among", services=services, at=at)
     for target in services:
-        check(repo, "blast_radius", service=target, at=at)
+        check(repo, "blast_radius", service=target, at=at, max_hops=6)
         check(repo, "storm_unexplained", services=services, target=target, at=at)
         for origin in origins or services:
             check(repo, "live_paths", origin=origin, target=target, at=at)
@@ -77,7 +77,7 @@ def test_odd_inputs(store, tenant):
             check(repo, "storm_unexplained", services=[], target=target, at=at)
             check(repo, "live_paths", origin="svc:checkout", target=target, at=at)
             check(repo, "live_paths", origin="svc:nope", target=target, at=at)
-            check(repo, "blast_radius", service=target, at=at)
+            check(repo, "blast_radius", service=target, at=at, max_hops=6)
     for name in ("path_suspects", "memory_suspects", "recall_similar"):  # no such incident
         check(repo, name, incident_id="inc:nope", window=WINDOW, min_score=RECALL_MIN_SCORE)
 
@@ -107,5 +107,5 @@ def test_hub_heavy_bench_graph(store, tenant):
     services = sorted(d["id"] for d in data["services"])
     check(repo, "storm_upstream", services=services, at=m["at"], since=m["at"] - WINDOW)
     for s in services:
-        check(repo, "blast_radius", service=s, at=m["at"])
+        check(repo, "blast_radius", service=s, at=m["at"], max_hops=6)
         check(repo, "live_paths", origin=m["origin"], target=s, at=m["at"])

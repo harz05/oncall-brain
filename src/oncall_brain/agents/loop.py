@@ -38,6 +38,7 @@ def stored_queries(queries: list[QueryRun]) -> str:
         keep = size <= left
         left -= size if keep else 0
         out.append({"name": q.name, "row_count": q.row_count, "ms": q.ms, "readonly": q.readonly,
+                    "db_ms": q.db_ms, "cached": q.cached, "wrote": q.wrote,
                     "params": q.params if keep else None, "sha": cypher_sha(q.cypher)})
     return json.dumps(out, default=str)
 

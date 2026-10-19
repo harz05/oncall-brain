@@ -6,11 +6,11 @@ RETURN a.id AS caller, b.id AS callee
 ORDER BY caller, callee
 
 // name: project_topology
-// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question.
+// purpose: Build the point-in-time projection: runs on the scratch graph scratch_<tenant>_topology_<nonce>, which then holds only the edges live at the time in question. Each edge has capacity 1 for algo.maxFlow (route_count); PageRank ignores it.
 UNWIND $edges AS e
 MERGE (a:Service {id: e.caller})
 MERGE (b:Service {id: e.callee})
-MERGE (a)-[:DEPENDS_ON]->(b)
+MERGE (a)-[:DEPENDS_ON {cap: 1}]->(b)
 RETURN count(*) AS edges
 
 // name: criticality
@@ -65,3 +65,10 @@ RETURN count(*) AS edges
 CALL algo.WCC({nodeLabels: ['Service'], relationshipTypes: ['VIA_RED']}) YIELD node, componentId
 RETURN node.id AS service, componentId AS component
 ORDER BY component, service
+
+// name: route_count
+// purpose: Live routes from $source to $target that share no dependency edge: algo.maxFlow on the point-in-time projection, every edge capacity 1. 1: every call crosses one edge, so there is no way around its two services. 0: no live route.
+MATCH (s:Service {id: $source}), (t:Service {id: $target})
+CALL algo.maxFlow({sourceNodes: [s], targetNodes: [t], relationshipTypes: ['DEPENDS_ON'], capacityProperty: 'cap'})
+YIELD maxFlow, edges
+RETURN toInteger(maxFlow) AS routes, [e IN edges | [startNode(e).id, endNode(e).id]] AS used

@@ -136,8 +136,10 @@ ORDER BY kind, at
 // purpose: Company knowledge behind the cause: current docs that mention the culprit change, then decision records and postmortems about its service, written before the incident. The update cites them so the on-call engineer sees the decision history.
 MATCH (:Incident {id: $incident_id})-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(c:Change)-[:CHANGED]->(s:Service)
 WHERE h.status IN ['confirmed', 'supported']
+// From the cause and its service to the docs about them (not every Doc, then a filter).
+UNWIND [c, s] AS x
 MATCH (d:Doc)-[:DECIDES|MENTIONS]->(x)
-WHERE (x = c OR x = s) AND d.at <= $at AND NOT ()-[:SUPERSEDES]->(d)
+WHERE d.at <= $at AND NOT ()-[:SUPERSEDES]->(d)
 WITH DISTINCT d, max(CASE WHEN x = c THEN 1 ELSE 0 END) AS about_change,
      CASE d.kind WHEN 'decision' THEN 2 WHEN 'postmortem' THEN 1 ELSE 0 END AS weighty
 RETURN d.id AS id, d.title AS title, d.kind AS kind, d.at AS at, about_change, weighty
@@ -172,3 +174,20 @@ RETURN solved_by_memory,
        collect({incident: past.id, title: past.title, symptom: past.symptom, score: x.score,
                 cause_service: coalesce(x.cause_service, ps.id), cause_change: pc.id, runbook: rb.id,
                 runbook_title: rb.title}) AS recalled
+
+// name: learned_late
+// purpose: Bi-temporal memory: what this incident's investigation used that the graph learned only after the incident opened. Each fact has two times: when it was true (valid time: at) and when the graph learned it (transaction time: recorded_at, the server clock when a tool wrote it). A change CI/CD reported late shows up here instead of silently rewriting what the agents knew. Seeded facts carry no recorded_at: known from the start.
+MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
+WHERE i.recorded_at IS NOT NULL
+OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(:Hypothesis)-[:SUSPECTS]->(c:Change)
+WHERE c.recorded_at > i.recorded_at
+WITH i, a, collect(DISTINCT {id: c.id, kind: 'change', at: c.at, recorded_at: c.recorded_at}) AS changes
+// The anomalies the checks read: on each hypothesis's evidence path and its suspect's service, in the alert window.
+OPTIONAL MATCH (i)-[:HAS_HYPOTHESIS]->(h:Hypothesis)-[:SUSPECTS]->(:Change)-[:CHANGED]->(cs:Service)
+OPTIONAL MATCH (h)<-[:SUPPORTS|REFUTES]-(e:Evidence)
+WITH i, a, changes, collect(DISTINCT cs.id) AS suspects, collect(e.path) AS paths
+WITH i, a, changes, suspects + reduce(acc = [], p IN paths | acc + coalesce(p, [])) AS read
+OPTIONAL MATCH (x:Anomaly)-[:ON]->(s:Service)
+WHERE s.id IN read AND x.recorded_at > i.recorded_at AND x.at >= a.at - $window AND x.at <= a.at
+WITH i, changes, collect(DISTINCT {id: x.id, kind: 'anomaly', at: x.at, recorded_at: x.recorded_at}) AS anomalies
+RETURN i.recorded_at AS opened_recorded_at, [f IN changes + anomalies WHERE f.id IS NOT NULL] AS facts

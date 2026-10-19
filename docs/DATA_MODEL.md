@@ -198,13 +198,47 @@ future tool or a raw `GRAPH.QUERY` included, can create a second `Service` with 
 `CREATE` on ten ids made ten duplicates without constraints and none with them (PERF.md, Concurrency). `GRAPH.COPY`
 carries constraints, so the pristine copy and every reset keep them, and `reset()` runs `ensure_schema()` after a
 restore so a copy made before the constraints existed gets them
-(`test_every_label_has_a_unique_id_constraint_that_reset_keeps_and_the_database_enforces`). FalkorDB has no
-constraint on relationships, and `MERGE` on an edge is not safe under concurrency (two writers can both miss it and
-both create it; measured in the same benchmark), so every agent run and write tool holds a per-tenant lock (see
-ARCHITECTURE 3.7). The `CREATE`s are `log_step` and `record_question`: append-only logs whose `seq` is the
+(`test_every_label_has_a_unique_id_constraint_that_reset_keeps_and_the_database_enforces`). FalkorDB's relationship
+constraints are keyed on a property: `DEPENDS_ON` carries one (`key`, `<caller>><callee>@<valid_from>`, UNIQUE and
+MANDATORY, so racing writers record one dependency once), the board edges the agents write do not, and `MERGE` on an edge is not safe under
+concurrency (two writers can both miss it and both create it; measured in the same benchmark), so every agent run and
+write tool holds a per-tenant lock (see ARCHITECTURE 3.7).
+
+Each `DEPENDS_ON` edge also has `key` = `<caller id>><callee id>@<valid_from>`, UNIQUE and MANDATORY
+(`repository.KEYED_EDGES`; set in the `MERGE`/`CREATE` pattern of `ingest_depends_on` and `add_dependency`, backfilled
+by `backfill_dependency_keys` on a graph from before it): racing writers record one dependency once
+(`test_racing_writers_record_one_dependency_once_without_any_lock`).
+
+The temporal edges have a MANDATORY constraint on `valid_from` (`GRAPH.CONSTRAINT CREATE <graph> MANDATORY
+RELATIONSHIP DEPENDS_ON PROPERTIES 1 valid_from`, the same for `OWNS`; `repository.DATED_EDGES`): FalkorDB refuses an
+undated dependency or owner, and removing the date from one, so every "what was true at alert time" filter meets dated
+edges only (`test_the_database_refuses_an_undated_dependency_or_owner`). FalkorDB checks it the moment an edge is made,
+before any `SET`, so the ingest puts the date in the `MERGE` pattern. The `CREATE`s are `log_step` and `record_question`: append-only logs whose `seq` is the
 current count + 1, each with one writer at a time (the tenant lock for agent steps, the session's own lock for
 questions, see ARCHITECTURE 3.7), and the unique constraints on `AgentStep.id` and `Question.id` are the backstop
 should a writer ever skip the lock.
+
+## Two times on a fact
+
+Facts carry valid time (`at`, `valid_from`, `valid_to`: when it was true) and, when a tool writes them, transaction
+time (`recorded_at`, FalkorDB's `timestamp()` / 1000 when the graph learned it): on `Change` and `Anomaly`
+(`record_change`, `record_anomaly`), on a new `DEPENDS_ON` (`add_dependency`) and on `Incident` (`open_incident`).
+Seeded facts have none: known from the start. `learned_late` lists what an incident's investigation used that the
+graph learned after the incident opened, so a change CI/CD reported late is used and marked as late
+(`test_a_change_reported_after_the_incident_opened_is_used_and_marked_learned_late`).
+
+## The coordination graph
+
+One more graph sits next to the tenant graphs, `oncall_brain_coord`, holding what every process shares (FalkorDB Cloud
+gives its users no `SET`, `INCR` or `EVAL`, so this is not kept in Redis keys):
+
+| Label | Properties | What it is |
+|---|---|---|
+| `Lease` | `key` (UNIQUE), `owner`, `exp` (ms, server clock) | a run lock (`oncall_brain:lock:<tenant>`), a narrower scoped lock, a Slack replay marker or pending run. The UNIQUE constraint lets exactly one concurrent `CREATE` win. |
+| `Counter` | `key` (UNIQUE), `n`, `exp` | a throttle window or the hourly/daily LLM token count, updated by one atomic `MERGE ... SET c.n = c.n + $by`. |
+
+Queries: `queries/coordination.cypher`. Expired nodes are swept every 500 writes; a constraint that comes up `FAILED`
+after a database restart is repaired (`Coordination._setup`).
 
 ## Memory, mapped to the model
 

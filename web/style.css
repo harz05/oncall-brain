@@ -431,8 +431,11 @@ details > summary:active { color: var(--ink); text-decoration-thickness: 3px; }
 .qhead b { color: var(--ink); }
 .qhead .rw { border: 1px solid var(--rule); color: var(--ink); padding: 0 var(--s1); }
 .qhead .btn { margin-left: auto; }
+.qhead .btn + .btn { margin-left: 0; }
 .q pre + pre { border-top: 1px solid var(--rule); }
 .q details { margin: var(--s2) var(--s3); }
+.q > p, .q .plan > p { margin: 0; padding: var(--s1) var(--s3); }
+.q .plan { border-top: 1px solid var(--rule); }
 .why-foot { margin-top: var(--s4); font-size: 13px; color: var(--muted); }
 
 /* ---------- ask the brain ---------- */

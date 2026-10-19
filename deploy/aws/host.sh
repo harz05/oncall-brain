@@ -92,10 +92,15 @@ cd "$APP"
 say "Building the app image (a few minutes on the first deploy)"
 quiet dc build
 
-# 7. Do not cut an agent run short. A run holds oncall_brain:lock:<tenant> and renews its 2-minute lease on every step
-#    (adapters/falkordb/repository.py), so a held lock means a run is in flight. Wait for it; never delete the lock.
-locks() { dc exec -T falkordb redis-cli --scan --pattern 'oncall_brain:lock:*' 2>/dev/null || true; }
-if [ -n "$(dc ps -q --status running falkordb 2>/dev/null)" ]; then
+# 7. Do not cut an agent run short. A run holds a lease on oncall_brain:lock:<tenant> (a Lease node in the
+#    coordination graph, adapters/falkordb/coordination.py) and renews its 2-minute lease on every step, so a live
+#    lease means a run is in flight. The running app is asked (it has the database URL, Cloud or local); empty output
+#    means none, or that the old app cannot say. Wait for it; never delete the lease.
+locks() {
+  dc exec -T app python -c 'from oncall_brain.wiring import make_store; print(make_store().coord.runs_in_flight() or "")' \
+    2>/dev/null || true
+}
+if [ -n "$(dc ps -q --status running app 2>/dev/null)" ]; then
   for i in $(seq 30); do
     [ -z "$(locks)" ] && break
     [ "$i" = 1 ] && say "An agent run is in flight; waiting up to 150 s for it to finish"

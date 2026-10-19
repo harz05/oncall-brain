@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     falkordb_port: int = 6379
     falkordb_username: str | None = None
     falkordb_password: str | None = Field(None, repr=False)
-    falkordb_ssl: bool = False  # FalkorDB Cloud and most hosted Redis need TLS
-    falkordb_url: str = Field("", repr=False)  # e.g. rediss://user:pass@host:port; overrides the fields above
+    falkordb_ssl: bool = False  # where the server has TLS on (not FalkorDB Cloud Free)
+    falkordb_url: str = Field("", repr=False)  # redis://user:pass@host:port (rediss:// with TLS); overrides the above
     default_tenant: str = "acme"
 
     # mock | openai | gemini | groq | openrouter | ollama | anthropic (presets in wiring.py).
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     api_token: str = _secret()  # when set, /api/* except /api/health needs "Authorization: Bearer <token>"
     # The token the MCP endpoint of a deployment requires (oncall_brain.serve, the Dockerfile); API_TOKEN when empty.
     mcp_token: str = _secret()
-    max_tenants: int = 20  # most tenant graphs a reset may create (~5 MB each)
+    max_tenants: int = 20  # most tenants a reset may create (two graphs of ~4 MB each per tenant)
     # Abuse limits for a public deployment (api/guards.py, services/limits.py); 0 turns one off. Throttles are per
     # client address in fixed windows, counted in FalkorDB's Redis so every process (app, MCP) shares them.
     rate_limit_per_min: int = 0  # requests to /api/* and /mcp per client per minute
@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # Longest a write, reset or run waits for its tenant's lock (an agent run holds it 60-150 s on Claude) before it
     # is refused with 409. Every waiter holds a server thread, so a public deployment keeps this short (preset 5).
     lock_wait_seconds: float = 120
+    # Server-side cap on one read (GRAPH.RO_QUERY ... TIMEOUT): FalkorDB Cloud sets no limit of its own, so a
+    # runaway read would hold a database thread. The slowest read the product makes takes ~0.2 s. 0 = no cap.
+    read_timeout_ms: int = 3000
 
     # Optional: post each status update to Slack through an incoming webhook (adapters/slack.py).
     slack_webhook_url: str = _secret()

@@ -14,7 +14,12 @@ The settings are listed in `.env.example`, and the public preset is in `deploy/a
   - `/mcp` needs `MCP_TOKEN`. Once a token is set, the write tools over `/api` need it too, and so does a named
   conversation user.
   - Slack requests are checked against their signature and timestamp, and replays are refused.
-  - FalkorDB has no public port and needs a password.
+  - The graphs live on FalkorDB Cloud, reachable only with the instance's password, which sits in AWS Parameter
+  Store and the box's root-only `.env`, never in the repository. The Docker FalkorDB on the box, kept as the fallback,
+  has no public port and needs a password too.
+  - Besides graph commands the app uses only `RENAME`, `EXPIRE`, `PING` and `INFO`, never `SET`, `INCR` or `EVAL`
+  (Cloud refuses those to every user), so its locks and
+  limits are graph writes under the same password.
 - **Output.** Security headers (CSP, nosniff, no-referrer, Permissions-Policy, and HSTS over https) are on every
   response. Text from the graph is escaped before it reaches Slack, where it is posted as a code block so links and
   mentions do not render. It is also escaped before the headless script prints it to a terminal.
@@ -53,3 +58,8 @@ and each fix has a test in `tests/unit/test_security_scan_fixes.py` or `tests/in
   `API_TOKEN` for an MCP-only deployment.
 - Clients behind one office NAT share a throttle bucket.
 - The per-process run cap counts runs in one app process. The deployment runs one.
+- The FalkorDB Cloud Free tier has no TLS, so queries and the password travel unencrypted between the AWS box and
+  the instance (both in ap-south-1, over the public internet). The data is synthetic and the password is used for
+  nothing else; a paid tier with TLS takes `rediss://` in `FALKORDB_URL` and no code change.
+- The Free tier keeps no backups and nothing across a restart: the watchdog (`serve.tend`) re-seeds the demo company,
+  so a restart loses what visitors taught it (confirmed fixes, runbooks), not the demo.

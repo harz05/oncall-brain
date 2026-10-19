@@ -10,20 +10,29 @@ against ALLOWED_HOSTS plus the hostname Render or Railway set, on both halves. W
 limits in services/limits.py (per-client throttles, concurrent runs, the daily LLM budget; the public preset in
 .env.example), and every response carries the security headers (api/guards.py)."""
 
+import asyncio
+import contextlib
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from oncall_brain.adapters.falkordb.repository import FalkorGraphStore
 from oncall_brain.api.app import app as api
-from oncall_brain.api.app import health_body
+from oncall_brain.api.app import health_body, store
 from oncall_brain.api.guards import SecurityHeaders
 from oncall_brain.config import get_settings
 from oncall_brain.mcp_server.__main__ import http_app
+from oncall_brain.services.seeding import reset
+
+log = logging.getLogger(__name__)
+TEND_EVERY = 60  # seconds
 
 
 class _McpHalf:
@@ -50,12 +59,37 @@ def health(_: Request) -> JSONResponse:
     return JSONResponse(body, status_code=200 if body["ok"] else 503)
 
 
+def tend(s: FalkorGraphStore, tenant: str) -> None:
+    """FalkorDB Cloud Free stops an instance nobody used for a day and keeps nothing across a restart (no
+    persistence). So once a minute: real graph queries keep it in use, and what a restart lost comes back: the
+    coordination graph's constraints (Coordination.recheck), then the demo company (reset seeds it when no pristine
+    copy survived). The UDF library reloads by itself on the first query that misses it (FalkorRepository._run)."""
+    s.coord.recheck()
+    if not s.exists(tenant):
+        log.warning("tend: tenant %s is missing (a database restart?): %s", tenant, reset(s, tenant))
+
+
+async def _tend_forever() -> None:
+    while True:
+        await asyncio.sleep(TEND_EVERY)
+        try:
+            await run_in_threadpool(tend, store(), get_settings().default_tenant)
+        except Exception:  # the database may be down right now: say so, try again in a minute
+            log.exception("tend failed")
+
+
 @asynccontextmanager
 async def lifespan(_: Starlette):
     # Starlette runs only the outer app's startup, so the two inner ones (FastAPI's, the MCP session manager) run here.
     mcp.app = http_app("0.0.0.0", require_token=True)
     async with api.router.lifespan_context(api), mcp.app.router.lifespan_context(mcp.app):
-        yield
+        task = asyncio.create_task(_tend_forever())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 # Route("/mcp", <ASGI app>) keeps the exact path; a Mount would answer POST /mcp with a redirect to /mcp/, which MCP

@@ -27,14 +27,21 @@ def fingerprint(data: dict[str, list[dict]]) -> str:
 
 
 def seed(store: GraphStore, tenant: str, seed: int = 7) -> dict[str, int]:
-    """Rebuild the tenant from scratch and snapshot it. Dropping first matters: the snapshot must hold
-    only seed data, never incidents or runbooks left over from a rehearsal."""
-    store.drop(tenant)
+    """Rebuild the tenant from scratch and snapshot it, holding the tenant's lock (a reset or an agent run waits)."""
+    with store.lock(tenant):
+        return _seed(store, tenant, seed)
+
+
+def _seed(store: GraphStore, tenant: str, seed: int = 7) -> dict[str, int]:
+    """seed() for a caller that already holds the tenant's lock (reset). The company is built on an empty staging graph
+    and published whole (GRAPH.COPY to the pristine copy, then RENAME over the tenant), so the snapshot holds only seed
+    data, never incidents, runbooks or a visitor's question, and nothing reads or writes a half-built tenant meanwhile
+    (the watchdog re-seeds a live site after a database restart)."""
     data = generate(seed)
-    repo = store.tenant(tenant)
+    repo = store.staging(tenant)
     load(repo, data)
     repo.write("ingest_meta", version=fingerprint(data), seed=seed)
-    store.snapshot(tenant)
+    store.publish(tenant)
     return {key: len(data[key]) for _, key in INGEST}
 
 
@@ -55,7 +62,6 @@ def reset(store: GraphStore, tenant: str, seed_value: int | None = None, max_ten
             rows = repo.read("data_version").rows
             seed_value = seed_value or (rows[0]["seed"] if rows else None) or 7  # keep the tenant's own seed
             if rows and rows[0]["version"] == fingerprint(generate(seed_value)):
-                repo.ensure_schema()  # a pristine copy made before the unique id constraints existed gets them now
                 return "restored"
-        seed(store, tenant, seed_value or 7)  # no copy, or one built by an older generator
+        _seed(store, tenant, seed_value or 7)  # no copy, or one built by an older generator
         return "seeded"

@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 from redis.exceptions import RedisError
 
-from oncall_brain.agents.registry import ToolContext, tool
+from oncall_brain.agents.registry import ToolContext, name_tokens, tool
 from oncall_brain.domain.models import Highlight, QueryRun, ToolOutput
 from oncall_brain.services import sessions
 
@@ -36,7 +36,9 @@ STOPWORDS = frozenset(
 LABEL_ORDER = {"Doc": 0, "Ticket": 1, "Message": 2}  # equal coverage: the considered record before the chatter
 KINDS = {"postmortem": "postmortem", "design": "design note", "decision": "decision record", "runbook": "runbook page",
          "ticket": "ticket", "chat": "chat", "status_update": "status update"}
-TOP, PER_LABEL = 5, 30
+# PER_LABEL is above the corpus (41 chat messages, 35 docs, 21 tickets): the full-text score only counts matched
+# terms, so a lower cut could drop a hit before the coverage ranking below ever sees it.
+TOP, PER_LABEL = 5, 200
 # Intent rules on the lowered question, first match wins: "who owns kafka and who knows it" is about ownership.
 # "what did I ask about who owns kafka" is a recall: history comes first, since "ask" and "owns" would match below.
 INTENTS = (
@@ -422,6 +424,27 @@ ROUTES = {"owner": _owner, "members": _members, "project": _project, "expert": _
           "happened": _happened}
 
 
+# A hyphenated name that is not the tail of another id (chg:inv-880, alert:checkout-latency) or a common word.
+_SERVICE_LIKE = re.compile(r"(?<![\w:-])(?:svc:)?[a-z0-9]+(?:-[a-z0-9]+)+")
+_NOT_SERVICES = {"post-mortem", "front-end", "back-end", "follow-up", "roll-back", "rollback", "read-only", "on-call",
+                 "real-time", "end-to-end", "set-up", "sign-off", "hand-off", "re-run", "e-mail", "built-in"}
+
+
+def _unknown_services(ctx: ToolContext, ans: "_Answer", question: str, linked: set[str]) -> str:
+    """The "unknown service" outcome: a hyphenated name in the question that is no service in the graph but shares a
+    word with some (resolve_service) is said to be unknown, with the closest ones, before the answer goes on, so
+    "who owns payment-service?" never reads as an answer about payment-service. "on-call" or a date share no word
+    with a service and pass."""
+    notes = []
+    for name in dict.fromkeys(n for n in _SERVICE_LIKE.findall(question.lower())
+                              if n not in linked and n not in _NOT_SERVICES):
+        rows = ans.read(ctx, "resolve_service", service=name, tokens=name_tokens(name)) if name_tokens(name) else []
+        if rows and not rows[0]["exact"]:
+            notes.append(f"No service named {name!r} in the graph (closest: "
+                         f"{', '.join(r['id'].removeprefix('svc:') for r in rows)})")
+    return "; ".join(notes) + ". " if notes else ""
+
+
 def _ts(at: int) -> str:
     return datetime.fromtimestamp(at, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -462,6 +485,7 @@ def ask(ctx: ToolContext, a: AskArgs) -> ToolOutput:
             "happened); one-letter words and words like 'why' or 'the' match nothing."})
     q = padded(question)
     ents = link(ans.read(ctx, "link_entities", q=q), q)
+    lead_in = _unknown_services(ctx, ans, question, {e["matched"] for e in ents}) + lead_in
     asked = padded(a.question)
     for e in ents:  # carried: linked through the pronoun, not named in the question as it was asked
         e["carried"] = bool(carried) and e["id"] in resolved["as"] and f" {e['matched']} " not in asked

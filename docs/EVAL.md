@@ -111,224 +111,224 @@ Each in the agent's own words, from this run's `check_hypothesis` and `conclude`
 
 | measure | calls | mean ms | p50 ms | p95 ms |
 |---|---|---|---|---|
-| respond() wall time per incident (all roles, incl. writes) | 200 | 102.5 | 98.2 | 139.9 |
-| tool `post_update`: its queries per call | 200 | 14.9 | 14.2 | 18.9 |
-| tool `blast_radius`: its queries per call | 351 | 5.4 | 5.2 | 9.0 |
-| tool `who_knows`: its queries per call | 200 | 4.0 | 3.8 | 6.0 |
-| tool `propose_hypotheses`: its queries per call | 200 | 3.9 | 3.6 | 5.6 |
-| tool `check_hypothesis`: its queries per call | 918 | 2.6 | 2.2 | 4.4 |
-| tool `conclude`: its queries per call | 82 | 2.4 | 2.1 | 4.5 |
-| tool `warn_owners`: its queries per call | 200 | 2.1 | 2.0 | 2.8 |
-| tool `hypothesize_from_memory`: its queries per call | 64 | 1.9 | 1.8 | 3.3 |
-| tool `recall_similar`: its queries per call | 200 | 1.6 | 1.4 | 2.2 |
-| tool `page_on_call`: its queries per call | 351 | 1.4 | 1.3 | 2.4 |
-| tool `open_incident`: its queries per call | 200 | 0.8 | 0.7 | 1.1 |
-| planner observe: `incident_board` read per decision | 3448 | 1.2 | 1.1 | 1.9 |
+| respond() wall time per incident (all roles, incl. writes) | 200 | 109.6 | 105.4 | 152.4 |
+| tool `post_update`: its queries per call | 200 | 8.9 | 8.4 | 12.8 |
+| tool `blast_radius`: its queries per call | 351 | 4.7 | 4.8 | 7.8 |
+| tool `who_knows`: its queries per call | 200 | 4.0 | 3.8 | 5.2 |
+| tool `propose_hypotheses`: its queries per call | 200 | 3.8 | 3.6 | 5.0 |
+| tool `check_hypothesis`: its queries per call | 918 | 2.8 | 2.4 | 4.7 |
+| tool `conclude`: its queries per call | 82 | 2.3 | 2.2 | 3.3 |
+| tool `warn_owners`: its queries per call | 200 | 2.2 | 2.1 | 3.2 |
+| tool `hypothesize_from_memory`: its queries per call | 64 | 2.0 | 1.9 | 2.7 |
+| tool `page_on_call`: its queries per call | 351 | 1.5 | 1.4 | 2.4 |
+| tool `recall_similar`: its queries per call | 200 | 1.4 | 1.2 | 2.3 |
+| tool `open_incident`: its queries per call | 200 | 0.9 | 0.8 | 1.3 |
+| planner observe: `incident_board` read per decision | 3448 | 1.3 | 1.2 | 2.0 |
 
 ## Per seed
 
 | seed | alert | true cause (hops) | decoys | perturbations | graph agent | anomaly-aware | keyword | flat log | inv. calls | checks | respond ms |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | subscriptions-errors | redis-cache (3) | abc | noise | yes | yes | no | no | 6 | 4 | 150 |
-| 2 | refunds-errors | payments (1) | abcde | - | yes | yes | no | no | 8 | 5 | 134 |
-| 3 | analytics-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 122 |
-| 4 | inventory-errors | warehouse-sync (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 121 |
-| 5 | web-frontend-latency | analytics (3) | abcde | - | yes | no | no | no | 8 | 5 | 112 |
-| 6 | fraud-check-latency | fraud-check (0) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 95 |
-| 7 | legacy-billing-errors | legacy-billing (0) | abcd | - | yes | no | yes | no | 7 | 5 | 83 |
-| 8 | inventory-errors | postgres-orders (1) | abc | - | yes | yes | no | no | 6 | 4 | 107 |
-| 9 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 134 |
-| 10 | mobile-bff-latency | mobile-bff (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 98 |
-| 11 | shipping-errors | postgres-orders (2) | abc | gap, innocent | no | yes | no | no | 8 | 5 | 110 |
-| 12 | search-errors | redis-cache (1) | ab | - | yes | yes | yes | no | 5 | 3 | 124 |
-| 13 | pricing-latency | promotions (1) | abcde | - | yes | no | no | no | 8 | 5 | 130 |
-| 14 | checkout-errors | warehouse-sync (2) | abcde | gap, noise | yes | yes | no | no | 8 | 5 | 114 |
-| 15 | subscriptions-errors | subscriptions (0) | abc | noise, noise-on-c | yes | no | no | no | 7 | 4 | 103 |
-| 16 | payments-gw-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 104 |
-| 17 | pricing-latency | pricing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 104 |
-| 18 | notifications-errors | notifications (0) | abc | - | yes | yes | no | no | 6 | 4 | 91 |
-| 19 | checkout-latency | promotions (2) | abcde | noise | yes | no | no | no | 8 | 5 | 114 |
-| 20 | checkout-errors | redis-cache (2) | abce | - | yes | yes | no | no | 7 | 4 | 101 |
-| 21 | refunds-latency | payments (1) | abcd | noise | yes | yes | no | no | 7 | 5 | 95 |
-| 22 | subscriptions-latency | subscriptions (0) | abcd | - | yes | no | yes | no | 7 | 5 | 93 |
-| 23 | web-frontend-latency | api-gateway (1) | abcd | innocent | yes | yes | no | no | 9 | 6 | 150 |
+| 1 | subscriptions-errors | redis-cache (3) | abc | noise | yes | yes | no | no | 6 | 4 | 115 |
+| 2 | refunds-errors | payments (1) | abcde | - | yes | yes | no | no | 8 | 5 | 142 |
+| 3 | analytics-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 105 |
+| 4 | inventory-errors | warehouse-sync (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 116 |
+| 5 | web-frontend-latency | analytics (3) | abcde | - | yes | no | no | no | 8 | 5 | 98 |
+| 6 | fraud-check-latency | fraud-check (0) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 84 |
+| 7 | legacy-billing-errors | legacy-billing (0) | abcd | - | yes | no | yes | no | 7 | 5 | 80 |
+| 8 | inventory-errors | postgres-orders (1) | abc | - | yes | yes | no | no | 6 | 4 | 87 |
+| 9 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 82 |
+| 10 | mobile-bff-latency | mobile-bff (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 86 |
+| 11 | shipping-errors | postgres-orders (2) | abc | gap, innocent | no | yes | no | no | 8 | 5 | 86 |
+| 12 | search-errors | redis-cache (1) | ab | - | yes | yes | yes | no | 5 | 3 | 133 |
+| 13 | pricing-latency | promotions (1) | abcde | - | yes | no | no | no | 8 | 5 | 98 |
+| 14 | checkout-errors | warehouse-sync (2) | abcde | gap, noise | yes | yes | no | no | 8 | 5 | 95 |
+| 15 | subscriptions-errors | subscriptions (0) | abc | noise, noise-on-c | yes | no | no | no | 7 | 4 | 81 |
+| 16 | payments-gw-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 81 |
+| 17 | pricing-latency | pricing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 87 |
+| 18 | notifications-errors | notifications (0) | abc | - | yes | yes | no | no | 6 | 4 | 73 |
+| 19 | checkout-latency | promotions (2) | abcde | noise | yes | no | no | no | 8 | 5 | 97 |
+| 20 | checkout-errors | redis-cache (2) | abce | - | yes | yes | no | no | 7 | 4 | 115 |
+| 21 | refunds-latency | payments (1) | abcd | noise | yes | yes | no | no | 7 | 5 | 102 |
+| 22 | subscriptions-latency | subscriptions (0) | abcd | - | yes | no | yes | no | 7 | 5 | 82 |
+| 23 | web-frontend-latency | api-gateway (1) | abcd | innocent | yes | yes | no | no | 9 | 6 | 98 |
 | 24 | pricing-latency | promotions (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 105 |
-| 25 | subscriptions-errors | subscriptions (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 89 |
-| 26 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 89 |
-| 27 | shipping-latency | inventory (1) | abcde | - | yes | no | no | no | 8 | 5 | 97 |
-| 28 | inventory-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 98 |
-| 29 | payments-latency | payments (0) | abcde | - | yes | yes | yes | no | 8 | 5 | 89 |
-| 30 | search-errors | redis-cache (1) | abd | innocent | yes | no | no | no | 8 | 5 | 103 |
-| 31 | payments-latency | payments (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 91 |
-| 32 | refunds-latency | fraud-check (2) | abc | noise | yes | yes | no | no | 6 | 4 | 100 |
-| 33 | payments-latency | payments (0) | abce | - | yes | yes | yes | no | 7 | 4 | 87 |
-| 34 | legacy-billing-latency | legacy-billing (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 115 |
-| 35 | payments-gw-errors | payments-gw (0) | abc | noise, noise-on-c | yes | no | yes | no | 7 | 4 | 95 |
-| 36 | reporting-latency | kafka (2) | abcd | noise, noise-on-c | no | no | no | no | 8 | 5 | 105 |
-| 37 | fraud-check-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 99 |
-| 38 | search-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 91 |
-| 39 | shipping-latency | shipping (0) | abce | noise | yes | yes | yes | no | 7 | 4 | 89 |
-| 40 | reporting-latency | reporting (0) | abc | - | yes | yes | yes | no | 6 | 4 | 86 |
-| 41 | shipping-latency | warehouse-sync (2) | abce | gap, noise | yes | yes | no | no | 7 | 4 | 95 |
-| 42 | inventory-errors | warehouse-sync (1) | abcd | - | yes | yes | yes | no | 7 | 5 | 119 |
-| 43 | web-frontend-errors | redis-cache (3) | abc | noise | yes | yes | no | no | 6 | 4 | 102 |
-| 44 | web-frontend-errors | payments (3) | abc | innocent | yes | yes | no | no | 8 | 5 | 104 |
-| 45 | inventory-errors | postgres-orders (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 91 |
-| 46 | inventory-latency | postgres-orders (1) | abc | innocent, noise, noise-on-c | yes | yes | no | no | 8 | 5 | 99 |
-| 47 | subscriptions-errors | subscriptions (0) | abc | - | yes | yes | yes | no | 6 | 4 | 79 |
-| 48 | checkout-errors | inventory (1) | abce | - | yes | yes | no | no | 7 | 4 | 94 |
-| 49 | recommendations-errors | kafka (2) | abcd | noise | yes | yes | no | no | 7 | 5 | 90 |
-| 50 | pricing-latency | promotions (1) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 97 |
-| 51 | payments-gw-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 96 |
-| 52 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 91 |
-| 53 | inventory-latency | postgres-orders (1) | abc | noise, noise-on-c | no | no | no | no | 7 | 4 | 89 |
-| 54 | reporting-latency | analytics (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 100 |
-| 55 | payments-errors | redis-cache (2) | abc | gap | yes | yes | yes | no | 6 | 4 | 91 |
-| 56 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 90 |
-| 57 | checkout-latency | checkout (0) | abc | noise | yes | yes | yes | no | 6 | 4 | 84 |
-| 58 | shipping-errors | warehouse-sync (2) | abcde | - | yes | no | no | no | 8 | 5 | 94 |
-| 59 | web-frontend-errors | pricing (3) | abce | noise | yes | yes | no | no | 7 | 4 | 89 |
-| 60 | shipping-latency | inventory (1) | abc | noise, noise-on-c | no | no | no | no | 7 | 4 | 90 |
-| 61 | mobile-bff-errors | postgres-orders (3) | abce | noise | yes | yes | no | no | 7 | 4 | 100 |
-| 62 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 93 |
-| 63 | fraud-check-errors | fraud-check (0) | abc | - | yes | yes | yes | no | 6 | 4 | 80 |
-| 64 | pricing-latency | promotions (1) | abc | - | yes | yes | no | no | 6 | 4 | 88 |
-| 65 | api-gateway-latency | redis-cache (2) | abcd | noise | yes | no | no | no | 7 | 5 | 109 |
-| 66 | notifications-errors | notifications (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 108 |
-| 67 | shipping-latency | inventory (1) | abcde | - | yes | no | no | no | 8 | 5 | 102 |
-| 68 | reporting-latency | kafka (2) | abcde | innocent | yes | no | no | no | 9 | 5 | 116 |
-| 69 | cart-latency | redis-cache (1) | abce | - | yes | yes | no | no | 7 | 4 | 103 |
-| 70 | reporting-errors | postgres-orders (1) | abc | noise | yes | yes | no | no | 6 | 4 | 93 |
-| 71 | cart-latency | pricing (1) | abcd | innocent, noise | yes | yes | no | no | 9 | 6 | 101 |
-| 72 | cart-latency | redis-cache (1) | abcd | innocent, noise, noise-on-c | no | no | no | no | 9 | 6 | 108 |
-| 73 | pricing-errors | promotions (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 104 |
-| 74 | cart-errors | redis-cache (1) | abcde | innocent | yes | yes | no | no | 10 | 6 | 113 |
-| 75 | refunds-latency | kafka (3) | abcd | noise | yes | yes | no | no | 7 | 5 | 105 |
-| 76 | inventory-errors | inventory (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 87 |
-| 77 | api-gateway-errors | refunds (1) | abce | noise | yes | yes | yes | no | 7 | 4 | 112 |
-| 78 | inventory-errors | warehouse-sync (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 108 |
-| 79 | mobile-bff-latency | recommendations (2) | abce | - | yes | yes | no | no | 7 | 4 | 100 |
-| 80 | search-errors | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 90 |
-| 81 | legacy-billing-errors | legacy-billing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 84 |
-| 82 | reporting-latency | postgres-orders (1) | abcd | innocent | yes | yes | no | no | 9 | 6 | 100 |
-| 83 | analytics-latency | kafka (1) | abd | innocent | yes | yes | no | no | 8 | 5 | 101 |
-| 84 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 103 |
-| 85 | recommendations-errors | redis-cache (1) | abcde | - | yes | no | yes | no | 8 | 5 | 98 |
-| 86 | fraud-check-errors | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 86 |
-| 87 | cart-errors | redis-cache (1) | abcde | innocent, noise, noise-on-c | yes | yes | no | no | 10 | 6 | 112 |
-| 88 | legacy-billing-errors | postgres-orders (1) | abd | - | yes | no | no | no | 6 | 4 | 90 |
-| 89 | search-errors | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 110 |
-| 90 | recommendations-errors | recommendations (0) | abce | - | yes | yes | yes | no | 7 | 4 | 104 |
-| 91 | inventory-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 140 |
-| 92 | search-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 154 |
-| 93 | checkout-errors | fraud-check (2) | abc | innocent | yes | yes | no | no | 8 | 5 | 108 |
-| 94 | api-gateway-latency | subscriptions (1) | abcd | noise | yes | yes | no | no | 7 | 5 | 107 |
-| 95 | analytics-latency | kafka (1) | abd | - | yes | no | no | no | 6 | 4 | 102 |
-| 96 | mobile-bff-errors | redis-cache (3) | abcd | - | yes | no | no | no | 7 | 5 | 123 |
-| 97 | inventory-latency | inventory (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 87 |
-| 98 | shipping-latency | notifications (1) | abce | - | yes | yes | no | no | 7 | 4 | 95 |
-| 99 | api-gateway-errors | payments (2) | abcde | noise | yes | yes | no | no | 8 | 5 | 104 |
-| 100 | inventory-errors | postgres-orders (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 140 |
-| 101 | search-latency | redis-cache (1) | abd | innocent | yes | no | no | no | 8 | 5 | 186 |
-| 102 | recommendations-errors | recommendations (0) | abc | noise | yes | yes | no | no | 6 | 4 | 83 |
-| 103 | checkout-errors | warehouse-sync (2) | abcd | gap | yes | no | no | no | 7 | 5 | 100 |
-| 104 | mobile-bff-latency | subscriptions (2) | abcde | noise | yes | yes | no | no | 8 | 5 | 103 |
-| 105 | web-frontend-errors | search (2) | abc | - | yes | yes | no | no | 6 | 4 | 85 |
-| 106 | cart-errors | redis-cache (1) | abc | - | yes | yes | yes | no | 6 | 4 | 98 |
-| 107 | refunds-errors | payments-gw (2) | abce | innocent | yes | yes | no | no | 9 | 5 | 99 |
-| 108 | payments-errors | kafka (2) | abcde | noise, noise-on-c | no | no | no | no | 9 | 5 | 115 |
-| 109 | fraud-check-latency | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 90 |
-| 110 | cart-latency | redis-cache (1) | abcd | innocent, noise, noise-on-c | yes | no | no | no | 8 | 5 | 108 |
-| 111 | pricing-latency | promotions (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 108 |
-| 112 | payments-gw-latency | payments-gw (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 122 |
-| 113 | cart-latency | promotions (2) | abcde | innocent | yes | no | no | no | 9 | 5 | 187 |
-| 114 | refunds-errors | redis-cache (3) | abce | noise | yes | yes | no | no | 7 | 4 | 118 |
-| 115 | pricing-errors | promotions (1) | abcd | innocent | yes | no | no | no | 8 | 5 | 95 |
-| 116 | api-gateway-errors | inventory (2) | abcde | innocent, noise | yes | yes | no | no | 10 | 6 | 109 |
-| 117 | inventory-errors | warehouse-sync (1) | abcde | noise, noise-on-c | no | no | no | no | 9 | 5 | 115 |
-| 118 | fraud-check-latency | fraud-check (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 92 |
-| 119 | mobile-bff-latency | api-gateway (1) | abce | - | yes | yes | no | no | 7 | 4 | 93 |
-| 120 | refunds-latency | payments-gw (2) | abcde | noise, noise-on-c | yes | yes | no | no | 9 | 5 | 113 |
-| 121 | fraud-check-errors | fraud-check (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 83 |
-| 122 | legacy-billing-errors | legacy-billing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 87 |
-| 123 | cart-errors | cart (0) | abcd | - | yes | no | yes | no | 7 | 5 | 90 |
-| 124 | refunds-latency | payments-gw (2) | abce | gap, noise | yes | yes | no | no | 7 | 4 | 97 |
-| 125 | checkout-errors | payments (1) | abc | noise | yes | yes | no | no | 6 | 4 | 100 |
-| 126 | web-frontend-errors | refunds (2) | abc | noise | yes | yes | no | no | 6 | 4 | 93 |
-| 127 | payments-latency | payments-gw (1) | abc | innocent, noise | yes | yes | yes | no | 8 | 5 | 113 |
-| 128 | pricing-errors | promotions (1) | abc | noise | yes | yes | no | no | 6 | 4 | 98 |
-| 129 | pricing-latency | promotions (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 118 |
-| 130 | inventory-errors | inventory (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 91 |
-| 131 | pricing-errors | redis-cache (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 98 |
-| 132 | reporting-errors | postgres-orders (1) | abcde | innocent | yes | no | no | no | 10 | 6 | 115 |
-| 133 | mobile-bff-latency | payments (3) | abcde | - | yes | no | no | no | 8 | 5 | 128 |
-| 134 | legacy-billing-latency | legacy-billing (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 77 |
-| 135 | reporting-latency | analytics (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 113 |
-| 136 | legacy-billing-latency | legacy-billing (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 119 |
-| 137 | payments-gw-errors | payments-gw (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 110 |
-| 138 | legacy-billing-errors | legacy-billing (0) | abc | - | yes | yes | yes | no | 6 | 4 | 88 |
-| 139 | reporting-errors | postgres-orders (1) | abce | innocent | yes | yes | no | no | 9 | 5 | 100 |
-| 140 | fraud-check-latency | fraud-check (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 94 |
-| 141 | web-frontend-latency | auth (2) | abce | innocent, noise | yes | yes | no | no | 9 | 5 | 103 |
-| 142 | refunds-latency | redis-cache (3) | abce | gap, innocent | no | yes | no | no | 9 | 5 | 112 |
-| 143 | web-frontend-latency | api-gateway (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 96 |
-| 144 | recommendations-latency | recommendations (0) | abce | noise | yes | yes | yes | no | 7 | 4 | 91 |
+| 25 | subscriptions-errors | subscriptions (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 78 |
+| 26 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 77 |
+| 27 | shipping-latency | inventory (1) | abcde | - | yes | no | no | no | 8 | 5 | 86 |
+| 28 | inventory-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 97 |
+| 29 | payments-latency | payments (0) | abcde | - | yes | yes | yes | no | 8 | 5 | 90 |
+| 30 | search-errors | redis-cache (1) | abd | innocent | yes | no | no | no | 8 | 5 | 96 |
+| 31 | payments-latency | payments (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 123 |
+| 32 | refunds-latency | fraud-check (2) | abc | noise | yes | yes | no | no | 6 | 4 | 173 |
+| 33 | payments-latency | payments (0) | abce | - | yes | yes | yes | no | 7 | 4 | 96 |
+| 34 | legacy-billing-latency | legacy-billing (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 106 |
+| 35 | payments-gw-errors | payments-gw (0) | abc | noise, noise-on-c | yes | no | yes | no | 7 | 4 | 109 |
+| 36 | reporting-latency | kafka (2) | abcd | noise, noise-on-c | no | no | no | no | 8 | 5 | 152 |
+| 37 | fraud-check-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 146 |
+| 38 | search-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 103 |
+| 39 | shipping-latency | shipping (0) | abce | noise | yes | yes | yes | no | 7 | 4 | 105 |
+| 40 | reporting-latency | reporting (0) | abc | - | yes | yes | yes | no | 6 | 4 | 81 |
+| 41 | shipping-latency | warehouse-sync (2) | abce | gap, noise | yes | yes | no | no | 7 | 4 | 109 |
+| 42 | inventory-errors | warehouse-sync (1) | abcd | - | yes | yes | yes | no | 7 | 5 | 106 |
+| 43 | web-frontend-errors | redis-cache (3) | abc | noise | yes | yes | no | no | 6 | 4 | 82 |
+| 44 | web-frontend-errors | payments (3) | abc | innocent | yes | yes | no | no | 8 | 5 | 106 |
+| 45 | inventory-errors | postgres-orders (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 100 |
+| 46 | inventory-latency | postgres-orders (1) | abc | innocent, noise, noise-on-c | yes | yes | no | no | 8 | 5 | 133 |
+| 47 | subscriptions-errors | subscriptions (0) | abc | - | yes | yes | yes | no | 6 | 4 | 92 |
+| 48 | checkout-errors | inventory (1) | abce | - | yes | yes | no | no | 7 | 4 | 103 |
+| 49 | recommendations-errors | kafka (2) | abcd | noise | yes | yes | no | no | 7 | 5 | 92 |
+| 50 | pricing-latency | promotions (1) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 129 |
+| 51 | payments-gw-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 112 |
+| 52 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | yes | no | yes | no | 8 | 5 | 108 |
+| 53 | inventory-latency | postgres-orders (1) | abc | noise, noise-on-c | no | no | no | no | 7 | 4 | 131 |
+| 54 | reporting-latency | analytics (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 109 |
+| 55 | payments-errors | redis-cache (2) | abc | gap | yes | yes | yes | no | 6 | 4 | 126 |
+| 56 | fraud-check-latency | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 98 |
+| 57 | checkout-latency | checkout (0) | abc | noise | yes | yes | yes | no | 6 | 4 | 93 |
+| 58 | shipping-errors | warehouse-sync (2) | abcde | - | yes | no | no | no | 8 | 5 | 113 |
+| 59 | web-frontend-errors | pricing (3) | abce | noise | yes | yes | no | no | 7 | 4 | 106 |
+| 60 | shipping-latency | inventory (1) | abc | noise, noise-on-c | no | no | no | no | 7 | 4 | 149 |
+| 61 | mobile-bff-errors | postgres-orders (3) | abce | noise | yes | yes | no | no | 7 | 4 | 121 |
+| 62 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 116 |
+| 63 | fraud-check-errors | fraud-check (0) | abc | - | yes | yes | yes | no | 6 | 4 | 100 |
+| 64 | pricing-latency | promotions (1) | abc | - | yes | yes | no | no | 6 | 4 | 103 |
+| 65 | api-gateway-latency | redis-cache (2) | abcd | noise | yes | no | no | no | 7 | 5 | 128 |
+| 66 | notifications-errors | notifications (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 98 |
+| 67 | shipping-latency | inventory (1) | abcde | - | yes | no | no | no | 8 | 5 | 129 |
+| 68 | reporting-latency | kafka (2) | abcde | innocent | yes | no | no | no | 9 | 5 | 107 |
+| 69 | cart-latency | redis-cache (1) | abce | - | yes | yes | no | no | 7 | 4 | 158 |
+| 70 | reporting-errors | postgres-orders (1) | abc | noise | yes | yes | no | no | 6 | 4 | 120 |
+| 71 | cart-latency | pricing (1) | abcd | innocent, noise | yes | yes | no | no | 9 | 6 | 157 |
+| 72 | cart-latency | redis-cache (1) | abcd | innocent, noise, noise-on-c | no | no | no | no | 9 | 6 | 156 |
+| 73 | pricing-errors | promotions (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 143 |
+| 74 | cart-errors | redis-cache (1) | abcde | innocent | yes | yes | no | no | 10 | 6 | 120 |
+| 75 | refunds-latency | kafka (3) | abcd | noise | yes | yes | no | no | 7 | 5 | 116 |
+| 76 | inventory-errors | inventory (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 100 |
+| 77 | api-gateway-errors | refunds (1) | abce | noise | yes | yes | yes | no | 7 | 4 | 106 |
+| 78 | inventory-errors | warehouse-sync (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 129 |
+| 79 | mobile-bff-latency | recommendations (2) | abce | - | yes | yes | no | no | 7 | 4 | 104 |
+| 80 | search-errors | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 104 |
+| 81 | legacy-billing-errors | legacy-billing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 82 |
+| 82 | reporting-latency | postgres-orders (1) | abcd | innocent | yes | yes | no | no | 9 | 6 | 94 |
+| 83 | analytics-latency | kafka (1) | abd | innocent | yes | yes | no | no | 8 | 5 | 150 |
+| 84 | payments-gw-errors | payments-gw (0) | abcd | noise, noise-on-c | no | no | yes | no | 8 | 5 | 106 |
+| 85 | recommendations-errors | redis-cache (1) | abcde | - | yes | no | yes | no | 8 | 5 | 115 |
+| 86 | fraud-check-errors | redis-cache (1) | ab | - | yes | yes | no | no | 5 | 3 | 103 |
+| 87 | cart-errors | redis-cache (1) | abcde | innocent, noise, noise-on-c | yes | yes | no | no | 10 | 6 | 156 |
+| 88 | legacy-billing-errors | postgres-orders (1) | abd | - | yes | no | no | no | 6 | 4 | 113 |
+| 89 | search-errors | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 126 |
+| 90 | recommendations-errors | recommendations (0) | abce | - | yes | yes | yes | no | 7 | 4 | 125 |
+| 91 | inventory-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 148 |
+| 92 | search-errors | redis-cache (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 116 |
+| 93 | checkout-errors | fraud-check (2) | abc | innocent | yes | yes | no | no | 8 | 5 | 142 |
+| 94 | api-gateway-latency | subscriptions (1) | abcd | noise | yes | yes | no | no | 7 | 5 | 155 |
+| 95 | analytics-latency | kafka (1) | abd | - | yes | no | no | no | 6 | 4 | 170 |
+| 96 | mobile-bff-errors | redis-cache (3) | abcd | - | yes | no | no | no | 7 | 5 | 99 |
+| 97 | inventory-latency | inventory (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 109 |
+| 98 | shipping-latency | notifications (1) | abce | - | yes | yes | no | no | 7 | 4 | 166 |
+| 99 | api-gateway-errors | payments (2) | abcde | noise | yes | yes | no | no | 8 | 5 | 148 |
+| 100 | inventory-errors | postgres-orders (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 152 |
+| 101 | search-latency | redis-cache (1) | abd | innocent | yes | no | no | no | 8 | 5 | 150 |
+| 102 | recommendations-errors | recommendations (0) | abc | noise | yes | yes | no | no | 6 | 4 | 87 |
+| 103 | checkout-errors | warehouse-sync (2) | abcd | gap | yes | no | no | no | 7 | 5 | 102 |
+| 104 | mobile-bff-latency | subscriptions (2) | abcde | noise | yes | yes | no | no | 8 | 5 | 107 |
+| 105 | web-frontend-errors | search (2) | abc | - | yes | yes | no | no | 6 | 4 | 94 |
+| 106 | cart-errors | redis-cache (1) | abc | - | yes | yes | yes | no | 6 | 4 | 99 |
+| 107 | refunds-errors | payments-gw (2) | abce | innocent | yes | yes | no | no | 9 | 5 | 108 |
+| 108 | payments-errors | kafka (2) | abcde | noise, noise-on-c | no | no | no | no | 9 | 5 | 109 |
+| 109 | fraud-check-latency | redis-cache (1) | abd | - | yes | no | no | no | 6 | 4 | 103 |
+| 110 | cart-latency | redis-cache (1) | abcd | innocent, noise, noise-on-c | yes | no | no | no | 8 | 5 | 120 |
+| 111 | pricing-latency | promotions (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 103 |
+| 112 | payments-gw-latency | payments-gw (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 94 |
+| 113 | cart-latency | promotions (2) | abcde | innocent | yes | no | no | no | 9 | 5 | 124 |
+| 114 | refunds-errors | redis-cache (3) | abce | noise | yes | yes | no | no | 7 | 4 | 92 |
+| 115 | pricing-errors | promotions (1) | abcd | innocent | yes | no | no | no | 8 | 5 | 99 |
+| 116 | api-gateway-errors | inventory (2) | abcde | innocent, noise | yes | yes | no | no | 10 | 6 | 114 |
+| 117 | inventory-errors | warehouse-sync (1) | abcde | noise, noise-on-c | no | no | no | no | 9 | 5 | 114 |
+| 118 | fraud-check-latency | fraud-check (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 93 |
+| 119 | mobile-bff-latency | api-gateway (1) | abce | - | yes | yes | no | no | 7 | 4 | 82 |
+| 120 | refunds-latency | payments-gw (2) | abcde | noise, noise-on-c | yes | yes | no | no | 9 | 5 | 127 |
+| 121 | fraud-check-errors | fraud-check (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 90 |
+| 122 | legacy-billing-errors | legacy-billing (0) | abcd | noise, noise-on-c | yes | yes | yes | no | 8 | 5 | 95 |
+| 123 | cart-errors | cart (0) | abcd | - | yes | no | yes | no | 7 | 5 | 91 |
+| 124 | refunds-latency | payments-gw (2) | abce | gap, noise | yes | yes | no | no | 7 | 4 | 112 |
+| 125 | checkout-errors | payments (1) | abc | noise | yes | yes | no | no | 6 | 4 | 108 |
+| 126 | web-frontend-errors | refunds (2) | abc | noise | yes | yes | no | no | 6 | 4 | 120 |
+| 127 | payments-latency | payments-gw (1) | abc | innocent, noise | yes | yes | yes | no | 8 | 5 | 112 |
+| 128 | pricing-errors | promotions (1) | abc | noise | yes | yes | no | no | 6 | 4 | 122 |
+| 129 | pricing-latency | promotions (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 113 |
+| 130 | inventory-errors | inventory (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 96 |
+| 131 | pricing-errors | redis-cache (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 125 |
+| 132 | reporting-errors | postgres-orders (1) | abcde | innocent | yes | no | no | no | 10 | 6 | 103 |
+| 133 | mobile-bff-latency | payments (3) | abcde | - | yes | no | no | no | 8 | 5 | 100 |
+| 134 | legacy-billing-latency | legacy-billing (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 163 |
+| 135 | reporting-latency | analytics (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 104 |
+| 136 | legacy-billing-latency | legacy-billing (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 87 |
+| 137 | payments-gw-errors | payments-gw (0) | abcd | - | yes | yes | yes | no | 7 | 5 | 101 |
+| 138 | legacy-billing-errors | legacy-billing (0) | abc | - | yes | yes | yes | no | 6 | 4 | 113 |
+| 139 | reporting-errors | postgres-orders (1) | abce | innocent | yes | yes | no | no | 9 | 5 | 123 |
+| 140 | fraud-check-latency | fraud-check (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 100 |
+| 141 | web-frontend-latency | auth (2) | abce | innocent, noise | yes | yes | no | no | 9 | 5 | 111 |
+| 142 | refunds-latency | redis-cache (3) | abce | gap, innocent | no | yes | no | no | 9 | 5 | 114 |
+| 143 | web-frontend-latency | api-gateway (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 113 |
+| 144 | recommendations-latency | recommendations (0) | abce | noise | yes | yes | yes | no | 7 | 4 | 96 |
 | 145 | fraud-check-errors | fraud-check (0) | abc | noise | yes | yes | yes | no | 6 | 4 | 91 |
-| 146 | web-frontend-errors | cart (2) | abce | gap | yes | yes | no | no | 7 | 4 | 105 |
-| 147 | recommendations-errors | kafka (2) | abce | gap, noise, noise-on-c | no | yes | yes | no | 8 | 4 | 109 |
-| 148 | reporting-errors | reporting (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 80 |
-| 149 | shipping-errors | postgres-orders (2) | abcd | gap, noise | yes | no | no | no | 7 | 5 | 89 |
-| 150 | recommendations-errors | redis-cache (1) | abcd | - | yes | no | no | no | 7 | 5 | 89 |
-| 151 | web-frontend-errors | analytics (3) | abce | noise | yes | yes | no | no | 7 | 4 | 160 |
-| 152 | pricing-latency | redis-cache (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 143 |
-| 153 | search-latency | search (0) | abc | - | yes | yes | yes | no | 6 | 4 | 92 |
-| 154 | subscriptions-errors | redis-cache (3) | abce | noise | yes | yes | no | no | 7 | 4 | 93 |
-| 155 | cart-errors | redis-cache (1) | abc | - | yes | yes | yes | no | 6 | 4 | 88 |
-| 156 | inventory-errors | warehouse-sync (1) | abc | innocent, noise, noise-on-c | yes | no | no | no | 8 | 5 | 99 |
-| 157 | mobile-bff-errors | recommendations (2) | abc | innocent, noise | yes | yes | no | no | 8 | 5 | 91 |
-| 158 | notifications-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 89 |
-| 159 | recommendations-errors | kafka (2) | abcd | gap, innocent, noise, noise-on-c | no | no | no | no | 9 | 6 | 117 |
-| 160 | reporting-errors | analytics (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 100 |
-| 161 | pricing-latency | promotions (1) | abcd | innocent, noise, noise-on-c | yes | yes | no | no | 9 | 6 | 106 |
-| 162 | mobile-bff-latency | checkout (2) | abce | innocent, noise | yes | yes | no | no | 9 | 5 | 102 |
-| 163 | inventory-latency | warehouse-sync (1) | abcd | - | yes | yes | yes | no | 7 | 5 | 91 |
-| 164 | subscriptions-latency | kafka (3) | abcd | noise | yes | no | yes | no | 7 | 5 | 96 |
-| 165 | recommendations-latency | analytics (1) | abcd | innocent, noise | yes | no | no | no | 8 | 5 | 103 |
-| 166 | payments-gw-errors | kafka (1) | abd | - | yes | no | no | no | 6 | 4 | 91 |
-| 167 | recommendations-errors | recommendations (0) | abcd | noise | yes | yes | no | no | 7 | 5 | 95 |
-| 168 | recommendations-latency | recommendations (0) | abcde | - | yes | no | no | no | 8 | 5 | 83 |
-| 169 | web-frontend-errors | analytics (3) | abcd | innocent | yes | yes | no | no | 9 | 6 | 96 |
-| 170 | reporting-errors | postgres-orders (1) | abce | - | yes | yes | no | no | 7 | 4 | 85 |
-| 171 | reporting-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 91 |
-| 172 | recommendations-latency | kafka (2) | abc | noise | yes | yes | no | no | 6 | 4 | 102 |
-| 173 | notifications-latency | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 90 |
-| 174 | reporting-errors | reporting (0) | abce | - | yes | yes | yes | no | 7 | 4 | 100 |
-| 175 | refunds-latency | payments-gw (2) | abce | noise | yes | yes | no | no | 7 | 4 | 178 |
-| 176 | cart-latency | redis-cache (1) | abcde | innocent | yes | no | no | no | 9 | 5 | 213 |
-| 177 | shipping-latency | kafka (2) | abcd | - | yes | yes | no | no | 7 | 5 | 98 |
-| 178 | legacy-billing-latency | postgres-orders (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 97 |
-| 179 | analytics-latency | analytics (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 94 |
-| 180 | mobile-bff-latency | pricing (3) | abce | innocent | yes | yes | no | no | 9 | 5 | 113 |
-| 181 | fraud-check-errors | fraud-check (0) | abcd | - | yes | no | yes | no | 7 | 5 | 98 |
-| 182 | inventory-latency | postgres-orders (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 93 |
-| 183 | cart-latency | promotions (2) | abce | gap | yes | yes | no | no | 7 | 4 | 89 |
-| 184 | payments-gw-errors | payments-gw (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 82 |
-| 185 | reporting-errors | analytics (1) | abcde | - | yes | no | no | no | 8 | 5 | 94 |
-| 186 | payments-errors | redis-cache (2) | abcde | gap, noise | yes | no | no | no | 8 | 5 | 97 |
-| 187 | cart-errors | redis-cache (1) | abcde | - | yes | yes | no | no | 8 | 5 | 98 |
-| 188 | search-latency | search (0) | abc | noise | yes | yes | yes | no | 6 | 4 | 79 |
-| 189 | notifications-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 86 |
+| 146 | web-frontend-errors | cart (2) | abce | gap | yes | yes | no | no | 7 | 4 | 148 |
+| 147 | recommendations-errors | kafka (2) | abce | gap, noise, noise-on-c | no | yes | yes | no | 8 | 4 | 164 |
+| 148 | reporting-errors | reporting (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 112 |
+| 149 | shipping-errors | postgres-orders (2) | abcd | gap, noise | yes | no | no | no | 7 | 5 | 113 |
+| 150 | recommendations-errors | redis-cache (1) | abcd | - | yes | no | no | no | 7 | 5 | 98 |
+| 151 | web-frontend-errors | analytics (3) | abce | noise | yes | yes | no | no | 7 | 4 | 96 |
+| 152 | pricing-latency | redis-cache (1) | abc | noise, noise-on-c | yes | yes | no | no | 7 | 4 | 114 |
+| 153 | search-latency | search (0) | abc | - | yes | yes | yes | no | 6 | 4 | 79 |
+| 154 | subscriptions-errors | redis-cache (3) | abce | noise | yes | yes | no | no | 7 | 4 | 103 |
+| 155 | cart-errors | redis-cache (1) | abc | - | yes | yes | yes | no | 6 | 4 | 95 |
+| 156 | inventory-errors | warehouse-sync (1) | abc | innocent, noise, noise-on-c | yes | no | no | no | 8 | 5 | 110 |
+| 157 | mobile-bff-errors | recommendations (2) | abc | innocent, noise | yes | yes | no | no | 8 | 5 | 105 |
+| 158 | notifications-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 96 |
+| 159 | recommendations-errors | kafka (2) | abcd | gap, innocent, noise, noise-on-c | no | no | no | no | 9 | 6 | 112 |
+| 160 | reporting-errors | analytics (1) | abcd | innocent | yes | no | no | no | 9 | 6 | 114 |
+| 161 | pricing-latency | promotions (1) | abcd | innocent, noise, noise-on-c | yes | yes | no | no | 9 | 6 | 116 |
+| 162 | mobile-bff-latency | checkout (2) | abce | innocent, noise | yes | yes | no | no | 9 | 5 | 112 |
+| 163 | inventory-latency | warehouse-sync (1) | abcd | - | yes | yes | yes | no | 7 | 5 | 144 |
+| 164 | subscriptions-latency | kafka (3) | abcd | noise | yes | no | yes | no | 7 | 5 | 125 |
+| 165 | recommendations-latency | analytics (1) | abcd | innocent, noise | yes | no | no | no | 8 | 5 | 123 |
+| 166 | payments-gw-errors | kafka (1) | abd | - | yes | no | no | no | 6 | 4 | 94 |
+| 167 | recommendations-errors | recommendations (0) | abcd | noise | yes | yes | no | no | 7 | 5 | 101 |
+| 168 | recommendations-latency | recommendations (0) | abcde | - | yes | no | no | no | 8 | 5 | 111 |
+| 169 | web-frontend-errors | analytics (3) | abcd | innocent | yes | yes | no | no | 9 | 6 | 105 |
+| 170 | reporting-errors | postgres-orders (1) | abce | - | yes | yes | no | no | 7 | 4 | 90 |
+| 171 | reporting-latency | postgres-orders (1) | abcd | - | yes | no | no | no | 7 | 5 | 94 |
+| 172 | recommendations-latency | kafka (2) | abc | noise | yes | yes | no | no | 6 | 4 | 96 |
+| 173 | notifications-latency | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 94 |
+| 174 | reporting-errors | reporting (0) | abce | - | yes | yes | yes | no | 7 | 4 | 76 |
+| 175 | refunds-latency | payments-gw (2) | abce | noise | yes | yes | no | no | 7 | 4 | 105 |
+| 176 | cart-latency | redis-cache (1) | abcde | innocent | yes | no | no | no | 9 | 5 | 123 |
+| 177 | shipping-latency | kafka (2) | abcd | - | yes | yes | no | no | 7 | 5 | 103 |
+| 178 | legacy-billing-latency | postgres-orders (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 110 |
+| 179 | analytics-latency | analytics (0) | abcd | noise | yes | no | yes | no | 7 | 5 | 113 |
+| 180 | mobile-bff-latency | pricing (3) | abce | innocent | yes | yes | no | no | 9 | 5 | 122 |
+| 181 | fraud-check-errors | fraud-check (0) | abcd | - | yes | no | yes | no | 7 | 5 | 94 |
+| 182 | inventory-latency | postgres-orders (1) | abc | innocent | yes | yes | no | no | 8 | 5 | 109 |
+| 183 | cart-latency | promotions (2) | abce | gap | yes | yes | no | no | 7 | 4 | 105 |
+| 184 | payments-gw-errors | payments-gw (0) | abc | noise, noise-on-c | yes | yes | yes | no | 7 | 4 | 79 |
+| 185 | reporting-errors | analytics (1) | abcde | - | yes | no | no | no | 8 | 5 | 139 |
+| 186 | payments-errors | redis-cache (2) | abcde | gap, noise | yes | no | no | no | 8 | 5 | 116 |
+| 187 | cart-errors | redis-cache (1) | abcde | - | yes | yes | no | no | 8 | 5 | 95 |
+| 188 | search-latency | search (0) | abc | noise | yes | yes | yes | no | 6 | 4 | 86 |
+| 189 | notifications-errors | kafka (1) | ab | - | yes | yes | no | no | 5 | 3 | 79 |
 | 190 | checkout-errors | postgres-orders (2) | abce | innocent, noise | yes | yes | no | no | 9 | 5 | 105 |
-| 191 | api-gateway-errors | auth (1) | abce | noise | yes | yes | no | no | 7 | 4 | 94 |
-| 192 | recommendations-errors | redis-cache (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 93 |
-| 193 | notifications-errors | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 89 |
-| 194 | recommendations-errors | kafka (2) | abcd | noise | yes | yes | no | no | 7 | 5 | 86 |
-| 195 | refunds-errors | payments (1) | abcde | - | yes | no | no | no | 8 | 5 | 100 |
-| 196 | payments-gw-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 91 |
-| 197 | mobile-bff-errors | payments (3) | abcd | noise | yes | no | no | no | 7 | 5 | 98 |
-| 198 | inventory-errors | inventory (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 77 |
-| 199 | notifications-errors | notifications (0) | abcd | noise | yes | yes | no | no | 7 | 5 | 88 |
-| 200 | refunds-latency | fraud-check (2) | abce | noise, noise-on-c | no | no | no | no | 8 | 4 | 105 |
+| 191 | api-gateway-errors | auth (1) | abce | noise | yes | yes | no | no | 7 | 4 | 123 |
+| 192 | recommendations-errors | redis-cache (1) | abce | noise, noise-on-c | yes | yes | no | no | 8 | 4 | 132 |
+| 193 | notifications-errors | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 101 |
+| 194 | recommendations-errors | kafka (2) | abcd | noise | yes | yes | no | no | 7 | 5 | 105 |
+| 195 | refunds-errors | payments (1) | abcde | - | yes | no | no | no | 8 | 5 | 117 |
+| 196 | payments-gw-latency | kafka (1) | ab | innocent | yes | yes | no | no | 7 | 4 | 99 |
+| 197 | mobile-bff-errors | payments (3) | abcd | noise | yes | no | no | no | 7 | 5 | 100 |
+| 198 | inventory-errors | inventory (0) | abcd | noise | yes | yes | yes | no | 7 | 5 | 84 |
+| 199 | notifications-errors | notifications (0) | abcd | noise | yes | yes | no | no | 7 | 5 | 80 |
+| 200 | refunds-latency | fraud-check (2) | abce | noise, noise-on-c | no | no | no | no | 8 | 4 | 94 |
 
 ## Limitations (read before quoting the numbers)
 
@@ -337,7 +337,7 @@ Each in the agent's own words, from this run's `check_hypothesis` and `conclude`
 - **Same authors.** The generator, the checks and the agent were written by the same team, and the decoy
   types mirror the facts the agent checks (live path, edge validity, rollback, anomaly propagation). This
   shows those checks are implemented correctly and hold up on random topologies, not that they are the
-  right checks for real incidents. The perturbations were added after a review called the first version
+  right checks for real incidents. The perturbations were added after mock judges called the first version
   (one decoy per verdict rule, nothing else in the window) built to be passed; the agent's ranking (onset-
   and upstream-aware leading cause, a monitoring gap as weaker support) changed in the same round, by the
   same team, knowing what the perturbations are. Not a blind test either.

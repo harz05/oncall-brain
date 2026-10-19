@@ -1,7 +1,7 @@
 # On-call Brain, as a Claude Code plugin
 
 Incident agents and a company brain over a FalkorDB graph, inside Claude Code. The plugin ships the On-call Brain
-MCP server (30 tools, 2 prompts) and three skills:
+MCP server (33 tools, 2 prompts) and three skills:
 
 | Skill | What it does |
 |---|---|
@@ -41,7 +41,7 @@ claude --plugin-dir ./plugin                            # or, installed from Git
 
 Claude Code expands `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` and `Bearer ${ONCALL_BRAIN_TOKEN}` from your
 environment when it starts the plugin's servers, so with neither variable set the entry reaches a local `make mcp-http`.
-Both servers publish the same 30 tools and the skills work with either. With no checkout next to the plugin the stdio
+Both servers publish the same 33 tools and the skills work with either. With no checkout next to the plugin the stdio
 server `oncall-brain` cannot start; Claude Code reports it as failed and the remote server carries on. The round trip
 is tested in `tests/integration/test_plugin.py` against a local `--http` server started with `API_TOKEN`, and in
 `tests/integration/test_deploy.py` against the deployment app (`docs/DEPLOY.md`), where the token is required.

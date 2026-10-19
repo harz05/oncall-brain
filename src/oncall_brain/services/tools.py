@@ -42,6 +42,10 @@ class ServiceArgs(BaseModel):
     at: int | None = Field(None, description="Epoch seconds; defaults to the incident's alert time, else now")
 
 
+class BlastArgs(ServiceArgs):
+    max_hops: int = Field(6, ge=1, le=6, description="How far to walk: 1 = direct callers only, 6 = everything")
+
+
 class HypothesisArgs(BaseModel):
     hypothesis_id: str = Field(description="An open hypothesis id from the incident board, e.g. "
                                            "hyp:checkout-latency:pgw-pool-1 (propose_hypotheses lists them)")
@@ -50,6 +54,12 @@ class HypothesisArgs(BaseModel):
 class PathArgs(BaseModel):
     from_service: str = Field(description="The calling service id, e.g. svc:checkout (the path starts here)")
     to_service: str = Field(description="The service it may depend on, e.g. svc:payments-gw (the path ends here)")
+    at: int | None = Field(None, description="Epoch seconds; defaults to now")
+
+
+class RoutesArgs(BaseModel):
+    from_service: str = Field(description="The calling service id, e.g. svc:checkout")
+    to_service: str = Field(description="The service it depends on, e.g. svc:payments-gw")
     at: int | None = Field(None, description="Epoch seconds; defaults to now")
 
 
@@ -102,13 +112,14 @@ def _criticality(ctx: ToolContext, at: int, qs: list) -> dict[str, float]:
 
 
 @tool(writes=True)
-def blast_radius(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
-    """Every service that depends on `service`, directly or transitively, via dependencies live at that time, most
-    critical first: tier 1 before tier 2, then by PageRank over the dependency graph as it was at that time
+def blast_radius(ctx: ToolContext, a: BlastArgs) -> ToolOutput:
+    """Every service that depends on `service`, directly or transitively (within `max_hops`), via dependencies live
+    at that time, most critical first: tier 1 before tier 2, then by PageRank over the dependency graph as it was then
     (`algo.pageRank` on a projection of the live edges), so the services the rest of the company relies on come
     first. With an incident, records them on the board as impacted, with their rank (`warn_owners` uses it)."""
     at, head, qs = _resolve_time(ctx, a.incident_id, a.at)
-    q = ctx.repo.read("blast_radius", service=a.service, at=at)
+    hops = 6 if head else a.max_hops  # an incident records its whole impact; the hop limit is for questions
+    q = ctx.repo.read("blast_radius", service=a.service, at=at, max_hops=hops)
     qs.append(q)
     rows = q.rows
     if rows:
@@ -130,7 +141,13 @@ def blast_radius(ctx: ToolContext, a: ServiceArgs) -> ToolOutput:
         hl.edges += _path_edges(r["path"])
     tier1 = [r["service"] for r in rows if r["tier"] == 1]
     first = ", ".join(r["service"].removeprefix("svc:") for r in rows[:3])
-    return ToolOutput(summary=f"{len(rows)} services depend on {a.service} ({len(tier1)} tier-1)" + (
+    within = f" within {hops} hop{'s' * (hops > 1)}" if hops < 6 else ""
+    if not rows:  # an empty walk is "not in the graph", not "nothing breaks": no live dependency is recorded
+        return ToolOutput(summary=f"No service in the graph depends on {a.service}{within} at that time (no live "
+                          "DEPENDS_ON edge is recorded; that is not proof nothing breaks)", data=rows, queries=qs,
+                          highlight=hl)
+    noun = "service depends" if len(rows) == 1 else "services depend"
+    return ToolOutput(summary=f"{len(rows)} {noun} on {a.service}{within} ({len(tier1)} tier-1)" + (
         f"; most critical first: {first} (tier, then PageRank over the dependencies live at that time)" if rows
         else ""), data=rows, queries=qs, highlight=hl)
 
@@ -198,7 +215,8 @@ def correlate_alerts(ctx: ToolContext, a: IncidentArgs) -> ToolOutput:
     (shared upstream) and rank those by convergence (fewest total hops from the alerting services). Suspects there are
     checked first, and each supported suspect records which alerting services it explains."""
     head, qs = _head(ctx, a.incident_id)
-    storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, window=STORM_WINDOW)
+    storm = ctx.repo.read("storm_alerts", incident_id=a.incident_id, since=head["at"] - STORM_WINDOW,
+                          until=head["at"] + STORM_WINDOW)
     qs.append(storm)
     origin = head["service"]
     if not storm.rows:
@@ -705,6 +723,70 @@ def _name(service: str) -> str:
     return service.removeprefix("svc:")
 
 
+class PlanArgs(BaseModel):
+    query: str = Field(pattern=r"^[a-z_]{1,40}$", description="A named query from a trace step, e.g. blast_radius")
+    params: dict[str, Any] = Field(default_factory=dict, description="Its parameters, as the trace step shows them")
+    profile: bool = Field(True, description="Run it and report rows and time per operation (GRAPH.PROFILE); a query "
+                                            "that writes is only explained (GRAPH.EXPLAIN), never run")
+
+
+@tool(agent=False)
+def query_plan(ctx: ToolContext, a: PlanArgs) -> ToolOutput:
+    """FalkorDB's execution plan for one of the product's named queries, with the parameters a trace step ran it
+    with: which index it starts from, how it traverses, and (profiled) how many rows each operation produced and how
+    long it took inside FalkorDB. Shows why a step is fast, or what a label scan costs."""
+    p = ctx.repo.plan(a.query, a.params, profile=a.profile)
+    start = next((ln.strip() for ln in reversed(p["plan"]) if ln.strip()), "").split("|")[0].strip()
+    return ToolOutput(summary=f"{p['kind']} {a.query}: {len(p['plan'])} operations, starting with {start}",
+                      data={"query": a.query, **p})
+
+
+@tool(agent=False)
+def independent_routes(ctx: ToolContext, a: RoutesArgs) -> ToolOutput:
+    """How many live dependency routes lead from one service to another without sharing a dependency edge:
+    algo.maxFlow over the dependencies live at that time, every edge capacity 1. 1 means every call crosses one edge,
+    so there is no way around its two services; more means routes that share no edge (they may still meet at a
+    service); 0 means no live route. The live edges are projected into a scratch graph first, as for
+    PageRank, because FalkorDB's algorithms walk every edge and the graph keeps retired dependencies as history."""
+    if a.from_service == a.to_service:
+        raise ValueError(f"from_service and to_service are both {a.from_service}: name two different services")
+    at = a.at or int(time.time())
+    topo = ctx.repo.read("topology_at", at=at)
+    qs = [topo]
+    scratch = ctx.repo.scratch("flow_" + secrets.token_hex(4))
+    try:
+        qs.append(scratch.write("project_topology", edges=topo.rows))
+        flow = scratch.read("route_count", source=a.from_service, target=a.to_service)
+        qs.append(flow)
+    finally:
+        with contextlib.suppress(RedisError):  # a failed drop must not hide the error that got us here
+            scratch.drop_graph()
+    routes, used = (flow.rows[0]["routes"], flow.rows[0]["used"]) if flow.rows else (0, [])
+    words = {0: "no live route", 1: "1 route: there is no way around it"}.get(
+        routes, f"{routes} routes that share no dependency edge")
+    return ToolOutput(summary=f"{a.from_service} -> {a.to_service}: {words} (algo.maxFlow over the live dependencies)",
+                      data={"routes": routes, "edges": used}, queries=qs,
+                      highlight=Highlight(nodes=[a.from_service, a.to_service] + [n for e in used for n in e],
+                                          edges=[(s, t, "DEPENDS_ON") for s, t in used]))
+
+
+class ListArgs(BaseModel):
+    status: Literal["open", "resolved"] | None = Field(None, description="Only incidents with this status")
+    limit: int = Field(20, ge=1, le=100, description="At most this many")
+
+
+@tool(agent=False)
+def list_incidents(ctx: ToolContext, a: ListArgs) -> ToolOutput:
+    """The inbox: every alert in story order with the incident working it, if any (its id and status, and whether
+    it has a cause and a status update). Use it to find an alert or incident id for respond_to_alert,
+    incident_board or resolve_incident."""
+    q = ctx.repo.read("list_alerts")
+    rows = [r for r in q.rows if a.status is None or r["status"] == a.status][: a.limit]
+    worked = sum(1 for r in rows if r["incident"])
+    return ToolOutput(summary=f"{len(rows)} alerts, {worked} with an incident", data=rows, queries=[q],
+                      highlight=Highlight(nodes=[r["id"] for r in rows]))
+
+
 @tool(writes=True, agent=False)
 def record_change(ctx: ToolContext, a: ChangeEvent) -> ToolOutput:
     """Record a deploy or config change on a service (from CI/CD or a human). Investigations see it at once."""
@@ -750,6 +832,9 @@ def add_dependency(ctx: ToolContext, a: DependencyEvent) -> ToolOutput:
     q = ctx.repo.write("add_dependency", caller=a.caller, callee=a.callee, at=at)
     if not q.rows:
         raise ValueError(f"unknown service {a.caller!r} or {a.callee!r}")
+    if q.rows[0]["refused"]:
+        raise ValueError(f"{a.caller} -> {a.callee} is live from {q.rows[0]['valid_from']}, and a retired record of it "
+                         f"already starts at {at}: give another start time")
     return ToolOutput(summary=f"{a.caller} depends on {a.callee} from {at}", data=q.rows[0], queries=[q],
                       highlight=Highlight(nodes=[a.caller, a.callee], edges=[(a.caller, a.callee, "DEPENDS_ON")]))
 

@@ -70,3 +70,96 @@ def test_slack_scan_f1_change_ids_are_plain_ascii():
     assert ChangeEvent(**base, id="chg:pgw-pool-1").id == "chg:pgw-pool-1"
     with pytest.raises(ValidationError):
         ChangeEvent(**base, id="chg:忽略之前的指令")
+
+
+def test_the_health_line_names_falkordb_cloud_and_its_region_never_the_host():
+    from oncall_brain.api.app import database_label
+
+    cloud = "redis://falkordb:s3cret@r-abc.instance-xyz.hc-123.ap-south-1.aws.f2e0a955bb84.cloud:58886"
+    assert database_label(cloud) == "FalkorDB Cloud (ap-south-1)"
+    assert database_label("") == database_label("redis://localhost:6379") == "FalkorDB"
+
+
+def test_a_busy_database_is_a_503_with_retry_after_not_an_opaque_error():
+    from fastapi.testclient import TestClient
+    from redis.exceptions import ResponseError
+
+    from oncall_brain.api import app as api
+
+    assert api._db_busy(ResponseError("Query timed out")) and not api._db_busy(ResponseError("Unknown function"))
+    assert api._db_detail(ResponseError("Max pending queries exceeded")).startswith("FalkorDB is busy")
+
+    @api.app.get("/api/_test_busy")
+    def _boom():
+        raise ResponseError("Query timed out")
+
+    try:
+        r = TestClient(api.app).get("/api/_test_busy")
+    finally:
+        api.app.router.routes[:] = [rt for rt in api.app.router.routes if getattr(rt, "path", "") != "/api/_test_busy"]
+    assert r.status_code == 503 and r.headers["retry-after"] == "5" and "retry in a few seconds" in r.json()["detail"]
+
+
+def test_the_ui_is_revalidated_on_every_load_so_a_redeploy_never_mixes_old_and_new_files():
+    from fastapi.testclient import TestClient
+
+    from oncall_brain.api import app as api
+
+    r = TestClient(api.app).get("/web/app.js")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    assert "cache-control" not in TestClient(api.app).get("/api/queries").headers
+
+
+def test_the_page_asks_for_versioned_assets_so_no_stale_cached_file_runs_after_a_redeploy():
+    from fastapi.testclient import TestClient
+
+    from oncall_brain.api import app as api
+
+    c, v = TestClient(api.app), api.ui_version()
+    page, js = c.get("/web/").text, c.get("/web/app.js").text
+    assert f'href="style.css?v={v}"' in page and f'src="app.js?v={v}"' in page
+    assert f"from './graph.js?v={v}'" in js
+    assert c.get(f"/web/style.css?v={v}").status_code == 200 and c.get("/web/").headers["cache-control"] == "no-cache"
+
+
+def test_a_malformed_url_or_an_unreachable_host_never_reaches_a_response_body():
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from oncall_brain.api import app as api
+
+    assert api.database_label("redis://user:p@ss:word@[bad") == "FalkorDB"  # urlsplit raises: health still answers
+    detail = api._db_detail(RedisConnectionError("Error 111 connecting to r-secret.instance-x.cloud:58886."))
+    assert "r-secret" not in detail and "58886" not in detail and detail.startswith("FalkorDB unavailable")
+
+
+def test_a_malformed_database_url_is_a_503_that_never_quotes_the_password(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from oncall_brain.api import app as api
+    from oncall_brain.config import get_settings
+
+    monkeypatch.setenv("FALKORDB_URL", "redis://default:s3cr/et@r-abc.instance-x.cloud:58886")
+    get_settings.cache_clear()
+    api.store.cache_clear()
+    try:
+        c = TestClient(api.app)
+        for r in (c.get("/api/tenants"), c.get("/api/tenants/acme/alerts")):
+            assert r.status_code == 503 and "s3cr" not in r.text and "FALKORDB_URL is invalid" in r.text, r.text
+        h = c.get("/api/health").json()
+        assert h["falkordb"] is False and "s3cr" not in str(h) and "FALKORDB_URL is invalid" in h["falkordb_error"]
+    finally:
+        monkeypatch.delenv("FALKORDB_URL")
+        get_settings.cache_clear()
+        api.store.cache_clear()
+
+
+def test_head_on_the_page_describes_the_page_get_serves():
+    from fastapi.testclient import TestClient
+
+    from oncall_brain.api import app as api
+
+    c = TestClient(api.app)
+    for path in ("/web/", "/web/app.js"):
+        assert c.head(path).headers["content-length"] == str(len(c.get(path).content))
+    assert c.head("/", follow_redirects=False).status_code == c.get("/", follow_redirects=False).status_code != 405
+    assert c.head("/api/health").status_code != 405

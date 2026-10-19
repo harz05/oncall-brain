@@ -56,10 +56,6 @@ def _api():
     return app
 
 
-def _redis():
-    return _api().store().db.connection
-
-
 async def _verified(request: Request) -> dict[str, str]:
     """The form fields of a request Slack signed, else 404 (Slack is off) or 401. The raw body is read once and the
     signature is checked over those exact bytes before anything is parsed. A signature is accepted once: Slack never
@@ -75,8 +71,7 @@ async def _verified(request: Request) -> dict[str, str]:
     if not (fresh and hmac.compare_digest(sent, good)):
         raise HTTPException(401, "invalid Slack signature")
     # A timestamp may be up to MAX_AGE ahead of us, so its signature stays acceptable for up to 2 * MAX_AGE.
-    if not await run_in_threadpool(_redis().set, f"oncall_brain:slack:seen:{good[3:].decode()}", 1, nx=True,
-                                   ex=2 * MAX_AGE):
+    if not await run_in_threadpool(_api().store().claim, f"oncall_brain:slack:seen:{good[3:].decode()}", 2 * MAX_AGE):
         raise HTTPException(401, "invalid Slack signature")
     return {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
@@ -189,7 +184,7 @@ def _incident(repo: GraphRepository, rest: str, f: dict[str, str]) -> dict[str, 
     alert = _open_alert(repo, svc, symptom)
     if alert and alert["incident"]:  # a run (here, the UI, the alert webhook) already worked it: show it, ~30 ms
         return {**_render(repo, alert["incident"]), "response_type": "in_channel"}
-    if not _redis().set(_pending(repo), 1, nx=True, ex=900):  # two commands at once: one run
+    if not _api().store().claim(_pending(repo), 900):  # two commands at once: one run
         return blocks.say(BUSY)
     Thread(target=_work, args=(repo, svc, symptom, alert and alert["id"], f.get("response_url", "")),
            daemon=True).start()
@@ -222,7 +217,7 @@ def _work(repo: GraphRepository, svc: dict[str, Any], symptom: str, alert: str |
         msg = blocks.say(f"The agents could not finish: {_why(e)}")
     finally:
         with suppress(RedisError):  # else it expires with its 15-minute lease
-            _redis().delete(_pending(repo))
+            _api().store().unclaim(_pending(repo))
     _post(url, {**msg, "response_type": "in_channel", "replace_original": False})
 
 

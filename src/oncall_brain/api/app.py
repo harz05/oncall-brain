@@ -8,6 +8,7 @@ body cap (api/guards.py), optional API_TOKEN; security headers on every response
 Run: uvicorn oncall_brain.api.app:app --port 8000
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path as FsPath
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 import anyio
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request
@@ -47,7 +49,7 @@ from oncall_brain.services import sessions
 from oncall_brain.services.limits import DailyBudget, RunsBusy
 from oncall_brain.services.seeding import TenantLimitReached, reset
 from oncall_brain.services.tools import AlertEvent
-from oncall_brain.wiring import exposure_warning
+from oncall_brain.wiring import BadDatabaseUrl, exposure_warning
 
 WEB_DIR = FsPath(os.environ.get("WEB_DIR") or FsPath(__file__).resolve().parents[3] / "web")
 
@@ -72,6 +74,45 @@ app = FastAPI(title="On-call Brain", description="Incident agents over a FalkorD
 # check_dir=False: the web/ folder may appear after the server starts.
 # html=True serves web/index.html at /web/. Asset paths in the page are relative, so the same files also work as a
 # static site (e.g. GitHub Pages with ?offline=1).
+
+
+@lru_cache(maxsize=1)
+def ui_version() -> str:
+    """One hash of the UI's code and styles, read once per server start. The page asks for app.js, graph.js and
+    style.css with ?v=<it>, so a redeploy that changes any of them gives them new URLs: no browser can serve a cached
+    old file next to the new page."""
+    h = hashlib.sha256()
+    for name in UI_FILES:
+        if (WEB_DIR / name).is_file():
+            h.update((WEB_DIR / name).read_bytes())
+    return h.hexdigest()[:12]
+
+
+UI_FILES = ("app.js", "graph.js", "style.css")
+
+
+def _ui_file(name: str, swaps: tuple[tuple[str, str], ...], media: str) -> Response:
+    if not (WEB_DIR / name).is_file():
+        raise HTTPException(404, f"no UI at {WEB_DIR / name}")
+    text = (WEB_DIR / name).read_text()
+    for old, new in swaps:
+        text = text.replace(old, new.format(v=ui_version()))
+    return Response(text, media_type=media)
+
+
+# Before the mount, which would otherwise answer these: the page and app.js carry the versioned asset URLs.
+@app.api_route("/web/", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/web/index.html", methods=["GET", "HEAD"], include_in_schema=False)
+def ui_page() -> Response:
+    return _ui_file("index.html", (('href="style.css"', 'href="style.css?v={v}"'),
+                                   ('src="app.js"', 'src="app.js?v={v}"')), "text/html")
+
+
+@app.api_route("/web/app.js", methods=["GET", "HEAD"], include_in_schema=False)
+def ui_app() -> Response:
+    return _ui_file("app.js", (("from './graph.js'", "from './graph.js?v={v}'"),), "text/javascript")
+
+
 app.mount("/web", StaticFiles(directory=WEB_DIR, html=True, check_dir=False), name="web")
 
 
@@ -81,7 +122,7 @@ app.mount("/web", StaticFiles(directory=WEB_DIR, html=True, check_dir=False), na
 def store() -> FalkorGraphStore:
     from oncall_brain.wiring import make_store
 
-    return make_store()
+    return make_store()  # a malformed FALKORDB_URL raises BadDatabaseUrl: a 503 with fixed text, never the URL
 
 
 @lru_cache
@@ -109,12 +150,24 @@ async def _unknown(_: Request, e: ValueError) -> JSONResponse:
     return JSONResponse({"detail": str(e)}, status_code=404)
 
 
+# FalkorDB refusing work it is too busy for: a read past READ_TIMEOUT_MS, a full queue (FalkorDB Cloud queues 50), a
+# query past its memory cap. Each is a 503 with Retry-After, not a broken database.
+_DB_BUSY = ("Query timed out", "Max pending queries exceeded", "mem consumption exceeded capacity")
+
+
+def _db_busy(e: RedisError) -> bool:
+    return any(m in str(e) for m in _DB_BUSY)
+
+
 def _db_detail(e: RedisError) -> str:
     if isinstance(e, LockError):  # the database is fine; another run holds the tenant
         return ("another agent run holds this tenant's lock (one run per tenant at a time; a crashed holder frees it "
-                "after 15 min): retry shortly")
-    if isinstance(e, RedisConnectionError):  # also covers auth failures
-        return f"FalkorDB unavailable: {e}"
+                "within 2 minutes): retry shortly")
+    if _db_busy(e):
+        return f"FalkorDB is busy ({(str(e).splitlines() or [''])[0][:80]}): retry in a few seconds"
+    if isinstance(e, RedisConnectionError):  # also covers auth failures; the text names the host, so it is logged
+        log.warning("FalkorDB unavailable: %s", e)
+        return f"FalkorDB unavailable: {_db_category(e)}"
     # Timeouts and ResponseError (e.g. "GRAPH.COPY failed, could not fork"). First line only, capped: FalkorDB
     # error texts can quote the whole query.
     return f"FalkorDB error ({type(e).__name__}): {(str(e).splitlines() or [''])[0][:160]}"
@@ -122,7 +175,8 @@ def _db_detail(e: RedisError) -> str:
 
 @app.exception_handler(RedisError)
 async def _db_error(_: Request, e: RedisError) -> JSONResponse:
-    return JSONResponse({"detail": _db_detail(e)}, status_code=409 if isinstance(e, LockError) else 503)
+    return JSONResponse({"detail": _db_detail(e)}, status_code=409 if isinstance(e, LockError) else 503,
+                        headers={"Retry-After": "5"} if _db_busy(e) else None)
 
 
 @app.exception_handler(RunsBusy)
@@ -186,7 +240,7 @@ def tenant_repo(tenant: Tenant) -> GraphRepository:
 Repo = Annotated[GraphRepository, Depends(tenant_repo)]
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def index(request: Request) -> RedirectResponse:
     if not (WEB_DIR / "index.html").is_file():
         raise HTTPException(404, f"no UI at {WEB_DIR / 'index.html'}")
@@ -200,6 +254,8 @@ def _db_category(e: Exception) -> str:
 
     if isinstance(e, AuthenticationError):
         return "authentication failed (check FALKORDB_PASSWORD or FALKORDB_URL)"
+    if isinstance(e, BadDatabaseUrl):
+        return str(e)
     if isinstance(e, RedisTimeout):
         return "timed out"
     if isinstance(e, RedisConnectionError):
@@ -207,6 +263,20 @@ def _db_category(e: Exception) -> str:
     if isinstance(e, ValueError):
         return "FALKORDB_URL is invalid (percent-encode / ? # @ : in the password)"
     return f"{type(e).__name__} (see the server log)"
+
+
+def database_label(url: str) -> str:
+    """Where the graphs live, for the health line, without the host: "FalkorDB Cloud (ap-south-1)" when FALKORDB_URL
+    points at a FalkorDB Cloud instance (its hosts end in .cloud and carry their region), else "FalkorDB"."""
+    # ponytail: reads the Cloud host format; an explicit setting if Cloud ever changes it.
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:  # a malformed FALKORDB_URL: health says so in falkordb_error, the label stays generic
+        return "FalkorDB"
+    if not host.endswith(".cloud"):
+        return "FalkorDB"
+    region = next((part for part in host.split(".") if re.fullmatch(r"[a-z]{2}-[a-z]+-\d", part)), "")
+    return f"FalkorDB Cloud ({region})" if region else "FalkorDB Cloud"
 
 
 def health_body() -> dict[str, Any]:
@@ -223,13 +293,14 @@ def health_body() -> dict[str, Any]:
         planner, ok = llm().name, True
     except HTTPException as e:
         planner, ok = f"<error: {e.detail}>", False
-    return {"ok": ok and up, "falkordb": up, "falkordb_error": db_error, "planner": planner,
+    return {"ok": ok and up, "falkordb": up, "falkordb_error": db_error,
+            "database": database_label(get_settings().falkordb_url), "planner": planner,
             "default_tenant": get_settings().default_tenant, "slack": bool(get_settings().slack_webhook_url),
             "llm_budget": {"cap": get_settings().llm_daily_token_cap, "used_today": used,
                            "hourly_cap": get_settings().llm_hourly_token_cap, "used_this_hour": hour}}
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health() -> JSONResponse:
     body = health_body()
     return JSONResponse(body, status_code=200 if body["ok"] else 503)

@@ -38,6 +38,24 @@ rerunning reproduces the graphs exactly (seeded), the timings only roughly.
   and on the 100-service graph, sweeping every service as origin or target.
 - **Machine.** FalkorDB 4.22.0 (native module, not Docker) on 12th Gen Intel(R) Core(TM) i5-12500H, Linux 6.8.0-138-generic, glibc 2.35, Python 3.12.14, client and server on the same laptop.
 
+## Oct 19: two walks moved into FalkorDB user-defined functions
+
+`blast_radius` is now `oncall.live_upstream`, and the live-hop distance in `path_suspects` and `recall_similar` is
+`oncall.live_reach` (`src/oncall_brain/adapters/falkordb/udf/oncall.js`): breadth-first walks inside FalkorDB that
+drop a dead edge as they meet it. `live_reach` walks once per alerting service, is handed the services that changed in
+the window, and stops when it has found them all; a first version walked once per (alerting service, suspect) pair and
+was 8 to 17 times slower at 1,000 to 2,500 services, which a review measured and this replaced. The tables below are
+from before this change. Same bench graphs (`scripts.bench.org(n)` and `cases`), p50 of 5 runs, local FalkorDB 4.22.0,
+the rows checked equal to the Cypher form each time:
+
+| query | 100 svc | 1000 svc | 2500 svc |
+|---|---|---|---|
+| path_suspects: `live_reach` / the `shortestPath` block it replaced | 2.9 / 2.0 ms | 13.1 / 12.4 ms | 30.9 / 64.6 ms |
+| recall_similar: `live_reach` / the `shortestPath` block | 2.7 / 1.9 ms | 14.2 / 31.7 ms | 35.6 / 140.8 ms |
+
+At 100 services the UDF costs about a millisecond more than the Cypher; from 1,000 up it is as fast or 2 to 4 times
+faster. `memory_suspects`, `storm_unexplained` and `depends_among` keep the `shortestPath` block described below.
+
 ## What changed
 
 Each rewrite keeps the 6-hop bound and the rule that every edge on a path must be valid at the alert time
@@ -358,10 +376,12 @@ Results | Records produced: 780, Execution time: 0.036096 ms
 question is not how fast the graph is under load but whether it stays right: no duplicate ids or edges, every read
 answered, every agent run finding the same cause. Three things make that true, and each has a table below: unique
 constraints on `id` for every label (`FalkorRepository._ensure_unique_ids`), one graph per tenant, and the per-tenant
-lock around agent runs and write tools (ARCHITECTURE 3.7). The same claims are tests in
+lock around agent runs and write tools (ARCHITECTURE 3.7), which since Oct 19 is a `Lease` node in the coordination
+graph `oncall_brain_coord`, exclusive by a UNIQUE constraint (it was a Redis lock before the move to FalkorDB Cloud).
+The tables below were measured with the lease. The same claims are tests in
 `tests/integration/test_concurrency.py`.
 
-- **Machine.** FalkorDB 4.18.3 (native module, not Docker) on Intel(R) Xeon(R) Processor @ 2.80GHz, Linux 6.18.44-fc-v114, glibc 2.39, Python 3.12.3, client and server on the same laptop.
+- **Machine.** FalkorDB 4.22.0 (native module, not Docker) on 12th Gen Intel(R) Core(TM) i5-12500H, Linux 6.8.0-138-generic, glibc 2.35, Python 3.12.14, client and server on the same laptop.
 - **Client.** Python threads in one process, so the client side shares one interpreter lock; separate processes (the
   API, the MCP server, an outside agent) can only widen the gap between concurrent and sequential.
 
@@ -369,10 +389,10 @@ lock around agent runs and write tools (ARCHITECTURE 3.7). The same claims are t
 
 | | wall ms | per incident p50 ms | per incident p95 ms | right cause | duplicate ids / edges |
 |---|---|---|---|---|---|
-| 8 tenants one after another | 1915 | 251.2 | 265.4 | 8/8 | |
-| 8 tenants at the same moment | 847 | 825.9 | 835.9 | 8/8 | 0 / 0 |
+| 8 tenants one after another | 914 | 109.7 | 133.1 | 8/8 | |
+| 8 tenants at the same moment | 456 | 445.8 | 453.1 | 8/8 | 0 / 0 |
 
-Eight tenants responding to the same alert at the same moment finish in under half the sequential wall time. Each
+Eight tenants responding to the same alert at the same moment finish in half the sequential wall time. Each
 run takes longer on its own (they share FalkorDB's thread pool), all eight find `chg:pgw-pool-1`, and no graph ends
 with a duplicate id or edge.
 
@@ -380,11 +400,10 @@ with a duplicate id or edge.
 
 | readers | agent runs (lock held) | reads completed | read p50 ms | read p95 ms | read p99 ms | slowest read ms | read errors |
 |---|---|---|---|---|---|---|---|
-| 8 | 3 in 5853 ms | 1236 | 23.5 | 104.7 | 149.9 | 226 | 0 |
+| 8 | 6 in 4943 ms | 1548 | 24.9 | 50.3 | 57.4 | 68 | 0 |
 
-Reads never take the lock. While three full stories (reset, act 1, resolve, act 2, act 3) ran back to back on one
-tenant, eight readers completed 1,236 `blast_radius` / `who_knows` / `ask` calls on that tenant, p50 24 ms, none
-failing. The first run of this benchmark failed 189 of 1,344 reads: a reset deleted the tenant graph and then copied
+Reads never take the lock. While six agent runs held it back to back on one tenant, eight readers completed 1,548
+`blast_radius` / `who_knows` / `ask` calls on that tenant, p50 25 ms, none failing. The first run of this benchmark failed 189 of 1,344 reads: a reset deleted the tenant graph and then copied
 the pristine one, and every read that landed in the gap got `Invalid graph operation on empty key`. `restore()` now
 copies the pristine graph to a staging key and `RENAME`s it over the tenant key; Redis renames atomically and
 FalkorDB moves the graph, its indexes and its constraints with the key, so a reader never meets a missing graph
@@ -394,12 +413,12 @@ FalkorDB moves the graph, its indexes and its constraints with the key, so a rea
 
 | writers x events | wall ms | write p50 ms | write p95 ms | write p99 ms | slowest write ms | changes (expected) | anomalies (expected) | changes with != 1 CHANGED edge | duplicate ids / edges |
 |---|---|---|---|---|---|---|---|---|---|
-| 8 x 25 | 1386 | 2.2 | 92.9 | 204.1 | 474 | 201 (201) | 200 (200) | 0 | 0 / 0 |
+| 8 x 25 | 1226 | 1.8 | 79.6 | 167.2 | 283 | 201 (201) | 200 (200) | 0 | 0 / 0 |
 
-Each `record_change` / `record_anomaly` call takes the tenant lock for one query, so 600 writes from 8 threads
-serialise at the lock: about 2 ms for the write itself, plus a waiting tail set by how often a waiter polls. With
-redis-py's default 100 ms poll the slowest write waited 1.3 s (p99 406 ms); the lock now polls every 10 ms, which
-brought the slowest write to 0.3 to 0.5 s and p99 to about 200 ms across runs. The graph ends exactly as written:
+Each `record_change` / `record_anomaly` call takes the tenant lock for one query, so 400 writes from 8 threads
+serialise at the lock: about 2 ms for the write itself, plus a waiting tail set by how often a waiter polls. Polling
+every 100 ms, the first version's slowest write waited 1.3 s (p99 406 ms); the lease polls every 10 ms, and the
+slowest write now waits under 0.3 s, p99 under 170 ms. The graph ends exactly as written:
 201 changes (200 new, plus the one id all 8 writers re-recorded, still one node with one `CHANGED` edge), 200
 anomalies, no duplicates.
 
@@ -409,11 +428,11 @@ anomalies, no duplicates.
 |---|---|---|---|
 | CREATE on 10 ids, no constraint | 10, 10, 10 | 241, 241, 241 | 0 |
 | CREATE on 10 ids, UNIQUE constraint | 0, 0, 0 | 11, 11, 11 | 230, 230, 230 |
-| MERGE one edge (5 keys, 600 calls) | duplicate edges: 0, 2, 2 | | |
+| MERGE one edge (5 keys, 600 calls) | duplicate edges: 1, 1, 0 | | |
 
 Twelve clients racing `CREATE` on the same ten ids make ten duplicate nodes on an unconstrained label and none on a
 constrained one (the losers get `unique constraint violation`). `MERGE` on one edge from 12 clients still produced
-duplicate edges in two repeats of three: FalkorDB has no uniqueness constraint on relationships, which is why the
+duplicate edges in two repeats of three: FalkorDB's relationship constraints are keyed on a property; `DEPENDS_ON` now carries one (UNIQUE `key`), the board edges the agents write do not, which is why the
 per-tenant lock stays around anything that writes edges. The constraints are the floor under the lock, not a
 replacement for it.
 

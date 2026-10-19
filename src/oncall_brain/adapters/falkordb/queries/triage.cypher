@@ -2,7 +2,9 @@
 // purpose: Open the incident for an alert (idempotent). The incident is the shared board every agent reads and writes.
 MATCH (a:Alert {id: $alert_id})-[:FIRED_ON]->(s:Service)
 MERGE (i:Incident {id: $incident_id})
-ON CREATE SET i.status = 'open', i.opened_at = a.at, i.symptom = a.symptom, i.title = a.name
+// recorded_at is transaction time: the server clock when the graph learned of it (opened_at is the alert's time).
+ON CREATE SET i.status = 'open', i.opened_at = a.at, i.symptom = a.symptom, i.title = a.name,
+              i.recorded_at = timestamp() / 1000.0
 MERGE (i)-[:TRIGGERED_BY]->(a)
 MERGE (i)-[:IMPACTS {hops: 0}]->(s)
 RETURN i.id AS incident, i.status AS status, s.id AS service, a.at AS at, a.symptom AS symptom, a.name AS alert
@@ -14,45 +16,17 @@ RETURN i.id AS incident, i.status AS status, o.id AS service, a.id AS alert, a.a
        a.name AS alert_name
 
 // name: blast_radius
-// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, with its shortest path.
+// purpose: Multi-hop impact: every service that transitively depends on $service via DEPENDS_ON edges valid at $at, within $max_hops hops (1 to 6), with its shortest path. The walk is a FalkorDB user-defined function (udf/oncall.js: live_upstream), a breadth-first search inside the database that drops dead edges as it meets them.
 MATCH (target:Service {id: $service})
-WITH [[target]] AS f0
-// Breadth-first against the edge direction, one hop per CALL, over edges live at $at: level k lists one path
-// [caller, ..., target] per caller k hops away, so each service is expanded once per level instead of once per path.
-// A caller keeps its path through its first parent in level order, and callers are ordered by that parent, then by
-// id descending: the order a depth-first traversal meets them, so ties pick the same path the plain
-// (caller)-[:DEPENDS_ON*1..6]->(target) query does (queries/reference.cypher).
-CALL { WITH f0 UNWIND range(0, size(f0) - 1) AS i WITH i, f0[i] AS path, f0[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f1 }
-CALL { WITH f1 UNWIND range(0, size(f1) - 1) AS i WITH i, f1[i] AS path, f1[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f2 }
-CALL { WITH f2 UNWIND range(0, size(f2) - 1) AS i WITH i, f2[i] AS path, f2[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f3 }
-CALL { WITH f3 UNWIND range(0, size(f3) - 1) AS i WITH i, f3[i] AS path, f3[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f4 }
-CALL { WITH f4 UNWIND range(0, size(f4) - 1) AS i WITH i, f4[i] AS path, f4[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f5 }
-CALL { WITH f5 UNWIND range(0, size(f5) - 1) AS i WITH i, f5[i] AS path, f5[i][0] AS x
-       MATCH (n:Service)-[r:DEPENDS_ON]->(x) WHERE r.valid_from <= $at AND (r.valid_to IS NULL OR r.valid_to > $at)
-       WITH n, min(i) AS first, collect(path)[0] AS path ORDER BY first, id(n) DESC
-       RETURN collect([n] + path) AS f6 }
-// A service can come back at a later level (a longer walk); its first level is its distance.
-UNWIND [f1, f2, f3, f4, f5, f6] AS level
-UNWIND level AS path
-WITH path[0] AS caller, collect(path)[0] AS path
+// live_upstream walks DEPENDS_ON against the edge direction, one level at a time, and follows only edges live at $at,
+// so a retired dependency never adds its callers to the frontier. Each caller comes once, at its fewest hops, with
+// its path through the first parent met; ties go the way the plain (caller)-[:DEPENDS_ON*1..6]->(target) query
+// takes them (queries/reference.cypher: blast_radius_reference, checked row for row by test_query_equivalence.py).
+UNWIND oncall.live_upstream(target, $at, $max_hops) AS hit
+MATCH (caller:Service {id: hit.service})
 MATCH (t:Team)-[o:OWNS]->(caller)
 WHERE coalesce(o.valid_from, 0) <= $at AND (o.valid_to IS NULL OR o.valid_to > $at)
-RETURN caller.id AS service, caller.tier AS tier, size(path) - 1 AS hops, t.name AS team, [n IN path | n.id] AS path
+RETURN caller.id AS service, caller.tier AS tier, hit.hops AS hops, t.name AS team, hit.path AS path
 ORDER BY hops, service
 
 // name: record_impacts
@@ -76,10 +50,12 @@ ON CREATE SET pg.at = $at, pg.for_service = $service
 RETURN pg.for_service AS first_for
 
 // name: storm_alerts
-// purpose: Other alerts within $window seconds of this incident's alert, before or after it (an alert storm; whichever alert is answered first folds the others in).
+// purpose: Other alerts between $since and $until, the storm window around this incident's alert, before or after it (an alert storm; whichever alert is answered first folds the others in).
 MATCH (i:Incident {id: $incident_id})-[:TRIGGERED_BY]->(a:Alert)
+// The window comes in as parameters, not as a.at +- $window: FalkorDB uses the Alert.at range index only for literal
+// or parameter bounds (GRAPH.EXPLAIN: Node By Index Scan instead of a label scan; tests/integration/test_plans.py).
 MATCH (other:Alert)-[:FIRED_ON]->(s:Service)
-WHERE other.id <> a.id AND other.at >= a.at - $window AND other.at <= a.at + $window
+WHERE other.at >= $since AND other.at <= $until AND other.id <> a.id
 RETURN other.id AS alert, other.name AS name, s.id AS service, other.at AS at
 ORDER BY at
 
@@ -131,7 +107,7 @@ RETURN count(svc) AS shared
 
 // name: open_incident_for_alert
 // purpose: An open incident this alert was already folded into (CORRELATED_WITH), so a second responder joins it instead of opening a duplicate incident.
-MATCH (i:Incident {status: 'open'})-[:CORRELATED_WITH]->(:Alert {id: $alert_id})
+MATCH (:Alert {id: $alert_id})<-[:CORRELATED_WITH]-(i:Incident {status: 'open'})  // from the alert's id index
 MATCH (i)-[:TRIGGERED_BY]->(t:Alert)
 RETURN i.id AS incident, t.id AS trigger
 LIMIT 1

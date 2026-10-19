@@ -70,7 +70,8 @@ def _registry_handler(name: str) -> Handler:
         out = respond.run_tool(_repo(store, tenant), name, args)
         return {"summary": out.summary, "data": out.data,
                 "queries": [{"name": q.name, "readonly": q.readonly, "rows": q.row_count, "ms": q.ms,
-                             "cypher": q.cypher} for q in out.queries]}
+                             "db_ms": q.db_ms, "cached": q.cached, "wrote": q.wrote, "cypher": q.cypher}
+                            for q in out.queries]}
 
     return run
 
@@ -96,6 +97,7 @@ def _llm():
 
 
 RUNS = {"respond_to_alert", "reset_tenant"}  # count against RUNS_PER_HOUR per client, as the API's respond and reset do
+DESTRUCTIVE = {"reset_tenant", "record_change", "record_doc", "record_message", "record_ticket"}
 
 
 def _client(ctx: Any) -> str | None:
@@ -174,7 +176,11 @@ def catalogue() -> dict[str, tuple[types.Tool, Handler]]:
         schema["properties"] = {"tenant": TENANT, **schema.get("properties", {})}
         schema["required"] = ["tenant", *schema.get("required", [])]
         tool = types.Tool(name=name, description=description, input_schema=schema,
-                          annotations=types.ToolAnnotations(read_only_hint=not writes and name != "ask"))
+                          # MCP reads a write tool as destructive unless told otherwise; ours add facts (MERGE,
+                          # closed validity windows), except DESTRUCTIVE: reset_tenant wipes what the graph learned,
+                          # and the record_* tools below overwrite a record when given an id that exists.
+                          annotations=types.ToolAnnotations(read_only_hint=not writes and name != "ask",
+                                                            destructive_hint=name in DESTRUCTIVE))
         out[name] = (tool, handler)
     return out
 

@@ -8,8 +8,9 @@ so the container is stateless; FalkorDB comes from FalkorDB Cloud (`FALKORDB_URL
 
 1. **GitHub.** Push this repository to a GitHub repository you own. Render deploys from it.
 2. **FalkorDB Cloud.** Sign in at https://app.falkordb.cloud, create a free database, open its connection details and
-   build one URL from them: `rediss://<username>:<password>@<host>:<port>` (`redis://` if the instance has no TLS).
-   Keep it for step 3. Optional check from your machine: `FALKORDB_URL='rediss://...' make demo` must end with
+   build one URL from them: `redis://<username>:<password>@<host>:<port>` (the Free tier has no TLS; `rediss://` on a
+   tier with TLS on). Keep it for step 3. Optional check from your machine: `FALKORDB_URL='redis://...' make demo`
+   must end with
    `DEMO OK` (a Cloud instance may run another FalkorDB version than the v4.22.0 pinned locally; if a query fails,
    note which).
 3. **Render.** Sign in at https://dashboard.render.com, New > Blueprint, pick the repository. `render.yaml` creates one
@@ -160,12 +161,12 @@ Defaults live in `deploy/aws/docker-compose.aws.yml`; set a line in `/opt/oncall
 | `MAX_CONCURRENT_RUNS` | 2 | Agent runs in progress at once, all clients together (the box runs one app process). One more is refused at once: 429, or an error line in the run stream. |
 | `LLM_DAILY_TOKEN_CAP` | 2,000,000 | Model tokens all runs may spend per UTC day (resets 05:30 IST), about 20 to 30 full runs. Counted in FalkorDB, so an app restart does not reset it; `curl -s https://<domain>/health` shows `llm_budget.used_today`. Checked before each model call, so runs in flight at the cap go one call over. Past it, runs use the deterministic planner. |
 | `LLM_RUN_TOKEN_CAP` | 150,000 | Model tokens one run may spend (the app default is 300,000). Past it the deterministic planner finishes that run and the trace says so. |
-| `MAX_TENANTS` | 20 | Tenants a reset may create, the default one included (each is two graphs, a few MB). A judge can open `?tenant=<name>` and press Reset for a private copy of the demo company. Past it: 429. |
+| `MAX_TENANTS` | 8 | Tenants a reset may create, the default one included (each is two graphs of about 4 MB; 8 fit FalkorDB Cloud Free's 100 MB). A judge can open `?tenant=<name>` and press Reset for a private copy of the demo company. Past it: 429. |
 | `LOCK_WAIT_SECONDS` | 5 | How long a run, reset or write waits for the demo company while another agent run holds it. Past it: "busy, retry shortly" at once, instead of a silent 2-minute wait. |
 | `LLM_HOURLY_TOKEN_CAP` | 500,000 | This hour's slice of the daily budget, so one busy hour cannot spend the day. Past it the deterministic planner decides until the next hour. |
 | `MAX_BODY_BYTES` | 65536 | Largest body `/api/*` and `/mcp` accept (413). Caddy refuses bodies over 1 MB first. |
 
-In the app the throttles, `MAX_CONCURRENT_RUNS` and `LLM_DAILY_TOKEN_CAP` default to 0 (off) and `MAX_TENANTS` to 20;
+In the app the throttles, `MAX_CONCURRENT_RUNS` and `LLM_DAILY_TOKEN_CAP` default to 0 (off) and `MAX_TENANTS` to 20 (8 on the AWS box);
 `deploy/aws/docker-compose.aws.yml` turns on the values above. The throttles are per client IP, so people behind one
 office NAT share them.
 
@@ -195,7 +196,9 @@ the 100 GB a month of outbound traffic AWS does not bill.
   graphs. Update when no agent run is in flight; if one was, its lock lease frees the demo company within 2 minutes.
 - **Back up the whole box.** EC2 -> Elastic Block Store -> Volumes -> the instance's volume -> Actions -> Create
   snapshot (Lightsail: the instance's Snapshots tab). The snapshot includes `.env` with the keys, so keep it private.
-- **Back up only the graphs.** `cd /opt/oncall-brain && sudo docker compose exec falkordb redis-cli SAVE && sudo
+- **Back up only the graphs.** With `FALKORDB_URL` set (section F) the graphs are on FalkorDB Cloud: export an RDB
+  from its console (Free keeps no backups and loses everything on a restart; the app re-seeds the demo company). With
+  the box's own FalkorDB: `cd /opt/oncall-brain && sudo docker compose exec falkordb redis-cli SAVE && sudo
   docker compose cp falkordb:/var/lib/falkordb/data/dump.rdb ./dump-$(date +%F).rdb`.
 - **Tear down.** EC2 -> Instances -> select it -> Instance state -> Terminate (the root volume goes with it unless you
   turned off "Delete on termination"). Then delete any volume left in the "available" state, release the Elastic IP
@@ -340,6 +343,43 @@ the Console too if you made it for this deployment.
   repository, commit, and run deploy.sh: host.sh recreates Caddy whenever the Caddyfile changes. (Section D's fix,
   editing the file on the box, is undone by the next deploy.)
 
+## F. The live site's database on FalkorDB Cloud
+
+The AWS box of section E serves the app; since Oct 19 its graphs live on a FalkorDB Cloud instance (Free tier, AWS
+ap-south-1, the box's region). The app needs only `FALKORDB_URL`; the box's own FalkorDB container stays as the
+fallback.
+
+1. **Create the instance.** At https://app.falkordb.cloud: Create, Free, AWS, ap-south-1, user `falkordb` and a
+   password. When it shows Running, the Connectivity tab (or Nodes) gives the host and port.
+2. **Check it from your machine first**, on a throwaway company, before the live site touches it. URL-encode the
+   password: `FALKORDB_URL='redis://falkordb:<password>@<host>:<port>' LLM_PROVIDER=mock make demo` must print
+   `DEMO OK`, and `FALKORDB_URL=... pytest tests/integration` runs the whole suite there.
+3. **Store the URL and deploy.** The URL holds the password, so it reaches the CLI through a pipe, as `deploy.sh`
+   does with the other secrets:
+   ```bash
+   aws ssm put-parameter --region ap-south-1 --name /graphhacks/FALKORDB_URL --type SecureString \
+     --tags Key=Project,Value=graphhacks --value file://<(printf %s "$URL")
+   aws ssm put-parameter --region ap-south-1 --name /graphhacks/MAX_TENANTS --type String --value 8 \
+     --tags Key=Project,Value=graphhacks     # two ~4 MB graphs per company: 8 fit the Free tier's 100 MB
+   deploy/aws/deploy.sh
+   ```
+   The container seeds the demo company on Cloud when it is missing, loads the `oncall` UDF library on its first
+   query and builds the coordination graph on its first lock.
+4. **Check.** `/health` says `"falkordb": true`; run an incident from the UI.
+5. **Roll back** to the box's own FalkorDB: `aws ssm delete-parameter --region ap-south-1 --name
+   /graphhacks/FALKORDB_URL && deploy/aws/deploy.sh`.
+
+What the Free tier means for the code (each item is handled in it, see README "Runs on FalkorDB Cloud"):
+
+- Its users get the graph commands but never `SET`, `INCR` or `EVAL`: locks and limits are graph writes
+  (`coordination.py`).
+- No TLS: `redis://`, not `rediss://` (docs/SECURITY.md says what that exposes).
+- No persistence or backups, and an instance unused for a day is stopped (deleted after 7): the health check runs a
+  real graph query every 5 seconds, and `serve.tend` restores the coordination constraints and the demo company once
+  a minute after a restart.
+- 100 MB of RAM for every graph: `MAX_TENANTS=8`; scratch graphs for the algorithms expire after 5 minutes even if
+  a process dies before dropping them.
+
 ## Settings that matter in public
 
 | Setting | Why |
@@ -350,7 +390,7 @@ the Console too if you made it for this deployment.
 | `MAX_TENANTS` | Each new tenant costs two graphs; resetting a new tenant past the cap returns 429. |
 | Abuse limits | `RATE_LIMIT_PER_MIN`, `WRITES_PER_MIN`, `RUNS_PER_HOUR`, `MAX_CONCURRENT_RUNS`, `LLM_DAILY_TOKEN_CAP`, `LLM_HOURLY_TOKEN_CAP`, `LOCK_WAIT_SECONDS`, `MAX_BODY_BYTES`: the public preset is in `.env.example`, `render.yaml` sets it, and docs/ARCHITECTURE.md 2.5 says what each bounds. |
 | `FORWARDED_ALLOW_IPS` | The proxy addresses uvicorn takes `X-Forwarded-For` from, so each visitor has its own throttle bucket. Name the proxy's network; `*` is safe only behind one proxy that overwrites the header. |
-| `FALKORDB_URL` / `FALKORDB_SSL` | Connection to a hosted FalkorDB (TLS). |
+| `FALKORDB_URL` / `FALKORDB_SSL` | Connection to a hosted FalkorDB: `redis://user:password@host:port` (FalkorDB Cloud Free has no TLS), `rediss://` where TLS is on. |
 
 `/health` answers on any `Host` (a platform's checker may not send the public name) and reveals only flags. There is
 no per-user auth: anyone with the token can address any tenant over MCP, and anyone who can reach the API can address
@@ -364,5 +404,5 @@ A deployment serves MCP at `https://<host>/mcp` with the bearer token above, fro
 any MCP SDK). The standalone server, `python -m oncall_brain.mcp_server --http --host 0.0.0.0 --port 8001`, still
 runs as a second process next to `make dev`; it checks `Host` and `Origin` the same way and needs no token unless one
 is set. `tests/integration/test_deploy.py` starts the deployment app as the Dockerfile does and checks all of this from
-outside: `/health`, the open API, the UI, the Host checks on both halves, 30 tools and an `ask` over `/mcp`, 401 on a
+outside: `/health`, the open API, the UI, the Host checks on both halves, 33 tools and an `ask` over `/mcp`, 401 on a
 wrong token.

@@ -12,7 +12,7 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: FALKORDB_URL        # rediss://<user>:<password>@<host>:<port> from FalkorDB Cloud
+      - key: FALKORDB_URL        # redis://<user>:<password>@<host>:<port> from FalkorDB Cloud
         sync: false
       - key: MCP_TOKEN           # the bearer token /mcp requires (the plugin's ONCALL_BRAIN_TOKEN)
         generateValue: true

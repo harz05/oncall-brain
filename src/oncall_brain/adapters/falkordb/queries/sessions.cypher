@@ -15,8 +15,10 @@ MERGE (s:Session {id: $session_id})
 ON CREATE SET s.user = $user, s.key = $key, s.started_at = $at
 SET s.last_at = $at
 WITH s
-OPTIONAL MATCH (p:Person)
-WHERE p.id = $user OR p.handle = $user
+// Two lookups, not `p.id = $user OR p.handle = $user`: an OR keeps FalkorDB off the id and handle indexes.
+OPTIONAL MATCH (byid:Person {id: $user})
+OPTIONAL MATCH (byhandle:Person {handle: $user})
+WITH s, coalesce(byid, byhandle) AS p
 FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END | MERGE (x)-[:OPENED]->(s))
 WITH DISTINCT s
 OPTIONAL MATCH (s)-[:ASKED]->(prev:Question)

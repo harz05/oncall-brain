@@ -47,7 +47,7 @@ servers, not a redirect. There is no per-user auth: anyone with the token can us
 
 ## What an outside model sees, and whether it picks right
 
-The server publishes `instructions` (the three ways to use it and what ids look like), 30 tools with a description
+The server publishes `instructions` (the three ways to use it and what ids look like), 33 tools with a description
 and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
 `readOnlyHint` annotations, and two prompts:
 
@@ -112,9 +112,9 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace harz05/oncall-brain`
 (Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
 `... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 30 tools, 2 prompts, and the who-owns skill's three calls on a
+the server through the launcher with an MCP client: 33 tools, 2 prompts, and the who-owns skill's three calls on a
 freshly reset tenant, every answer carrying its Cypher. Remote mode is tested the same way: the `oncall-brain-remote`
-entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 30 tools
+entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 33 tools
 and answers `ask`; a wrong token gets 401
 (`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`). Claude Code itself agrees:
 `claude --plugin-dir ./plugin mcp list` (2.1.301) shows `plugin:oncall-brain:oncall-brain` Connected over stdio and,
@@ -247,4 +247,4 @@ described, the prompts render, and the remote transport refuses requests without
 `tests/unit/test_serve.py` covers the deployment app: `/mcp` refused until a token is set while the API stays open,
 opened by `MCP_TOKEN` at the exact path, one `API_TOKEN` guarding both halves, the platform hostnames accepted;
 `tests/integration/test_deploy.py` starts it as the Dockerfile does and drives it from outside (`/health`, the UI,
-the Host checks, 30 tools and an `ask` over `/mcp`, 401 on a wrong token).
+the Host checks, 33 tools and an `ask` over `/mcp`, 401 on a wrong token).
