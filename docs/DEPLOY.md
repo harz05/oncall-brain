@@ -365,7 +365,7 @@ only `FALKORDB_URL`; the box's own FalkorDB container stays as the fallback. `/h
 5. **Roll back** to the box's own FalkorDB: `aws ssm delete-parameter --region ap-south-1 --name
    /graphhacks/FALKORDB_URL && deploy/aws/deploy.sh`.
 
-What the Free tier means for the code (each item is handled in it; see README "Runs on FalkorDB Cloud"):
+What the Free tier means for the code (each item is handled in it; see FALKORDB_NOTES.md):
 
 - Its users get the graph commands but never `SET`, `INCR` or `EVAL`. So locks, throttles and the LLM budget are
   `Lease` and `Counter` nodes in the `oncall_brain_coord` graph, with a UNIQUE constraint as the mutex
