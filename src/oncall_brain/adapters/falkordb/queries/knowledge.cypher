@@ -117,7 +117,7 @@ RETURN 'general' AS source, d.id AS id, d.title AS title, null AS service, null 
 
 // name: service_incidents
 // purpose: ask, "what happened" and "how do I": incidents that IMPACT a linked service, were CAUSED_BY a linked change or a change to a linked service, or are linked by id, newest first, with the cause and the runbook that fixed each (FIXED_WITH).
-// ponytail: scans every incident's IMPACTS / CAUSED_BY edges (tens here); start from the linked ids if incidents grow to many thousands.
+// limit: scans every incident's IMPACTS / CAUSED_BY edges (tens here); start from the linked ids if incidents grow to many thousands.
 MATCH (i:Incident)-[:IMPACTS|CAUSED_BY]->(x)
 OPTIONAL MATCH (x)-[:CHANGED]->(xs:Service)
 WITH i, x, xs

@@ -232,7 +232,7 @@ def timed(repo, name: str, params: dict, reps: int) -> tuple[list, list[float]]:
 
 
 def profile(repo, name: str, params: dict) -> str:
-    # ponytail: reaches into the repository's graph handle; GRAPH.PROFILE is a bench-only need.
+    # limit: reaches into the repository's graph handle; GRAPH.PROFILE is a bench-only need.
     return "\n".join(repo._graph.profile(all_queries()[name].cypher, params).plan)
 
 
@@ -345,11 +345,11 @@ Unchanged, measured for reference: `who_knows` (linear in people, no path enumer
 LIMITS = """\
 ## Limitations
 
-- **Our generator, our laptop.** The graphs are synthetic and seeded by us; real dependency maps differ in depth,
-  fan-out and cycles, and the old queries' cost depends on the number of paths, so the speedups here are an
-  example, not a bound. The reviewer's graph (292 services, 1,790 edges) has far more paths per service than ours:
-  their upstream closure took 1,653 ms, while `path_suspects` (the same closure) takes 12 ms in its reference form on
-  our 300-service graph. Ours gets expensive in the other direction, into a hub (`blast_radius`).
+- **My generator, my laptop.** The graphs are synthetic and seeded by me. Real dependency maps differ in depth,
+  fan-out and cycles, and the plain form's cost depends on the number of paths, so the speedups here are an example,
+  not a bound. The 292-service test graph has far more paths per service than mine: its upstream closure took
+  1,653 ms, while `path_suspects` (the same closure) takes 12 ms in its reference form on my 300-service graph. Mine
+  gets expensive in the other direction, into a hub (`blast_radius`).
 - **Single client, warm cache, localhost.** No concurrency, no network, the whole graph in memory.
 - **The fallback is still a path traversal, for the pairs that need it.** When the unfiltered shortest path
   crosses an edge not live at the alert time, that pair's live distance comes from the validity-filtered

@@ -66,7 +66,7 @@ _running_lock = threading.Lock()
 def run_slot(limit: int) -> Iterator[None]:
     """At most `limit` agent runs at once (0 = no limit). A run past it is refused at once, not queued: a queued run
     would hold an HTTP request open for minutes."""
-    # ponytail: per process. Several app replicas each allow `limit`; a Redis counter would make it global.
+    # limit: per process. Several app replicas each allow `limit`; a Redis counter would make it global.
     global _running
     with _running_lock:
         if limit and _running >= limit:
@@ -105,7 +105,7 @@ class DailyBudget:
 
     def spent(self) -> str | None:
         """Why the model may not decide now (the trace's words), or None."""
-        # ponytail: checked before each decision, so runs in flight at a cap overshoot by one decision each.
+        # limit: checked before each decision, so runs in flight at a cap overshoot by one decision each.
         if self.cap and self.used_today() >= self.cap:
             return f"today's LLM budget ({self.cap:,} tokens) is spent; the rules planner decides until 00:00 UTC."
         if self.hourly and self.used_this_hour() >= self.hourly:

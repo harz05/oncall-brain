@@ -268,7 +268,7 @@ def _db_category(e: Exception) -> str:
 def database_label(url: str) -> str:
     """Where the graphs live, for the health line, without the host: "FalkorDB Cloud (ap-south-1)" when FALKORDB_URL
     points at a FalkorDB Cloud instance (its hosts end in .cloud and carry their region), else "FalkorDB"."""
-    # ponytail: reads the Cloud host format; an explicit setting if Cloud ever changes it.
+    # limit: reads the Cloud host format; an explicit setting if Cloud ever changes it.
     try:
         host = urlsplit(url).hostname or ""
     except ValueError:  # a malformed FALKORDB_URL: health says so in falkordb_error, the label stays generic

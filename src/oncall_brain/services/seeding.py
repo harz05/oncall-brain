@@ -52,7 +52,7 @@ class TenantLimitReached(Exception):
 def reset(store: GraphStore, tenant: str, seed_value: int | None = None, max_tenants: int | None = None) -> str:
     """Restore the pristine copy (GRAPH.COPY); seed from scratch if there is none (or it can't be copied).
     A new tenant costs two graphs, so callers facing the network pass a cap; existing tenants always reset."""
-    # ponytail: check-then-seed race, so concurrent new-tenant resets can overshoot a little; fine for a soft cap.
+    # limit: check-then-seed race, so concurrent new-tenant resets can overshoot a little; fine for a soft cap.
     known = store.tenants()
     if max_tenants is not None and tenant not in known and len(known) >= max_tenants:
         raise TenantLimitReached(f"tenant limit reached ({max_tenants}); reset an existing tenant or raise MAX_TENANTS")

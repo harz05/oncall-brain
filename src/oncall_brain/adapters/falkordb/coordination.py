@@ -78,7 +78,7 @@ class Coordination:
         """Check the constraints again (serve.py's watchdog, once a minute). FalkorDB Cloud Free keeps nothing
         across a restart, and the first claim after one would recreate this graph without its constraints, so
         leases would stop being exclusive until the next check."""
-        # ponytail: a minute without exclusive leases after a database restart; check per claim if that matters.
+        # limit: a minute without exclusive leases after a database restart; check per claim if that matters.
         self._g = None
         self._setup()
 

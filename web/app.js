@@ -1,4 +1,4 @@
-// On-call Brain UI (docs/design/RULEBOOK.md, direction "Pager"). Three views:
+// On-call Brain UI (direction "Pager"). Three views:
 //   Incidents  the inbox on the left; the open incident on the right as an ink slab (the page you were woken by),
 //              then dispatch rows that answer it in order: Cause, Where (the evidence wire), Since, Who, Do this,
 //              Ruled out, Sources, and the status update. "Show me why" is the incident subgraph and every agent step
@@ -599,7 +599,7 @@ function expertFromSummary(steps) {
 // The service a step is about: its target, else the first service id in its highlight, summary or reason.
 const svcOf = (s) => (s?.target?.startsWith('svc:') && s.target) || s?.highlight?.nodes?.find((id) => kindOf(id) === 'svc')
   || idIn(s?.summary, 'svc') || idIn(s?.reason, 'svc') || null;
-// ponytail: an id for a person the API named without one, from the demo data's person:first-last convention.
+// limit: an id for a person the API named without one, from the demo data's person:first-last convention.
 const personId = (name) => `person:${String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
 // ---------- one incident: the slab ----------

@@ -42,7 +42,7 @@ baselines are plain Python over the scenario rows, with no graph traversal:
 - **Graph agent**: `services.respond.respond()` with the deterministic planner (`MockProvider`): recall,
   multi-hop suspects from `path_suspects` (investigate.cypher), then `check_hypothesis` on each. Correct iff the change
   it marks SUPPORTED is the planted truth.
-- **Anomaly-aware change log** (`scenarios.anomaly_pick`), the strongest simple rule without the graph we
+- **Anomaly-aware change log** (`scenarios.anomaly_pick`), the strongest simple rule without the graph I
   found: drop changes rolled back before the alert, keep those whose own service shows an anomaly between
   the change and the alert, and blame the one whose service went red first (a cause goes red before what
   it breaks), ties to the newest. Decoy *a* goes red after the truth does and *b* is rolled back. Without
@@ -334,21 +334,21 @@ Each in the agent's own words, from this run's `check_hypothesis` and `conclude`
 
 - **Synthetic.** One 25-service org and one alert time, so alternative live paths are few; whether
   a gap hurts depends on whether another path happens to light up.
-- **Same authors.** The generator, the checks and the agent were written by the same team, and the decoy
-  types mirror the facts the agent checks (live path, edge validity, rollback, anomaly propagation). This
-  shows those checks are implemented correctly and hold up on random topologies, not that they are the
-  right checks for real incidents. The perturbations were added after mock judges called the first version
-  (one decoy per verdict rule, nothing else in the window) built to be passed; the agent's ranking (onset-
-  and upstream-aware leading cause, a monitoring gap as weaker support) changed in the same round, by the
-  same team, knowing what the perturbations are. Not a blind test either.
-- **The perturbation rates are ours.** The overall number moves with them; the per-perturbation rows say
+- **Same author.** I wrote the generator, the checks and the agent, and the decoy types mirror the facts the
+  agent checks (live path, edge validity, rollback, anomaly propagation). This shows those checks are
+  implemented correctly and hold up on random topologies, not that they are the right checks for real
+  incidents. I added the perturbations because the first version (one decoy per verdict rule, nothing else in
+  the window) was built to be passed. The agent's ranking (onset- and upstream-aware leading cause, a
+  monitoring gap as weaker support) changed in the same round, written knowing what the perturbations are.
+  Not a blind test either.
+- **I chose the perturbation rates.** The overall number moves with them; the per-perturbation rows say
   more. Gap seeds are few (it needs a truth path with a hop in between), so read that row with care.
 - **The flat baseline loses by construction**: decoy *a* is always the newest change in the window. Its
   row shows the agent is not fooled by recency, not how often "newest change" is right in practice.
 - **The anomaly-aware row is the fair comparison, and the generator is still kind to it.** The cause's own
   anomaly is never dropped and always follows its change within minutes, and noise only lands on dependencies
   of the alerting service, so only a blip on a changed service (decoy *c*) can go red before the truth.
-  This baseline was added after review; the agent was not tuned to it.
+  I added this baseline later; the agent was not tuned to it.
 - **What the perturbations still don't cover.** A silent cause service (the gap only hits hops in between;
   a changed service with no anomaly is refuted by design), more than one silent hop, late or out-of-order
   anomaly timestamps, a service on the truth path that was already flapping before the change, blips outside

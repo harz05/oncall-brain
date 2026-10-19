@@ -163,7 +163,7 @@ const satSize = (label) => {
 // overlaps no box in `boxes` (nodes and their labels), needs no line from the anchor through one, and sits on none of
 // `lines` (edges already drawn); failing that, the free spot with the fewest such crossings. The spot taken and its
 // line to the anchor are added to `boxes` and `lines`.
-// ponytail: O(nodes + edges) per candidate, fine for the ~60 nodes we ever draw.
+// limit: O(nodes + edges) per candidate, fine for the ~60 nodes ever drawn.
 function freeSpot(base, pref, boxes, { w, up, down }, lines = []) {
   let spot = null, best = null, least = Infinity;
   for (const r of [70, 105, 140, 180, 230, 290]) {

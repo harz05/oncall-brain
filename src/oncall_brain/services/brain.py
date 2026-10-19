@@ -115,7 +115,7 @@ def intent_of(question: str) -> str | None:
 
 
 def _stem(word: str) -> str:
-    # ponytail: prefix stem ("lowered" ~ "lower", "designed" ~ "design"); swap in a real stemmer if it misfires.
+    # limit: prefix stem ("lowered" ~ "lower", "designed" ~ "design"); swap in a real stemmer if it misfires.
     return word[:max(4, len(word) - 2)]
 
 

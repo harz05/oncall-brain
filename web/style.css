@@ -1,4 +1,4 @@
-/* On-call Brain. Implements docs/design/RULEBOOK.md (direction "Pager"): paper, ink, one red for what is broken now.
+/* On-call Brain. Direction "Pager": paper, ink, one red for what is broken now.
    Every colour and font family is declared in :root below and nowhere else (graph.js reads the same properties). */
 
 @font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap;

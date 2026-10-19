@@ -1,25 +1,41 @@
 # On-call Brain as an MCP server
 
 Every graph tool the agents use is defined once in `agents/registry.py`. `oncall_brain.mcp_server` publishes that
-same registry over the [Model Context Protocol](https://modelcontextprotocol.io), so Claude Desktop, Claude Code,
-the MCP Inspector or any other MCP client can call the tools directly: 28 registry tools plus two use-case tools,
-30 in all.
+same registry over the [Model Context Protocol](https://modelcontextprotocol.io), plus two use-case tools,
+`respond_to_alert` and `reset_tenant`. Claude Code, Claude Desktop, the MCP Inspector or any other MCP client can
+call the tools directly.
 
 | Tool | What it does |
 |---|---|
 | `reset_tenant` | Restore the tenant's pristine seeded graph (`GRAPH.COPY`), seeding it first if there is none. |
-| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the outcome (root cause, `co_causes`, ruled-out suspects with their tags, both no-graph baselines, who was paged, the status update text, `checks_to_culprit`, `runbook`, `expert`, `storm`) and a short list of steps. The same-incident memory ablation (`?compare=memory`) is on the HTTP endpoint only. |
-| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` (writes the update for #incidents onto the incident; nothing is sent to Slack) |
-| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed"), on every surface. Our own agent runs are never offered it. |
-| company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; no LLM. With a `user` and a `session` key the question is remembered in that person's session in the graph, a follow-up can say "it" or "them", and "what did I ask about payments-gw" is answered from it; "what is the Q4 cost review changing and who is on it" walks the `Initiative` behind the tickets), `my_questions` (the same recall as a tool: a user's earlier questions, newest first, with what each was about and the sources it cited, by subject or session), `who_knows`, `change_story` |
-| read tools | `dependency_path`, `service_map`, `incident_board` |
-| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision), `record_message` (a chat message, its channel, author and what it mentions; `ask` cites it at once), `record_ticket` (a ticket with its status, the change it requested and the initiative it is part of; `change_story` and the initiative's story list it), `transfer_ownership` (a team takes over a service: the old owner's `OWNS` edge is closed, never deleted, so an alert from before the handover still pages the old team and "who owned payments-gw at the time of inc:0911" still names it): keep the graph current, then respond to the new alert. Like `resolve_incident`, never offered to our own agent runs. |
+| `respond_to_alert` | Run triage -> investigator -> comms on an alert. Returns the incident id, the planner, the model tokens spent, the outcome (root cause with a confidence label, `co_causes`, ruled-out suspects with their tags, both no-graph baselines, who was paged and who got a heads-up, the status update text, `checks_to_culprit`, `runbook`, `expert`, `storm`, `learned_late`) and every step with who decided it. The same-incident memory comparison (`?compare=memory`) is on the HTTP endpoint only. |
+| agent tools | `open_incident`, `correlate_alerts`, `blast_radius`, `warn_owners` (a heads-up to the on-call of the most critical impacted teams not yet paged), `page_on_call`, `recall_similar`, `hypothesize_from_memory`, `propose_hypotheses`, `check_hypothesis`, `conclude`, `post_update` (writes the update for #incidents onto the incident; the tool itself sends nothing to Slack) |
+| human step | `resolve_incident`: confirm the cause and learn the runbook. The confirmed change becomes the incident's cause even if the agents picked another (theirs is outranked). It also rewrites the status update ("status: resolved, cause confirmed") on every surface. Never offered to agent runs. |
+| company brain | `ask` (a free-form question over docs, tickets and chat: FalkorDB full-text search, then the graph around the hits, then an answer with every source cited; no LLM. With a `user` and a `session` key the question is remembered in that person's session in the graph, a follow-up can say "it" or "them", and "what did I ask about payments-gw" is answered from it. "What is the Q4 cost review changing and who is on it" walks the `Initiative` behind the tickets), `my_questions` (a user's earlier questions, newest first, with what each was about and the sources it cited, by subject or session), `who_knows`, `change_story` |
+| read tools | `dependency_path`, `service_map`, `incident_board`, and three that are never offered to agent runs: `list_incidents` (the inbox: every alert with the incident working it), `query_plan` (FalkorDB's plan for one of the product's named queries with the parameters a step ran it with: `GRAPH.PROFILE` for a read, `GRAPH.EXPLAIN` for a write, which is never run; the UI's Plan button calls it), `independent_routes` (`algo.maxFlow` over the dependencies live at a given time: how many independent routes lead from one service to another; 1 means there is no way around) |
+| live events | `record_change`, `record_anomaly`, `raise_alert`, `add_dependency`, `retire_dependency`, `record_doc` (a decision record, design note, postmortem or runbook page, with the service it decides for and the doc it supersedes; `ask` answers from it at once and flags the old decision), `record_message` (a chat message, its channel, author and what it mentions; `ask` cites it at once), `record_ticket` (a ticket with its status, the change it requested and the initiative it is part of; `change_story` and the initiative's story list it), `transfer_ownership` (a team takes over a service: the old owner's `OWNS` edge is closed, never deleted, so an alert from before the handover still pages the old team and "who owned payments-gw at the time of inc:0911" still names it). They keep the graph current; then respond to the new alert. Never offered to agent runs. |
 
 Every tool takes a required `tenant` (`[a-z0-9_]{1,40}`): each tenant is its own FalkorDB graph `tenant_<name>`.
-Registry tools return JSON text `{summary, data, queries: [{name, readonly, rows, ms, cypher}]}`, so the client sees
-the exact Cypher behind every answer and whether it ran read-only (`GRAPH.RO_QUERY`). Read-only tools carry the
-MCP `readOnlyHint` annotation. `who_knows` counts as a write tool: with an `incident_id` it records the top
-person as `CONSULTED` on that incident. Write tools take the tenant lock, so they cannot race an agent run.
+
+Every service argument is resolved against the graph before the tool runs, on every surface (`registry.call`).
+`payments-gw` becomes `svc:payments-gw`. A name the graph does not hold is refused with the closest ones: names
+that share a word with it, or spell close to it by FLEX's `flex.text.jaroWinkler` (query `resolve_service`):
+
+```text
+> blast_radius {"tenant": "demo", "service": "payment-service"}
+ValueError: No service named 'payment-service' in the graph; did you mean svc:payments, svc:payments-gw?   (isError: true)
+```
+
+Registry tools return JSON text `{summary, data, queries}`. Each query carries `name`, `readonly`, `rows`, `ms` (the
+round trip), `db_ms` (FalkorDB's own execution time), `cached` (whether FalkorDB took the plan from its cache),
+`wrote` (what a write changed) and `cypher`. So the client sees the exact Cypher behind every answer and whether it
+ran read-only (`GRAPH.RO_QUERY`).
+
+Read-only tools carry the MCP `readOnlyHint` annotation. `ask` does not, because with a `user` it records the
+question. `reset_tenant`, `record_change`, `record_doc`, `record_message` and `record_ticket` carry
+`destructiveHint` (the reset wipes what the graph learned; the record tools overwrite a record given an existing id).
+`who_knows` counts as a write tool: with an `incident_id` it records the top person as `CONSULTED` on that incident.
+Write tools take the tenant lock, so they cannot race an agent run.
 
 ## Run it
 
@@ -31,16 +47,17 @@ FalkorDB must be running (`make db`). Settings come from the environment or `.en
 python -m oncall_brain.mcp_server          # or: make mcp
 
 # Streamable HTTP at http://127.0.0.1:8001/mcp
-python -m oncall_brain.mcp_server --http --port 8001
+python -m oncall_brain.mcp_server --http --port 8001     # or: make mcp-http
 ```
 
 Over HTTP the server checks the `Host` and `Origin` headers against `ALLOWED_HOSTS` (plus the local names and the
 hostname Render or Railway set) on any bind address, which blocks DNS rebinding. Set `MCP_TOKEN` (or `API_TOKEN`,
-which also guards the HTTP API) and every request must carry `Authorization: Bearer <token>`, which is what a remote
-client needs. A deployment ([DEPLOY.md](DEPLOY.md)) serves the same endpoint at `https://<host>/mcp` from the one app
-container (`oncall_brain.serve`, also `make serve`), where the token is required: without one `/mcp` answers 401
-while the UI and API keep working. `/mcp/` (a trailing slash, which some clients add) is the same endpoint on both
-servers, not a redirect. There is no per-user auth: anyone with the token can use any tenant.
+which also guards the HTTP API) and every request must carry `Authorization: Bearer <token>`.
+
+A deployment ([DEPLOY.md](DEPLOY.md)) serves the same endpoint at `https://<host>/mcp` from the one app container
+(`oncall_brain.serve`, also `make serve`). There the token is required: without one, `/mcp` answers 401 while the UI
+and API keep working. `/mcp/` (a trailing slash, which some clients add) is the same endpoint on both servers, not a
+redirect. There is no per-user auth: anyone with the token can use any tenant.
 
 `<venv>/bin/python` below is the interpreter `make setup` created (`<repo>/.venv/bin/python`, or wherever your
 `VIRTUAL_ENV` points).
@@ -49,16 +66,12 @@ servers, not a redirect. There is no per-user auth: anyone with the token can us
 
 The server publishes `instructions` (the three ways to use it and what ids look like), 33 tools with a description
 and a described argument schema each (`tests/unit/test_mcp_surface.py` fails the build if any argument lacks one),
-`readOnlyHint` annotations, and two prompts:
+the `readOnlyHint` and `destructiveHint` annotations, and two prompts:
 
 | Prompt | Arguments | Expands to |
 |---|---|---|
 | `work_alert` | `tenant`, `alert_id` | "Call respond_to_alert ... report the likely cause with its confidence, who is paged, the fix, what was ruled out, the update; then offer resolve_incident" |
 | `company_question` | `tenant`, `question`, optional `user` and `session` | "Call ask (with user and session when given, so the question is remembered and a follow-up can say 'it') ... lead with the answer, then the sources; who_knows / change_story when they add something" |
-
-`python -m scripts.mcp_pick` gives Claude only what an MCP client gets (instructions + tool list) and 14 plain
-requests ("who owns kafka?", "we just deployed cart v3.2.0, record that", "inc:checkout-latency is confirmed:
-chg:pgw-pool-1 caused it"...). Result: **17/17 right on claude-opus-5-5**, table in [MCP_PICK.md](MCP_PICK.md).
 
 ## Headless: alert in, answer and update out, no UI open
 
@@ -68,14 +81,15 @@ curl -X POST 'http://localhost:8000/api/tenants/acme/alerts?respond=true' \
   -d '{"service": "svc:checkout", "symptom": "latency", "name": "checkout p99 latency above 2s", "at": 1792036800}'
 ```
 
-`at` (epoch seconds) pins this sample to the demo story's act-1 time, where the demo company's changes sit, so it finds
-the payments-gw pool change. A real alerting tool leaves `at` out and the alert is stamped now; on the demo graph that
-honestly answers "No cause found", because nothing changed recently.
+This records the alert (`raise_alert`), runs the three agents, writes the incident, its evidence and the status
+update into the graph, and, with `SLACK_WEBHOOK_URL` set, posts the update to your channel. The response is the same
+run object the UI shows, and the UI's inbox lists the incident.
 
-records the alert (`raise_alert`), runs the three agents, writes the incident, its evidence and the status update
-into the graph, and, with `SLACK_WEBHOOK_URL` set, posts the update to your channel. The response is the same run
-object the UI shows; the inbox lists the incident the next time anyone opens it. Over MCP the equivalent is
-`raise_alert` then `respond_to_alert`.
+`at` (epoch seconds) pins this sample to the demo story's act-1 time, where the demo company's changes sit, so it
+finds the payments-gw pool change. A real alerting tool leaves `at` out and the alert is stamped now. On the demo
+graph that answers "No cause found", because nothing changed recently.
+
+Over MCP the equivalent is `raise_alert` then `respond_to_alert` (an MCP run does not post to Slack).
 
 ## Claude Code
 
@@ -102,25 +116,28 @@ alert:checkout-latency and tell me the root cause and which suspects were ruled 
 | File | What it is |
 |---|---|
 | `plugin/.claude-plugin/plugin.json` | The manifest: name `oncall-brain`, points at `.mcp.json`. |
-| `plugin/.mcp.json` | Two MCP server entries: `oncall-brain` (stdio: `${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp`) and `oncall-brain-remote` (`type: http`, `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` with `Authorization: Bearer ${ONCALL_BRAIN_TOKEN}`). Claude Code expands `${VAR}` and `${VAR:-default}` in a plugin server's `url` and `headers`, so a deployed instance needs nothing local; with neither variable set the entry reaches a local `make mcp-http`. |
-| `plugin/bin/oncall-brain-mcp` | Launcher: runs `<checkout>/.venv/bin/python -m oncall_brain.mcp_server` from the checkout (the plugin's parent directory, or `$ONCALL_BRAIN_HOME`), so `.env` is found. Arguments pass through (`--http --port 8001`). |
+| `plugin/.mcp.json` | Two MCP server entries: `oncall-brain` (stdio: `${CLAUDE_PLUGIN_ROOT}/bin/oncall-brain-mcp`) and `oncall-brain-remote` (`type: http`, `${ONCALL_BRAIN_URL:-http://127.0.0.1:8001}/mcp` with `Authorization: Bearer ${ONCALL_BRAIN_TOKEN}`). Claude Code expands `${VAR}` and `${VAR:-default}` in a plugin server's `url` and `headers`, so a deployed instance needs nothing local. With neither variable set, the entry reaches a local `make mcp-http`. |
+| `plugin/bin/oncall-brain-mcp` | Launcher: runs `python -m oncall_brain.mcp_server` from the checkout (the plugin's parent directory, or `$ONCALL_BRAIN_HOME`), so `.env` is found. The interpreter is `$ONCALL_BRAIN_PYTHON`, else the active `VIRTUAL_ENV`, else `<checkout>/.venv`. Arguments pass through (`--http --port 8001`). |
 | `plugin/skills/incident/SKILL.md` | `/oncall-brain:incident <alert_id> [tenant]`: the `work_alert` flow, with the heads-up and the confirm step. |
 | `plugin/skills/who-owns/SKILL.md` | `/oncall-brain:who-owns <service> [tenant]`: `who_knows`, then `ask`, then the rotation. |
 | `plugin/skills/ask/SKILL.md` | `/oncall-brain:ask <question> [--tenant t] [--as person:...]`: the `company_question` flow, with the asker's session when `--as` is given (a follow-up can say "it"; "what did I ask about X" recalls), plus `change_story` / `dependency_path` when they add something. |
-| `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace, so `/plugin install oncall-brain --marketplace harz05/oncall-brain` works once the repo is on GitHub. |
+| `.claude-plugin/marketplace.json` (repo root) | A one-plugin marketplace named `oncall-brain`, so the plugin installs straight from GitHub. |
 
-From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin install oncall-brain --marketplace harz05/oncall-brain`
-(Claude Code 2.1.275 or later). `claude plugin validate --strict plugin`, `... .claude-plugin/marketplace.json` and
-`... plugin/skills` all pass; `tests/integration/test_plugin.py` runs them when the CLI is installed and then drives
-the server through the launcher with an MCP client: 33 tools, 2 prompts, and the who-owns skill's three calls on a
-freshly reset tenant, every answer carrying its Cypher. Remote mode is tested the same way: the `oncall-brain-remote`
-entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 33 tools
-and answers `ask`; a wrong token gets 401
-(`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`). Claude Code itself agrees:
-`claude --plugin-dir ./plugin mcp list` (2.1.301) shows `plugin:oncall-brain:oncall-brain` Connected over stdio and,
-with `ONCALL_BRAIN_URL` and `ONCALL_BRAIN_TOKEN` pointing at a `--http` server started with `API_TOKEN`,
-`plugin:oncall-brain:oncall-brain-remote` Connected too; with a wrong token it reports the server's 401 ("missing or
-wrong API token"); with neither variable set it tries `http://127.0.0.1:8001/mcp`, which is `make mcp-http`.
+From the checkout: `claude --plugin-dir ./plugin`. From GitHub: `/plugin marketplace add harz05/oncall-brain`, then
+`/plugin install oncall-brain@oncall-brain`.
+
+How it is checked:
+
+- `claude plugin validate --strict` passes on `plugin`, `.claude-plugin/marketplace.json` and `plugin/skills`.
+- `tests/integration/test_plugin.py` runs those checks when the CLI is installed. It then drives the server through
+  the launcher with an MCP client: 33 tools, 2 prompts, and the who-owns skill's three calls on a freshly reset
+  tenant, every answer carrying its Cypher.
+- Remote mode is tested the same way
+  (`test_the_remote_entry_reaches_a_deployed_server_with_the_token_and_nothing_local`): the `oncall-brain-remote`
+  entry, expanded as Claude Code expands it, reaches a local `--http` server started with `API_TOKEN`, lists the 33
+  tools and answers `ask`. A wrong token gets 401.
+- `claude --plugin-dir ./plugin mcp list` shows `plugin:oncall-brain:oncall-brain` Connected over stdio, and, with
+  `ONCALL_BRAIN_URL` and `ONCALL_BRAIN_TOKEN` set, `plugin:oncall-brain:oncall-brain-remote` Connected too.
 
 ## Claude Desktop
 
@@ -150,7 +167,7 @@ HTTP).
 
 ## Example session
 
-The responses below are real (the Cypher is trimmed).
+The responses below are real, from the deterministic planner (trimmed; the Cypher is cut).
 
 ```text
 > blast_radius {"tenant": "demo", "service": "svc:payments-gw"}
@@ -159,40 +176,48 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
 > reset_tenant {"tenant": "demo"}
 {"tenant": "demo", "graph": "seeded"}
 
-> blast_radius {"tenant": "demo", "service": "svc:payments-gw"}
-{"summary": "7 services depend on svc:payments-gw (5 tier-1)",
+> blast_radius {"tenant": "demo", "service": "payments-gw"}
+{"summary": "7 services depend on svc:payments-gw (5 tier-1); most critical first: payments, api-gateway, checkout
+             (tier, then PageRank over the dependencies live at that time)",
  "data": [{"service": "svc:payments", "tier": 1, "hops": 1, "team": "Payments",
-           "path": ["svc:payments", "svc:payments-gw"]},
-          {"service": "svc:checkout", "tier": 1, "hops": 2, "team": "Checkout",
-           "path": ["svc:checkout", "svc:payments", "svc:payments-gw"]}, ...],
- "queries": [{"name": "blast_radius", "readonly": true, "rows": 7, "ms": 3.23, "cypher": "MATCH ..."}]}
+           "path": ["svc:payments", "svc:payments-gw"], "score": 0.0584, "rank": 1},
+          {"service": "svc:api-gateway", "tier": 1, "hops": 3, "team": "Platform",
+           "path": ["svc:api-gateway", "svc:checkout", "svc:payments", "svc:payments-gw"], "score": 0.054, "rank": 2}, ...],
+ "queries": [{"name": "blast_radius", "readonly": true, "rows": 7, "ms": 1.69, "db_ms": 1.22, "cached": false,
+              "wrote": null, "cypher": "..."}, ...]}
 
 > respond_to_alert {"tenant": "demo", "alert_id": "alert:checkout-latency"}
-{"incident_id": "inc:checkout-latency", "planner": "deterministic planner",
- "outcome": {"root_cause": {"change": "chg:pgw-pool-1", "service": "svc:payments-gw",
+{"incident_id": "inc:checkout-latency", "planner": "deterministic planner", "llm_tokens": 0,
+ "outcome": {"root_cause": {"change": "chg:pgw-pool-1", "service": "svc:payments-gw", "author": "Sana Brandt",
                             "summary": "Lower payments-gw HTTP pool max_connections 200 -> 20 (cost cleanup)",
                             "verdict": "supports", "reason": "anomaly propagates payments-gw -> payments -> checkout",
-                            "live_path": ["svc:checkout", "svc:payments", "svc:payments-gw"]},
-             "refuted": [...], "baseline_pick": {...}, "baseline_correct": false,
-             "anomaly_baseline_pick": {"change": "chg:legacy-193", ...}, "anomaly_baseline_correct": false, "paged": [...],
-             "co_causes": [],
-             "update_text": "...", "investigator_calls": 8, "hypotheses_checked": 5, "checks_to_culprit": 3,
-             "runbook": null, "expert": {"name": "Sana Brandt", "handle": "@sana.brandt", ...}, "storm": null, ...},
- "steps": [{"seq": 1, "role": "triage", "tool": "open_incident", "summary": "Opened inc:checkout-latency ..."},
-           {"seq": 2, "role": "triage", "tool": "blast_radius", "summary": "3 services depend on svc:checkout ..."},
-           {"seq": 3, "role": "triage", "tool": "page_on_call", "summary": "Paged Ravi Moreau (@ravi.moreau, Checkout) ..."},
-           {"seq": 4, "role": "triage", "tool": "handoff", "summary": "triage hands off to investigator"},
-           {"seq": 5, "role": "investigator", "tool": "recall_similar", "summary": "Recalled inc:0911 ..."}, ...]}
+                            "live_path": ["svc:checkout", "svc:payments", "svc:payments-gw"], ...},
+             "confidence": {"level": "high", "label": "Very likely", "why": "anomalies follow this change along the
+                            live dependency path to the alerting service"},
+             "refuted": [...], "baseline_pick": {"change": "chg:search-420", ...}, "baseline_correct": false,
+             "anomaly_baseline_pick": {"change": "chg:legacy-193", ...}, "anomaly_baseline_correct": false,
+             "paged": [{"name": "Asha Nakamura", "service": "svc:payments-gw", ...},
+                       {"name": "Ravi Moreau", "service": "svc:checkout", ...}],
+             "co_causes": [], "update_text": "...", "investigator_calls": 8, "hypotheses_checked": 5,
+             "checks_to_culprit": 3, "runbook": null, "expert": {"name": "Sana Brandt", "handle": "@sana.brandt", ...},
+             "storm": null, "learned_late": [], ...},
+ "steps": [{"seq": 1, "role": "triage", "tool": "open_incident", "by": "rules", "summary": "Opened inc:checkout-latency ..."},
+           {"seq": 2, "role": "triage", "tool": "blast_radius", "by": "rules", "summary": "3 services depend on svc:checkout ..."},
+           {"seq": 3, "role": "triage", "tool": "page_on_call", "by": "rules", "summary": "Paged Ravi Moreau (@ravi.moreau, Checkout) ..."},
+           {"seq": 4, "role": "triage", "tool": "handoff", "by": "rules", "summary": "triage hands off to investigator"},
+           {"seq": 5, "role": "investigator", "tool": "recall_similar", "by": "rules", "summary": "Recalled inc:0911 ..."}, ...]}
 
 > resolve_incident {"tenant": "demo", "incident_id": "inc:checkout-latency", "change_id": "chg:pgw-pool-1"}
-  ... runbook learned; the stored update now starts "[checkout p99 latency above 2s] status: resolved, cause confirmed".
+  ... "Resolved inc:checkout-latency; runbook 'Revert the config change on payments-gw' now has 1 success(es)"
 > respond_to_alert {"tenant": "demo", "alert_id": "alert:refunds-latency"}
-  ... act 2: recalled from act 1's memory, culprit on check 1, update has a "Next action" line.
+  ... act 2: solved from act 1's memory, culprit on check 1, and the update has the line
+      "Next action: Revert the config change on payments-gw (this runbook worked 1 of 1 times)".
 ```
 
 ## Example: ask the company brain
 
-`ask` reads only (two `GRAPH.RO_QUERY` calls; given a `user` it also appends the question to that person's session), so it needs no incident. Response from a freshly reset tenant, trimmed:
+`ask` only reads (every query is a `GRAPH.RO_QUERY`); given a `user`, it also appends the question to that person's
+session. Response from a freshly reset tenant, trimmed:
 
 ```text
 > ask {"tenant": "demo", "question": "Why was the payments gateway pool lowered?"}
@@ -204,14 +229,16 @@ ValueError: tenant 'demo' has no graph yet; call reset_tenant first          (is
             max_connections 200 -> 20 (cost cleanup)'; people who know: Sana Brandt, Quinn Tanaka. It is the decision
             of record for payments-gw. Also: ...",
           "hits": [{"id": "doc:cost-review-pgw", "kind": "design", "matched": 4, "superseded_by": null, ...}, ...],
-          "related": [{"id": "svc:payments-gw", "kind": "service", "via": "doc:cost-review-pgw DECIDES svc:payments-gw"},
-                      {"id": "team:payments", "kind": "team", "via": "team:payments OWNS svc:payments-gw"}, ...],
+          "related": [{"id": "chg:pgw-pool-1", "kind": "change", "via": "doc:cost-review-pgw MENTIONS chg:pgw-pool-1"},
+                      {"id": "person:sana-brandt", "kind": "person", "via": "chg:pgw-pool-1 AUTHORED_BY person:sana-brandt"},
+                      {"id": "svc:payments-gw", "kind": "service", "via": "chg:pgw-pool-1 CHANGED svc:payments-gw"}, ...],
           "sources": ["doc:cost-review-pgw", "msg:chat-008", "doc:pm-load-test-pgw", "ticket:PAY-388", "ticket:CR-881"]},
- "queries": [{"name": "search_knowledge", "readonly": true, ...}, {"name": "knowledge_context", "readonly": true, ...}]}
+ "queries": [{"name": "link_entities", "readonly": true, ...}, {"name": "decisions_about", "readonly": true, ...},
+             {"name": "search_knowledge", "readonly": true, ...}, {"name": "knowledge_context", "readonly": true, ...}]}
 ```
 
-Ask with a few content words: stopwords and one-letter words are dropped and only `[a-z0-9]` survives, so a question
-like "why was it?" returns a plain "Ask with a few content words" answer without querying the index.
+Ask with a few content words. Stopwords and one-letter words are dropped and only `[a-z0-9]` survives, so a question
+like "why was it?" gets a plain "Ask with a few content words" answer without querying the index.
 
 ## Example: push your own events, then respond
 
@@ -239,12 +266,14 @@ alert makes the agents refute suspects behind it ("checkout no longer depends on
 
 ## Tests
 
-`tests/integration/test_mcp.py` drives the server in-process with the SDK's own `mcp.Client`. It lists the tools,
-seeds a throwaway tenant through `reset_tenant` and calls `blast_radius` on it; it is skipped when FalkorDB is not
-reachable. `test_mcp_over_http_refuses_foreign_host_and_origin` checks that MCP over HTTP answers a foreign `Host`
-with 421 and a foreign `Origin` with 403. `tests/unit/test_mcp_surface.py` checks every tool and argument is
-described, the prompts render, and the remote transport refuses requests without the token when `API_TOKEN` is set.
-`tests/unit/test_serve.py` covers the deployment app: `/mcp` refused until a token is set while the API stays open,
-opened by `MCP_TOKEN` at the exact path, one `API_TOKEN` guarding both halves, the platform hostnames accepted;
-`tests/integration/test_deploy.py` starts it as the Dockerfile does and drives it from outside (`/health`, the UI,
-the Host checks, 33 tools and an `ask` over `/mcp`, 401 on a wrong token).
+- `tests/integration/test_mcp.py` drives the server in-process with the SDK's own `mcp.Client`. It lists the tools,
+  seeds a throwaway tenant through `reset_tenant` and calls `blast_radius` on it; it is skipped when FalkorDB is not
+  reachable. `test_mcp_over_http_refuses_foreign_host_and_origin` checks that MCP over HTTP answers a foreign `Host`
+  with 421 and a foreign `Origin` with 403.
+- `tests/unit/test_mcp_surface.py` checks that every tool and argument is described, the prompts render, only the
+  tools that wipe or overwrite are marked destructive, and the remote transport refuses requests without the token
+  when `API_TOKEN` is set.
+- `tests/unit/test_serve.py` covers the deployment app: `/mcp` refused until a token is set while the API stays open,
+  opened by `MCP_TOKEN` at the exact path, one `API_TOKEN` guarding both halves, the platform hostnames accepted.
+- `tests/integration/test_deploy.py` starts the deployment app as the Dockerfile does and drives it from outside
+  (`/health`, the UI, the Host checks, 33 tools and an `ask` over `/mcp`, 401 on a wrong token).

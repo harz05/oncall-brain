@@ -50,7 +50,7 @@ ALREADY = {**blocks.say("Already resolved, so nothing changed."), "replace_origi
 
 
 def _api():
-    # ponytail: imported on use, since api/app.py includes this router at its end (a top-level import would be circular)
+    # Imported on use, since api/app.py includes this router at its end (a top-level import would be circular)
     from oncall_brain.api import app
 
     return app
@@ -195,7 +195,7 @@ def _incident(repo: GraphRepository, rest: str, f: dict[str, str]) -> dict[str, 
 def _open_alert(repo: GraphRepository, svc: dict[str, Any], symptom: str) -> dict[str, Any] | None:
     """The first alert on that service and symptom still open in the inbox, with the incident working it if any
     (list_alerts order: the demo's acts in story order, then by time; not yet resolved)."""
-    # ponytail: oldest open alert first; add "newest" or an alert id argument if a real inbox piles up stale ones.
+    # limit: oldest open alert first; add "newest" or an alert id argument if a real inbox piles up stale ones.
     return next((a for a in repo.read("list_alerts").rows
                  if a["service"] == svc["id"] and a["symptom"] == symptom and a["status"] != "resolved"), None)
 
